@@ -1,0 +1,22 @@
+<template>
+  <div class="ingest-view">
+    <IngestPanel />
+  </div>
+</template>
+
+<script>
+import IngestPanel from '@/components/IngestPanel.vue'
+
+export default {
+  name: 'IngestView',
+  components: {
+    IngestPanel
+  }
+}
+</script>
+
+<style scoped>
+.ingest-view {
+  height: 100%;
+}
+</style>

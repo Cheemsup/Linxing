@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.mapper.UserMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.entity.User">
+        <id column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="password_hash" property="passwordHash"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id, username, password_hash, created_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO users (username, password_hash)
+        VALUES (#{username}, #{passwordHash})
+    </insert>
+
+    <select id="findById" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM users
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByUsername" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM users
+        WHERE username = #{username}
+    </select>
+
+    <update id="update">
+        UPDATE users
+        SET username = #{username},
+            password_hash = #{passwordHash}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM users WHERE id = #{id}
+    </delete>
+
+</mapper>

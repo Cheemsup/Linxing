@@ -1,0 +1,59 @@
+# ==================== IDE ====================
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==================== Java / Maven ====================
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+apt_generated/
+
+# ==================== Node.js / Vue ====================
+node_modules/
+dist/
+
+# ==================== 环境变量 & 密钥（重要！）====================
+.env
+.env.local
+.env.*.local
+application-local.yaml
+application-prod.yaml
+
+# ==================== 日志 ====================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==================== 操作系统 ====================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==================== 项目数据（不上传）====================
+files_store/
+models/
+
+# ==================== 其他 ====================
+*.class
+*.jar
+*.war
+*.ear
+*.bak
+*.tmp

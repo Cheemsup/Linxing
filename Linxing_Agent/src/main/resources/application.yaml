@@ -1,6 +1,8 @@
 spring:
   application:
     name: Personal-Note-RAG
+  profiles:
+    active: dev
   servlet:
     multipart:
       enabled: true

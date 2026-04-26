@@ -31,7 +31,7 @@ dist/
 .env
 .env.local
 .env.*.local
-application-local.yaml
+application-dev.yaml
 application-prod.yaml
 
 # ==================== 日志 ====================

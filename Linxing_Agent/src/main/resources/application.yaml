@@ -10,7 +10,7 @@ spring:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://127.0.0.1:5432/vectordb
     username: postgres
-    password: 230801
+    password: ${DB_PASSWORD:}
     druid:
       initial-size: 5
       max-active: 20
@@ -28,7 +28,7 @@ server:
   port: 8080
 
 rag:
-  store-path: D:\JavaProjects\Linxing\files_store
+  store-path: ${RAG_STORE_PATH:./files_store}
   embedding:
     model: bge-small-zh
     chunk-size: 800
@@ -38,12 +38,12 @@ rag:
     port: 5432
     database: vectordb
     user: postgres
-    password: 230801
+    password: ${VECTOR_DB_PASSWORD:}
     table: embeddings
     dimension: 512
   llm:
     provider: minimax
-    api-key: sk-cp-PLFrECVGzujOXyxJ40ZGpIDZ-izAZ0ut68DPTep4-uJEm1xNkfFeN9X4m5XlbdefulJMXPNzfnvUsa6oHIBKrNS5oYl1_czfZEfQ5EsLZgIjjgBkGL0xo0k
+    api-key: ${LLM_API_KEY:}
     base-url: https://api.minimax.chat/v1
     group-id: 2038083649219338792
     model: MiniMax-M2.7
@@ -55,8 +55,8 @@ rag:
     recall-size: 20
   reranker:
     enabled: true
-    model-path: D:\JavaProjects\Linxing\models\ms-marco-MiniLM-L-6-v2\model.onnx
-    tokenizer-path: D:\JavaProjects\Linxing\models\ms-marco-MiniLM-L-6-v2\tokenizer.json
+    model-path: ${RERANKER_MODEL_PATH:}
+    tokenizer-path: ${RERANKER_TOKENIZER_PATH:}
     batch-size: 8
 
 logging:

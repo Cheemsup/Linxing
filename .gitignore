@@ -33,6 +33,7 @@ dist/
 .env.*.local
 application-dev.yaml
 application-prod.yaml
+application-jwt.yaml
 
 # ==================== 日志 ====================
 logs/

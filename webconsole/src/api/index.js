@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { authStore } from '@/utils/auth'
 
 const api = axios.create({
   baseURL: '/api',
@@ -8,32 +9,65 @@ const api = axios.create({
   }
 })
 
+api.interceptors.request.use(
+  config => {
+    const token = authStore.getToken()
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    return config
+  },
+  error => {
+    console.error('Request Error:', error)
+    return Promise.reject(error)
+  }
+)
+
 api.interceptors.response.use(
   response => {
-    const res = response.data
-    if (res && typeof res === 'object' && 'code' in res) {
-      if (res.code === 1) {
-        return response
-      } else {
-        return Promise.reject(new Error(res.msg || '操作失败'))
-      }
-    }
     return response
   },
   error => {
-    console.error('API Error:', error)
+    if (error.response) {
+      const status = error.response.status
+
+      switch (status) {
+        case 401:
+          authStore.clearAuth()
+          window.location.href = '/login'
+          break
+        case 403:
+          console.error('权限不足，拒绝访问')
+          break
+        case 404:
+          console.error('请求的资源不存在')
+          break
+        case 500:
+          console.error('服务器内部错误')
+          break
+        default:
+          console.error(`请求错误: ${status}`)
+      }
+    } else if (error.message.includes('timeout')) {
+      console.error('请求超时')
+    } else {
+      console.error('网络错误，请检查连接')
+    }
+
     return Promise.reject(error)
   }
 )
 
 export const ragApi = {
   chat(question, sessionId = 'default') {
-    return api.post('/rag/chat', { question, sessionId })
+    const userId = authStore.getUserId()
+    return api.post('/rag/chat', { question, sessionId, userId })
   },
 
-  ingestFile(file, userId = null) {
+  ingestFile(file) {
     const formData = new FormData()
     formData.append('file', file)
+    const userId = authStore.getUserId()
     if (userId) {
       formData.append('userId', userId)
     }
@@ -51,32 +85,37 @@ export const ragApi = {
 }
 
 export const documentApi = {
-  list(page = 1, size = 10, userId = 1) {
+  list(page = 1, size = 10) {
+    const userId = authStore.getUserId()
     return api.get('/documents', {
       params: { page, size, userId }
     })
   },
 
-  getDetail(id, userId = 1) {
+  getDetail(id) {
+    const userId = authStore.getUserId()
     return api.get(`/documents/${id}`, {
       params: { userId }
     })
   },
 
-  delete(id, userId = 1) {
+  delete(id) {
+    const userId = authStore.getUserId()
     return api.delete(`/documents/${id}`, {
       params: { userId }
     })
   },
 
-  preview(id, userId = 1) {
+  preview(id) {
+    const userId = authStore.getUserId()
     return api.get(`/documents/${id}/preview`, {
       params: { userId }
     })
   },
 
   getDownloadUrl(id) {
-    return `/api/documents/${id}/download`
+    const token = authStore.getToken()
+    return `/api/documents/${id}/download?token=${token}`
   }
 }
 

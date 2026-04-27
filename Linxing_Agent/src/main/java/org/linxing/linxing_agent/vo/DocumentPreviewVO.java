@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.dto;
+package org.linxing.linxing_agent.vo;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

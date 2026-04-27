@@ -15,6 +15,36 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(AccountNotFoundException.class)
+    public Result<String> handleAccountNotFound(AccountNotFoundException ex) {
+        log.warn("账户不存在: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(PasswordIncorrectException.class)
+    public Result<String> handlePasswordIncorrect(PasswordIncorrectException ex) {
+        log.warn("密码错误: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(AccountDisabledException.class)
+    public Result<String> handleAccountDisabled(AccountDisabledException ex) {
+        log.warn("账户已禁用: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(UsernameDuplicateException.class)
+    public Result<String> handleUsernameDuplicate(UsernameDuplicateException ex) {
+        log.warn("用户名已存在: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public Result<String> handleAuthentication(AuthenticationException ex) {
+        log.warn("认证失败: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new HashMap<>();

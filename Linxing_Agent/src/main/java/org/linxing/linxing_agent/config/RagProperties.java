@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.config;
 
 import lombok.Data;
+import org.linxing.linxing_agent.constant.CommonConstants;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -18,9 +19,9 @@ public class RagProperties {
 
     @Data
     public static class Embedding {
-        private String model;
-        private int chunkSize;
-        private int chunkOverlap;
+        private String model = CommonConstants.EMBEDDING_MODEL;
+        private int chunkSize = CommonConstants.CHUNK_SIZE;
+        private int chunkOverlap = CommonConstants.CHUNK_OVERLAP;
     }
 
     @Data
@@ -49,8 +50,8 @@ public class RagProperties {
 
     @Data
     public static class Search {
-        private int defaultTopK;
-        private int recallSize;
+        private int defaultTopK = CommonConstants.SEARCH_DEFAULT_TOP_K;
+        private int recallSize = CommonConstants.SEARCH_RECALL_SIZE;
     }
 
     @Data

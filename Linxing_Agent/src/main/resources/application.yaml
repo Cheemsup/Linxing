@@ -13,11 +13,6 @@ spring:
     url: jdbc:postgresql://127.0.0.1:5432/vectordb
     username: postgres
     password: ${DB_PASSWORD:}
-    druid:
-      initial-size: 5
-      max-active: 20
-      min-idle: 5
-      max-wait: 60000
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -30,35 +25,17 @@ server:
   port: 8080
 
 rag:
-  store-path: ${RAG_STORE_PATH:./files_store}
-  embedding:
-    model: bge-small-zh
-    chunk-size: 800
-    chunk-overlap: 200
   vector-store:
-    host: localhost
-    port: 5432
-    database: vectordb
-    user: postgres
-    password: ${VECTOR_DB_PASSWORD:}
     table: embeddings
     dimension: 512
   llm:
     provider: minimax
-    api-key: ${LLM_API_KEY:}
-    base-url: https://api.minimax.chat/v1
-    group-id: 2038083649219338792
     model: MiniMax-M2.7
     temperature: 0.3
     timeout-seconds: 60
     max-tokens: 2048
-  search:
-    default-top-k: 5
-    recall-size: 20
   reranker:
     enabled: true
-    model-path: ${RERANKER_MODEL_PATH:}
-    tokenizer-path: ${RERANKER_TOKENIZER_PATH:}
     batch-size: 8
 
 logging:

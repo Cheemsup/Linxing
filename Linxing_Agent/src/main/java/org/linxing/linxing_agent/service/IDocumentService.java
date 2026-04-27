@@ -1,7 +1,7 @@
 package org.linxing.linxing_agent.service;
 
-import org.linxing.linxing_agent.dto.DocumentPreviewVO;
-import org.linxing.linxing_agent.dto.DocumentVO;
+import org.linxing.linxing_agent.vo.DocumentPreviewVO;
+import org.linxing.linxing_agent.vo.DocumentVO;
 import org.linxing.linxing_agent.dto.PageResult;
 
 public interface IDocumentService {

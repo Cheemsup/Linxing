@@ -10,8 +10,8 @@ import org.linxing.linxing_agent.vo.DocumentVO;
 import org.linxing.linxing_agent.dto.PageResult;
 import org.linxing.linxing_agent.entity.DocRecord;
 import org.linxing.linxing_agent.mapper.DocumentMapper;
+import org.linxing.linxing_agent.pipeline.ChunkPipelineCoordinator;
 import org.linxing.linxing_agent.service.IDocumentService;
-import org.linxing.linxing_agent.utils.EmbeddingHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,7 +28,7 @@ import java.util.List;
 public class DocumentServiceImpl implements IDocumentService {
 
     private final DocumentMapper documentMapper;
-    private final EmbeddingHelper embeddingHelper;
+    private final ChunkPipelineCoordinator chunkPipelineCoordinator;
 
     @Override
     public PageResult<DocumentVO> listDocuments(Integer userId, int page, int size) {
@@ -65,7 +65,7 @@ public class DocumentServiceImpl implements IDocumentService {
             throw new IllegalArgumentException("无权删除该文档");
         }
 
-        embeddingHelper.deleteByDocumentId(userId, id);
+        chunkPipelineCoordinator.deleteByDocumentId(userId, id);
 
         try {
             Path filePath = Paths.get(record.getFilePath());

@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.constant.JwtClaimsConstant;
 import org.linxing.linxing_agent.context.BaseContext;
+import org.linxing.linxing_agent.context.UserInfo;
 import org.linxing.linxing_agent.config.JwtProperties;
 import org.linxing.linxing_agent.utils.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,8 +36,18 @@ public class JwtTokenUserInterceptor implements HandlerInterceptor {
         try {
             Claims claims = JwtUtil.parseJWT(jwtProperties.getUserSecretKey(), token);
             Long userId = Long.valueOf(claims.get(JwtClaimsConstant.USER_ID).toString());
-            log.info("用户ID：{}", userId);
-            BaseContext.setCurrentId(userId);
+            String username = claims.get(JwtClaimsConstant.USERNAME) != null 
+                    ? claims.get(JwtClaimsConstant.USERNAME).toString() 
+                    : null;
+            
+            log.info("用户认证成功: userId={}, username={}", userId, username);
+            
+            UserInfo userInfo = UserInfo.builder()
+                    .userId(userId)
+                    .username(username)
+                    .build();
+            BaseContext.setCurrentUser(userInfo);
+            
             return true;
         } catch (Exception e) {
             response.setStatus(401);
@@ -47,6 +58,6 @@ public class JwtTokenUserInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
-        BaseContext.removeCurrentId();
+        BaseContext.clear();
     }
 }

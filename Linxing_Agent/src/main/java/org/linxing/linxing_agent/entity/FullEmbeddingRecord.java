@@ -1,12 +1,12 @@
 package org.linxing.linxing_agent.entity;
 
-import java.util.UUID;
+import jakarta.validation.constraints.NotNull;
 
 public record FullEmbeddingRecord(
-        UUID id,
+        Integer id,
         Integer userId,
-        Integer documentId,
-        Integer chunkId,
+        @NotNull Integer documentId,
+        @NotNull Integer chunkId,
         String embeddingVector,
         String text,
         String metadata

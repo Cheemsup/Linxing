@@ -14,10 +14,6 @@ export const authApi = {
 
   logout() {
     return api.post('/user/logout')
-  },
-
-  getCurrentUser() {
-    return api.get('/user/current')
   }
 }
 

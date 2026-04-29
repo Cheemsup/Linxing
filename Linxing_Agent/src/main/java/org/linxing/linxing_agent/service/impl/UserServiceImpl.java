@@ -7,9 +7,7 @@ import org.linxing.linxing_agent.dto.UserLoginDTO;
 import org.linxing.linxing_agent.dto.UserRegisterDTO;
 import org.linxing.linxing_agent.vo.UserLoginVO;
 import org.linxing.linxing_agent.vo.UserRegisterResult;
-import org.linxing.linxing_agent.vo.UserVO;
 import org.linxing.linxing_agent.entity.User;
-import org.linxing.linxing_agent.exception.AccountDisabledException;
 import org.linxing.linxing_agent.exception.AccountNotFoundException;
 import org.linxing.linxing_agent.exception.PasswordIncorrectException;
 import org.linxing.linxing_agent.exception.UsernameDuplicateException;
@@ -115,25 +113,5 @@ public class UserServiceImpl implements IUserService {
     public void logout() {
         Long currentUserId = BaseContext.getCurrentId();
         log.info("用户登出: userId={}", currentUserId);
-    }
-
-    @Override
-    public UserVO getCurrentUser() {
-        Long currentUserId = BaseContext.getCurrentId();
-        if (currentUserId == null) {
-            return null;
-        }
-
-        Optional<User> userOptional = userMapper.findById(currentUserId.intValue());
-        if (userOptional.isEmpty()) {
-            return null;
-        }
-
-        User user = userOptional.get();
-        return UserVO.builder()
-                .id(user.getId())
-                .username(user.getUsername())
-                .createdAt(user.getCreatedAt())
-                .build();
     }
 }

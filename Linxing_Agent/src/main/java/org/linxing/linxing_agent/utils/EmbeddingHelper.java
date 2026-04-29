@@ -8,6 +8,7 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.constant.ChunkTypeConstants;
 import org.linxing.linxing_agent.constant.DocumentStatusConstants;
 import org.linxing.linxing_agent.constant.RagConstants;
 import org.linxing.linxing_agent.config.RagProperties;
@@ -24,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 @Slf4j
 @Component
@@ -57,14 +57,16 @@ public class EmbeddingHelper {
         List<FullEmbeddingRecord> embedRecords = new ArrayList<>();
 
         for (int i = 0; i < segments.size(); i++) {
-            UUID embeddingId = UUID.randomUUID();
             TextSegment segment = segments.get(i);
 
             Chunk chunk = Chunk.builder()
                     .userId(userId)
                     .documentId(documentId)
                     .chunkText(segment.text())
-                    .pageNumber(extractPageNumber(segment))
+                    .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                    .chunkType(ChunkTypeConstants.GENERAL)
+                    .sourceStrategy("RecursiveChunkStrategy")
+                    .isSearchable(true)
                     .createdAt(OffsetDateTime.now())
                     .build();
             chunkMapper.insert(chunk);
@@ -72,7 +74,7 @@ public class EmbeddingHelper {
             String metadataJson = buildMetadataJson(userId, documentId, fileName, segment, chunk.getId());
 
             embedRecords.add(new FullEmbeddingRecord(
-                    embeddingId,
+                    null,
                     userId,
                     documentId,
                     chunk.getId(),
@@ -118,18 +120,6 @@ public class EmbeddingHelper {
                 .targetId(String.valueOf(documentId))
                 .createdAt(OffsetDateTime.now())
                 .build());
-    }
-
-    private int extractPageNumber(TextSegment segment) {
-        String pageStr = segment.metadata().getString("page_number");
-        if (pageStr == null || pageStr.isEmpty()) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(pageStr);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 
     private String buildMetadataJson(Integer userId, Integer documentId, String fileName, TextSegment segment, Integer chunkId) {

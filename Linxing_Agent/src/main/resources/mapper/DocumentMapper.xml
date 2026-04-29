@@ -11,16 +11,17 @@
         <result column="file_size" property="fileSize"/>
         <result column="file_type" property="fileType"/>
         <result column="status" property="status"/>
+        <result column="chunk_strategy" property="chunkStrategy"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <sql id="BaseColumnList">
-        id, user_id, file_name, file_path, file_size, file_type, status, created_at
+        id, user_id, file_name, file_path, file_size, file_type, status, chunk_strategy, created_at
     </sql>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO documents (user_id, file_name, file_path, file_size, file_type, status)
-        VALUES (#{userId}, #{fileName}, #{filePath}, #{fileSize}, #{fileType}, #{status})
+        INSERT INTO documents (user_id, file_name, file_path, file_size, file_type, status, chunk_strategy)
+        VALUES (#{userId}, #{fileName}, #{filePath}, #{fileSize}, #{fileType}, #{status}, #{chunkStrategy})
     </insert>
 
     <select id="findById" resultMap="BaseResultMap">
@@ -57,6 +58,13 @@
 
     <update id="updateStatus">
         UPDATE documents SET status = #{status} WHERE id = #{id}
+    </update>
+
+    <update id="update">
+        UPDATE documents SET
+            status = #{status},
+            chunk_strategy = #{chunkStrategy}
+        WHERE id = #{id}
     </update>
 
     <delete id="deleteById">

@@ -5,9 +5,8 @@
 
     <insert id="batchInsertEmbeddings">
         <foreach collection="list" item="item" separator=";">
-            INSERT INTO embeddings (id, user_id, document_id, chunk_id, embedding, "text", metadata)
-            VALUES ('${item.id}'::uuid,
-                    #{item.userId},
+            INSERT INTO embeddings (user_id, document_id, chunk_id, embedding, "text", metadata)
+            VALUES (#{item.userId},
                     #{item.documentId},
                     #{item.chunkId},
                     #{item.embeddingVector}::vector(512),
@@ -25,7 +24,8 @@
                e.chunk_id               AS chunkId,
                e.document_id            AS documentId,
                d.file_name              AS fileName,
-               c.page_number            AS pageNumber,
+               c.chunk_type             AS chunkType,
+               c.title_path             AS titlePath,
                c.chunk_text             AS chunkText
         FROM embeddings e
                  LEFT JOIN chunks c ON e.chunk_id = c.id

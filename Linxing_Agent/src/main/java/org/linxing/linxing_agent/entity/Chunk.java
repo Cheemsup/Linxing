@@ -9,7 +9,7 @@ import java.time.OffsetDateTime;
 
 /**
  * 文档分块实体类
- * 用于存储文档切分后的文本块信息
+ * 支持分层存储：Level 1（大粒度结构块）和 Level 2（小粒度检索块）
  */
 @Data
 @Builder
@@ -25,7 +25,21 @@ public class Chunk {
 
     private String chunkText;
 
-    private Integer pageNumber;
+    private Integer parentChunkId;
+
+    private Short chunkLevel;
+
+    private String chunkType;
+
+    private String titlePath;
+
+    private String contextPrefix;
+
+    private String sourceStrategy;
+
+    private Boolean isSearchable;
+
+    private String tsContent;
 
     private OffsetDateTime createdAt;
 }

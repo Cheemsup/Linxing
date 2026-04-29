@@ -22,7 +22,7 @@ import java.nio.file.Paths;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/documents")
+@RequestMapping("/documents")
 @RequiredArgsConstructor
 public class DocumentController {
 

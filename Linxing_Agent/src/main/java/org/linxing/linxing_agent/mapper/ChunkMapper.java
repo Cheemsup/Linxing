@@ -24,4 +24,6 @@ public interface ChunkMapper {
     int deleteByDocumentId(@Param("documentId") Integer documentId);
 
     int deleteByUserId(@Param("userId") Integer userId);
+
+    int update(Chunk chunk);
 }

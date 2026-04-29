@@ -7,18 +7,31 @@
         <id column="id" property="id"/>
         <result column="user_id" property="userId"/>
         <result column="document_id" property="documentId"/>
+        <result column="parent_chunk_id" property="parentChunkId"/>
+        <result column="chunk_level" property="chunkLevel"/>
         <result column="chunk_text" property="chunkText"/>
-        <result column="page_number" property="pageNumber"/>
+        <result column="chunk_type" property="chunkType"/>
+        <result column="title_path" property="titlePath"/>
+        <result column="context_prefix" property="contextPrefix"/>
+        <result column="source_strategy" property="sourceStrategy"/>
+        <result column="is_searchable" property="isSearchable"/>
+        <result column="ts_content" property="tsContent"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <sql id="BaseColumnList">
-        id, user_id, document_id, chunk_text, page_number, created_at
+        id, user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
+        chunk_type, title_path, context_prefix, source_strategy,
+        is_searchable, ts_content, created_at
     </sql>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO chunks (user_id, document_id, chunk_text, page_number)
-        VALUES (#{userId}, #{documentId}, #{chunkText}, #{pageNumber})
+        INSERT INTO chunks (user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
+                            chunk_type, title_path, context_prefix, source_strategy,
+                            is_searchable)
+        VALUES (#{userId}, #{documentId}, #{parentChunkId}, #{chunkLevel}, #{chunkText},
+                #{chunkType}, #{titlePath}, #{contextPrefix}, #{sourceStrategy},
+                #{isSearchable})
     </insert>
 
     <select id="findById" resultMap="BaseResultMap">
@@ -53,6 +66,18 @@
     <delete id="deleteById">
         DELETE FROM chunks WHERE id = #{id}
     </delete>
+
+    <update id="update">
+        <![CDATA[
+        UPDATE chunks SET
+            chunk_type = #{chunkType},
+            title_path = #{titlePath},
+            context_prefix = #{contextPrefix},
+            is_searchable = #{isSearchable},
+            ts_content = to_tsvector('simple', #{tsContent})
+        WHERE id = #{id}
+        ]]>
+    </update>
 
     <delete id="deleteByDocumentId">
         DELETE FROM chunks WHERE document_id = #{documentId}

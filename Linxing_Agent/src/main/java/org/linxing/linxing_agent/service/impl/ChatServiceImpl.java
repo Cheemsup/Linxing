@@ -111,7 +111,7 @@ public class ChatServiceImpl implements IChatService {
     private String buildContext(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> "【来源:" + r.fileName() +
-                        (r.pageNumber() != null && r.pageNumber() > 0 ? " 第" + r.pageNumber() + "页" : "") +
+                        (r.titlePath() != null ? " > " + r.titlePath() : "") +
                         "】\n" + r.chunkText())
                 .collect(Collectors.joining("\n\n---\n\n"));
     }
@@ -119,7 +119,7 @@ public class ChatServiceImpl implements IChatService {
     private List<String> extractSources(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> r.fileName() +
-                        (r.pageNumber() != null && r.pageNumber() > 0 ? " (第" + r.pageNumber() + "页)" : ""))
+                        (r.titlePath() != null ? " > " + r.titlePath() : ""))
                 .distinct()
                 .collect(Collectors.toList());
     }

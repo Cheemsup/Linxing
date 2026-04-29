@@ -31,5 +31,7 @@ public class DocRecord {
 
     private String status;
 
+    private String chunkStrategy;
+
     private OffsetDateTime createdAt;
 }

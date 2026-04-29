@@ -30,6 +30,8 @@ public interface DocumentMapper {
 
     int updateStatus(@Param("id") Integer id, @Param("status") String status);
 
+    int update(DocRecord docRecord);
+
     int deleteById(@Param("id") Integer id);
 
     int deleteByUserId(@Param("userId") Integer userId);

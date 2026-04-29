@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS documents (
     file_size       BIGINT DEFAULT 0,
     file_type       VARCHAR(50) DEFAULT '',
     status          VARCHAR(20) DEFAULT 'processing' CHECK (status IN ('processing', 'completed', 'failed')),
+    chunk_strategy  VARCHAR(50) DEFAULT 'auto',
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -37,38 +38,55 @@ CREATE INDEX IF NOT EXISTS idx_documents_user_status ON documents(user_id, statu
 CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
 
 -- =============================================
--- 3. 分块索引表 chunks（核心关联表）
+-- 3. 分块索引表 chunks（核心关联表，支持分层 Small-to-Big 检索）
 -- =============================================
 CREATE TABLE IF NOT EXISTS chunks (
     id              SERIAL PRIMARY KEY,
     user_id         INT NOT NULL,
     document_id     INT NOT NULL,
+    parent_chunk_id INT,
+    chunk_level     SMALLINT DEFAULT 1,
     chunk_text      TEXT NOT NULL,
-    page_number     INT DEFAULT 0,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    chunk_type      VARCHAR(30) DEFAULT 'general',
+    title_path      TEXT,
+    context_prefix  TEXT,
+    source_strategy VARCHAR(50),
+    is_searchable   BOOLEAN DEFAULT TRUE,
+    ts_content      TSVECTOR,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT chunks_document_id_fkey FOREIGN KEY(document_id) REFERENCES documents(id),
+    CONSTRAINT chunks_parent_chunk_id_fkey FOREIGN KEY(parent_chunk_id) REFERENCES chunks(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_user_doc ON chunks(user_id, document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_user_id ON chunks(user_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_chunk_id) WHERE (parent_chunk_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_chunks_level ON chunks(chunk_level);
+CREATE INDEX IF NOT EXISTS idx_chunks_type ON chunks(chunk_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_source_strategy ON chunks(source_strategy);
+CREATE INDEX IF NOT EXISTS idx_chunks_ts_content ON chunks USING GIN (ts_content);
 
 -- =============================================
 -- 4. 向量存储表 embeddings（pgvector 核心表）
--- 自定义结构：增加 user_id 列支持多租户隔离
--- 必须在应用启动前手动创建此表，否则 LangChain4j 会用默认结构自动创建
 -- =============================================
 CREATE TABLE IF NOT EXISTS embeddings (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              SERIAL PRIMARY KEY,
     user_id         INT,
-    document_id     INT,
-    chunk_id        INT,
-    embedding       vector(512) NOT NULL,
+    document_id     INT NOT NULL,
+    chunk_id        INT NOT NULL,
+    embedding       vector NOT NULL,
     "text"          TEXT,
-    metadata        JSONB
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT embeddings_chunk_id_fkey FOREIGN KEY(chunk_id) REFERENCES chunks(id),
+    CONSTRAINT fk_embeddings_document FOREIGN KEY(document_id) REFERENCES documents(id),
+    CONSTRAINT fk_embeddings_chunk FOREIGN KEY(chunk_id) REFERENCES chunks(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_embeddings_vector ON embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_embeddings_user_id ON embeddings(user_id);
 CREATE INDEX IF NOT EXISTS idx_embeddings_doc_id ON embeddings(document_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_meta_chunk_type ON embeddings(((metadata ->> 'chunk_type')));
+CREATE INDEX IF NOT EXISTS idx_embeddings_meta_parent_id ON embeddings(((metadata ->> 'parent_chunk_id')));
 
 -- =============================================
 -- 5. 操作日志表 activity_logs

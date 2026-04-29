@@ -16,7 +16,7 @@ import java.util.Set;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/ingest")
+@RequestMapping("/ingest")
 @RequiredArgsConstructor
 public class IngestController {
 

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>HTML 测试文档</title>
+</head>
+<body>
+    <h1>HTML 测试文档</h1>
+    <p>这是一个用于测试 HtmlChunkStrategy 的示例文档。</p>
+    
+    <h2>第一章：HTML 基础</h2>
+    <p>HTML（HyperText Markup Language）是构建网页的标准标记语言。它定义了网页的结构和内容。</p>
+    
+    <section>
+        <h3>1.1 HTML 标签</h3>
+        <p>HTML 使用标签来标记内容。常见的标签包括：</p>
+        <ul>
+            <li>&lt;h1&gt; - &lt;h6&gt;：标题标签</li>
+            <li>&lt;p&gt;：段落标签</li>
+            <li>&lt;a&gt;：链接标签</li>
+            <li>&lt;img&gt;：图片标签</li>
+        </ul>
+    </section>
+    
+    <section>
+        <h3>1.2 HTML 属性</h3>
+        <p>HTML 标签可以包含属性，用于提供额外的信息。例如：</p>
+        <p>&lt;a href="https://example.com"&gt;链接&lt;/a&gt;</p>
+    </section>
+    
+    <article>
+        <h2>第二章：HTML5 新特性</h2>
+        <p>HTML5 引入了许多新的语义化标签和 API。</p>
+        
+        <h3>2.1 语义化标签</h3>
+        <p>HTML5 新增了以下语义化标签：</p>
+        <ul>
+            <li>&lt;header&gt;：页眉</li>
+            <li>&lt;nav&gt;：导航</li>
+            <li>&lt;main&gt;：主要内容</li>
+            <li>&lt;article&gt;：文章</li>
+            <li>&lt;section&gt;：章节</li>
+            <li>&lt;aside&gt;：侧边栏</li>
+            <li>&lt;footer&gt;：页脚</li>
+        </ul>
+        
+        <h3>2.2 多媒体支持</h3>
+        <p>HTML5 原生支持音频和视频播放，无需第三方插件。</p>
+        <p>&lt;video src="movie.mp4" controls&gt;&lt;/video&gt;</p>
+        <p>&lt;audio src="music.mp3" controls&gt;&lt;/audio&gt;</p>
+    </article>
+    
+    <h2>第三章：CSS 样式</h2>
+    <p>CSS（Cascading Style Sheets）用于控制网页的外观和布局。</p>
+    
+    <h3>3.1 选择器</h3>
+    <p>CSS 选择器用于选中 HTML 元素。常见的选择器包括：</p>
+    <ul>
+        <li>元素选择器：p { color: red; }</li>
+        <li>类选择器：.class { color: blue; }</li>
+        <li>ID 选择器：#id { color: green; }</li>
+    </ul>
+    
+    <h3>3.2 盒模型</h3>
+    <p>CSS 盒模型描述了元素的内容、内边距、边框和外边距。</p>
+    <p>理解盒模型对于网页布局非常重要。</p>
+    
+    <h4>3.2.1 内边距</h4>
+    <p>内边距（padding）是内容与边框之间的空间。</p>
+    
+    <h4>3.2.2 边框</h4>
+    <p>边框（border）是围绕内容的线条。</p>
+    
+    <h4>3.2.3 外边距</h4>
+    <p>外边距（margin）是边框与其他元素之间的空间。</p>
+    
+    <h2>第四章：JavaScript 交互</h2>
+    <p>JavaScript 用于实现网页的交互功能。</p>
+    
+    <h3>4.1 DOM 操作</h3>
+    <p>DOM（Document Object Model）是 HTML 文档的编程接口。</p>
+    <p>通过 JavaScript 可以动态修改 DOM，实现页面的动态更新。</p>
+    
+    <h3>4.2 事件处理</h3>
+    <p>JavaScript 可以响应用户的各种操作，如点击、输入、滚动等。</p>
+    
+    <h5>小标题测试</h5>
+    <p>这是一个 h5 级别的标题测试。</p>
+    
+    <h6>最小标题测试</h6>
+    <p>这是一个 h6 级别的标题测试，用于验证标题层级栈的正确性。</p>
+    
+    <h2>第五章：RAG 系统详解（L1级别测试）</h2>
+    <p>RAG（Retrieval-Augmented Generation）是一种将信息检索与文本生成相结合的技术架构。它的核心思想是：在生成回答之前，先从知识库中检索相关的文档片段，然后将这些片段作为上下文提供给大语言模型，从而增强模型的回答能力和准确性。</p>
+    
+    <h3>5.1 系统架构</h3>
+    <p>RAG 系统的主要优势包括：第一，无需重新训练模型即可更新知识库，大大降低了维护成本；第二，可以引用具体的知识来源，提高回答的可信度；第三，减少了模型的幻觉问题，因为回答基于实际检索到的文档；第四，可以处理私有或实时数据，而不受模型训练截止日期的限制。</p>
+    <p>RAG 系统的典型工作流程如下：用户提出问题后，系统首先将问题转换为向量表示，然后在向量数据库中检索最相关的文档片段。检索到的片段与原始问题一起被送入大语言模型，模型基于这些上下文生成最终的回答。整个过程实现了"检索-增强-生成"的闭环。</p>
+    
+    <h3>5.2 向量数据库技术</h3>
+    <p>向量数据库是 RAG 系统的核心组件之一。它专门用于存储和检索高维向量数据。与传统的关系型数据库不同，向量数据库使用向量相似度作为检索依据，而不是精确匹配。常用的向量数据库包括：PostgreSQL with pgvector 扩展（本项目使用的方案）、Pinecone（托管式向量数据库）、Milvus（开源高性能向量数据库）、Weaviate（支持混合检索的开源数据库）、Chroma（轻量级嵌入式向量数据库）等。</p>
+    <p>向量相似度计算方法主要有：余弦相似度（Cosine Similarity）、欧几里得距离（Euclidean Distance）、点积（Dot Product）等。其中余弦相似度最为常用，因为它对向量的长度不敏感，只关注方向的一致性。</p>
+    
+    <h3>5.3 文本分块策略</h3>
+    <p>文本分块是 RAG 系统中的关键预处理步骤。好的分块策略应该：保持语义完整性，避免将相关内容分散到不同分块；控制分块大小，使其适合向量模型的输入限制；保留上下文信息，便于后续检索和理解。</p>
+    <p>本项目实现了多种分块策略：MarkdownChunkStrategy 针对 Markdown 文档按标题层级分块；HtmlChunkStrategy 针对 HTML 文档按标签结构分块；CodeChunkStrategy 针对代码文件按类和函数定义分块；LineBasedChunkStrategy 针对日志和 CSV 文件按行分块；StructureAwareChunkStrategy 针对 PDF 和 DOCX 文档按段落分块；RecursiveChunkStrategy 作为通用兜底策略使用递归字符分割。</p>
+    
+    <h3>5.4 嵌入模型选择</h3>
+    <p>嵌入模型负责将文本转换为向量表示。选择合适的嵌入模型对 RAG 系统的性能至关重要。常用的嵌入模型包括：BGE（BAAI General Embedding）系列，由北京智源人工智能研究院开发，支持中英文，本项目使用 BGE-small-zh 模型；OpenAI Embeddings，使用 GPT 系列模型，效果优秀但需要 API 调用；Sentence-BERT，基于 BERT 的句子嵌入模型；E5 模型，微软开发的嵌入模型。</p>
+    
+    <h3>5.5 检索增强技术</h3>
+    <p>除了基本的向量检索，RAG 系统还可以采用多种增强技术来提高检索质量：混合检索（Hybrid Search）结合向量检索和关键词检索的优点；重排序（Reranking）对初步检索结果使用更精确的模型进行重新排序；查询改写使用 LLM 将用户的自然语言问题改写为更适合检索的形式；多轮检索根据初步检索结果生成新的查询，进行迭代检索。</p>
+    
+    <h2>第六章：总结</h2>
+    <p>本文档展示了 HTML 分块策略的各种测试场景，包括：</p>
+    <ul>
+        <li>多级标题（h1-h6）</li>
+        <li>section 和 article 标签</li>
+        <li>标题路径提取</li>
+        <li>HTML 标签剥离</li>
+        <li>超长文本（L1级别测试）</li>
+    </ul>
+</body>
+</html>

@@ -14,6 +14,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Deprecated
 public class QueryRewriter {
 
     private final OpenAiChatModel chatLanguageModel;

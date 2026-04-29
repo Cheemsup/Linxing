@@ -12,7 +12,7 @@ import org.linxing.linxing_agent.config.RagProperties;
 import org.linxing.linxing_agent.dto.IngestResponse;
 import org.linxing.linxing_agent.entity.DocRecord;
 import org.linxing.linxing_agent.mapper.DocumentMapper;
-import org.linxing.linxing_agent.utils.EmbeddingHelper;
+import org.linxing.linxing_agent.pipeline.ChunkPipelineCoordinator;
 import org.linxing.linxing_agent.service.IIngestService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +32,7 @@ import java.time.format.DateTimeFormatter;
 @RequiredArgsConstructor
 public class IngestServiceImpl implements IIngestService {
 
-    private final EmbeddingHelper embeddingHelper;
+    private final ChunkPipelineCoordinator chunkPipelineCoordinator;
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
 
@@ -48,14 +48,14 @@ public class IngestServiceImpl implements IIngestService {
         }
 
         String originalFilename = file.getOriginalFilename();
-        log.info("[用户{}] 收到文件上传: {}, 大小: {} bytes", userId, originalFilename, file.getSize());
+        log.info("[用户{}]，文件上传: {}, 大小: {} bytes", userId, originalFilename, file.getSize());
 
         DocRecord docRecord = null;
         try {
             Path storedFile = persistFile(file);
             log.debug("文件已持久化到: {}", storedFile);
 
-            String fileType = extractFileType(originalFilename);
+            String fileType = extractFileType(originalFilename);//根据文件名称，获取文件类型为后续chunk决策做参考
 
             docRecord = DocRecord.builder()
                     .userId(userId)
@@ -66,7 +66,7 @@ public class IngestServiceImpl implements IIngestService {
                     .status(DocumentStatusConstants.PROCESSING)
                     .createdAt(OffsetDateTime.now())
                     .build();
-            documentMapper.insert(docRecord);
+            documentMapper.insert(docRecord);//插入原始文件元数据记录
             log.info("文档记录已入库，documentId: {}", docRecord.getId());
 
             DocumentParser parser = createParser(fileType);
@@ -74,7 +74,7 @@ public class IngestServiceImpl implements IIngestService {
             document.metadata().put("file_name", originalFilename);
             document.metadata().put("stored_path", storedFile.toString());
 
-            int chunksCount = embeddingHelper.embedDocument(userId, docRecord.getId(), originalFilename, document);
+            int chunksCount = chunkPipelineCoordinator.processDocument(docRecord, document.text(), document);//根据策略选择器+责任链，对文档进行切分、向量化和持久化
 
             return IngestResponse.builder()
                     .success(true)
@@ -102,6 +102,7 @@ public class IngestServiceImpl implements IIngestService {
         }
     }
 
+    //将文件持久化到指定目录，且具备重名处理（在文件名后添加序号）
     private Path persistFile(MultipartFile file) throws IOException {
         LocalDate today = LocalDate.now();
         String datePath = today.format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
@@ -126,6 +127,7 @@ public class IngestServiceImpl implements IIngestService {
         return targetFile;
     }
 
+    //根据文件名提取文件类型
     private String extractFileType(String fileName) {
         if (fileName == null || !fileName.contains(".")) {
             return "unknown";
@@ -141,6 +143,7 @@ public class IngestServiceImpl implements IIngestService {
         };
     }
 
+    //根据文件类型创建对应的文档解析器
     private DocumentParser createParser(String fileType) {
         return switch (fileType) {
             case "docx", "xlsx" -> new ApachePoiDocumentParser();

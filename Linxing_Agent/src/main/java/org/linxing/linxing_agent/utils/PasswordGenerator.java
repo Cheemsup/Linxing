@@ -2,6 +2,7 @@ package org.linxing.linxing_agent.utils;
 
 import java.util.Scanner;
 
+@Deprecated
 public class PasswordGenerator {
 
     public static void main(String[] args) {

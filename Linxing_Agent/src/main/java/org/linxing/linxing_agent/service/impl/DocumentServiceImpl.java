@@ -5,10 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.linxing.linxing_agent.vo.ChunkTreeVO;
 import org.linxing.linxing_agent.vo.DocumentPreviewVO;
 import org.linxing.linxing_agent.vo.DocumentVO;
 import org.linxing.linxing_agent.dto.PageResult;
+import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.entity.DocRecord;
+import org.linxing.linxing_agent.mapper.ChunkMapper;
 import org.linxing.linxing_agent.mapper.DocumentMapper;
 import org.linxing.linxing_agent.pipeline.ChunkPipelineCoordinator;
 import org.linxing.linxing_agent.service.IDocumentService;
@@ -21,6 +24,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -28,6 +33,7 @@ import java.util.List;
 public class DocumentServiceImpl implements IDocumentService {
 
     private final DocumentMapper documentMapper;
+    private final ChunkMapper chunkMapper;
     private final ChunkPipelineCoordinator chunkPipelineCoordinator;
 
     @Override
@@ -91,7 +97,8 @@ public class DocumentServiceImpl implements IDocumentService {
 
         if ("pdf".equalsIgnoreCase(fileType)) {
             return previewPdf(record, filePath);
-        } else if ("txt".equalsIgnoreCase(fileType) || "md".equalsIgnoreCase(fileType) || "text".equalsIgnoreCase(fileType)) {
+        } else if ("txt".equalsIgnoreCase(fileType) || "md".equalsIgnoreCase(fileType) || "text".equalsIgnoreCase(fileType)
+                || "java".equalsIgnoreCase(fileType) || "csv".equalsIgnoreCase(fileType) || "html".equalsIgnoreCase(fileType)) {
             return previewText(record, filePath);
         } else if ("doc".equalsIgnoreCase(fileType) || "docx".equalsIgnoreCase(fileType)
                 || "xls".equalsIgnoreCase(fileType) || "xlsx".equalsIgnoreCase(fileType)) {
@@ -188,7 +195,60 @@ public class DocumentServiceImpl implements IDocumentService {
                 .fileSize(record.getFileSize())
                 .fileType(record.getFileType())
                 .status(record.getStatus())
+                .chunkStrategy(record.getChunkStrategy())
                 .createdAt(record.getCreatedAt())
+                .build();
+    }
+
+    @Override
+    public List<ChunkTreeVO> getChunkTree(Integer id, Integer userId) {
+        DocRecord record = documentMapper.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("文档不存在"));
+        if (!record.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权访问该文档");
+        }
+
+        List<Chunk> allChunks = chunkMapper.findByDocumentIdOrdered(id);
+
+        Map<Integer, List<Chunk>> childrenMap = allChunks.stream()
+                .filter(c -> c.getParentChunkId() != null)
+                .collect(Collectors.groupingBy(Chunk::getParentChunkId));
+
+        List<Chunk> level1Chunks = allChunks.stream()
+                .filter(c -> c.getParentChunkId() == null)
+                .collect(Collectors.toList());
+
+        List<ChunkTreeVO> tree = new ArrayList<>();
+        for (Chunk level1 : level1Chunks) {
+            ChunkTreeVO node = toChunkTreeVO(level1);
+            List<Chunk> children = childrenMap.getOrDefault(level1.getId(), List.of());
+            node.setChildren(children.stream()
+                    .map(this::toChunkTreeVO)
+                    .collect(Collectors.toList()));
+            tree.add(node);
+        }
+
+        if (level1Chunks.isEmpty() && !allChunks.isEmpty()) {
+            return allChunks.stream()
+                    .map(this::toChunkTreeVO)
+                    .collect(Collectors.toList());
+        }
+
+        return tree;
+    }
+
+    private ChunkTreeVO toChunkTreeVO(Chunk chunk) {
+        String preview = chunk.getChunkText();
+        if (preview != null && preview.length() > 200) {
+            preview = preview.substring(0, 200) + "...";
+        }
+        return ChunkTreeVO.builder()
+                .chunkId(chunk.getId())
+                .titlePath(chunk.getTitlePath())
+                .chunkLevel(chunk.getChunkLevel())
+                .chunkType(chunk.getChunkType())
+                .textPreview(preview)
+                .children(List.of())
                 .build();
     }
 }

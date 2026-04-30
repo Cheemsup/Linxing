@@ -661,8 +661,7 @@ class ChunkStrategyTest {
                     new CodeChunkStrategy(),
                     new StructureAwareChunkStrategy(),
                     new LineBasedChunkStrategy(),
-                    new RecursiveChunkStrategy(),
-                    null
+                    new RecursiveChunkStrategy()
             );
         }
 
@@ -724,29 +723,6 @@ class ChunkStrategyTest {
 
             ChunkStrategy strategy = factory.getStrategy(context);
             assertInstanceOf(RecursiveChunkStrategy.class, strategy);
-        }
-
-        @Test
-        @DisplayName("should 支持用户显式指定策略")
-        void testGetStrategy_ExplicitStrategy() {
-            ChunkStrategyContext context = ChunkStrategyContext.builder()
-                    .fileType("txt")
-                    .fullText("some content")
-                    .build();
-            context.getExtra().put("chunkStrategy", "markdown");
-
-            ChunkStrategy strategy = factory.getStrategy(context);
-            assertInstanceOf(MarkdownChunkStrategy.class, strategy);
-        }
-
-        @Test
-        @DisplayName("should 支持通过策略名称获取策略")
-        void testGetStrategyByName() {
-            ChunkStrategy strategy = factory.getStrategyByName("MarkdownChunkStrategy");
-            assertInstanceOf(MarkdownChunkStrategy.class, strategy);
-
-            strategy = factory.getStrategyByName("markdown");
-            assertInstanceOf(MarkdownChunkStrategy.class, strategy);
         }
     }
 }

@@ -1,54 +1,80 @@
 <template>
-  <div class="chat-panel">
-    <div class="chat-messages" ref="messagesContainer">
-      <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.type]">
-        <div class="message-content">
-          <div v-if="msg.type === 'user'" class="user-message">
-            <strong>你:</strong> {{ msg.content }}
+  <div class="chat-panel-wrapper">
+    <div class="chat-panel">
+      <div class="chat-messages" ref="messagesContainer">
+        <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.type]">
+          <div class="message-content">
+            <div v-if="msg.type === 'user'" class="user-message">
+              <strong>你:</strong> {{ msg.content }}
+            </div>
+            <div v-else class="bot-message">
+              <strong>助手:</strong>
+              <div class="answer" v-html="formatAnswer(msg.content)"></div>
+              <div v-if="msg.sourceDetails && msg.sourceDetails.length" class="sources">
+                <span class="source-label">来源:</span>
+                <span
+                  v-for="(source, si) in msg.sourceDetails"
+                  :key="si"
+                  class="source-tag clickable"
+                  @click="openChunkContext(source)"
+                  :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
+                >
+                  {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
+                </span>
+              </div>
+              <div v-else-if="msg.sources && msg.sources.length" class="sources">
+                <span class="source-label">来源:</span>
+                <span v-for="source in msg.sources" :key="source" class="source-tag">{{ source }}</span>
+              </div>
+            </div>
           </div>
-          <div v-else class="bot-message">
-            <strong>助手:</strong>
-            <div class="answer" v-html="formatAnswer(msg.content)"></div>
-            <div v-if="msg.sources && msg.sources.length" class="sources">
-              <span class="source-label">来源:</span>
-              <span v-for="source in msg.sources" :key="source" class="source-tag">{{ source }}</span>
+        </div>
+        <div v-if="loading" class="message bot">
+          <div class="message-content">
+            <div class="bot-message">
+              <strong>助手:</strong> <span class="loading">思考中...</span>
             </div>
           </div>
         </div>
       </div>
-      <div v-if="loading" class="message bot">
-        <div class="message-content">
-          <div class="bot-message">
-            <strong>助手:</strong> <span class="loading">思考中...</span>
-          </div>
-        </div>
+      <div class="chat-input">
+        <textarea
+          v-model="question"
+          @keydown.enter.exact.prevent="sendQuestion"
+          placeholder="输入你的问题，例如：我的笔记中关于XXX的内容是什么？"
+          rows="3"
+        ></textarea>
+        <button @click="sendQuestion" :disabled="loading || !question.trim()">
+          {{ loading ? '发送中...' : '发送' }}
+        </button>
       </div>
     </div>
-    <div class="chat-input">
-      <textarea
-        v-model="question"
-        @keydown.enter.exact.prevent="sendQuestion"
-        placeholder="输入你的问题，例如：我的笔记中关于XXX的内容是什么？"
-        rows="3"
-      ></textarea>
-      <button @click="sendQuestion" :disabled="loading || !question.trim()">
-        {{ loading ? '发送中...' : '发送' }}
-      </button>
-    </div>
+
+    <ChunkContextPanel
+      v-if="showContextPanel"
+      ref="contextPanel"
+      @close="showContextPanel = false"
+      @navigate="handleNavigate"
+    />
   </div>
 </template>
 
 <script>
 import { ragApi } from '@/api'
+import ChunkContextPanel from './ChunkContextPanel.vue'
 
 export default {
   name: 'ChatPanel',
+  components: {
+    ChunkContextPanel
+  },
   data() {
     return {
       question: '',
       messages: [],
       loading: false,
-      sessionId: 'session-' + Date.now()
+      sessionId: 'session-' + Date.now(),
+      showContextPanel: false
     }
   },
   methods: {
@@ -66,7 +92,8 @@ export default {
         this.messages.push({
           type: 'bot',
           content: data.answer,
-          sources: data.sources
+          sources: data.sources,
+          sourceDetails: data.sourceDetails
         })
       } catch (error) {
         this.messages.push({
@@ -79,6 +106,22 @@ export default {
           this.scrollToBottom()
         })
       }
+    },
+    openChunkContext(sourceDetail) {
+      if (!sourceDetail || !sourceDetail.chunkId) return
+      this.showContextPanel = true
+      this.$nextTick(() => {
+        if (this.$refs.contextPanel) {
+          this.$refs.contextPanel.loadContext(sourceDetail.chunkId)
+        }
+      })
+    },
+    handleNavigate(chunkId) {
+      this.$nextTick(() => {
+        if (this.$refs.contextPanel) {
+          this.$refs.contextPanel.loadContext(chunkId)
+        }
+      })
     },
     formatAnswer(text) {
       if (!text) return ''
@@ -95,7 +138,13 @@ export default {
 </script>
 
 <style scoped>
+.chat-panel-wrapper {
+  display: flex;
+  height: 100%;
+}
+
 .chat-panel {
+  flex: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -162,6 +211,16 @@ export default {
   border-radius: 4px;
   margin-right: 4px;
   font-size: 11px;
+}
+
+.source-tag.clickable {
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.source-tag.clickable:hover {
+  background: #bbdefb;
+  text-decoration: underline;
 }
 
 .loading {

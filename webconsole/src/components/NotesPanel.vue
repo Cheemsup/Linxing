@@ -1,102 +1,133 @@
 <template>
-  <div class="notes-panel">
-    <div class="notes-header">
-      <h2>笔记管理</h2>
-      <div class="header-actions">
-        <span class="doc-count">共 {{ total }} 篇文档</span>
-        <button @click="loadDocuments" class="btn-refresh" :disabled="loading">刷新</button>
+  <div class="notes-panel-wrapper">
+    <div class="notes-panel">
+      <div class="notes-header">
+        <h2>笔记管理</h2>
+        <div class="header-actions">
+          <span class="doc-count">共 {{ total }} 篇文档</span>
+          <button @click="loadDocuments" class="btn-refresh" :disabled="loading">刷新</button>
+        </div>
       </div>
-    </div>
 
-    <div v-if="loading" class="loading-state">
-      <span class="spinner"></span> 加载中...
-    </div>
+      <div v-if="loading" class="loading-state">
+        <span class="spinner"></span> 加载中...
+      </div>
 
-    <div v-else-if="documents.length === 0" class="empty-state">
-      <span class="empty-icon">📭</span>
-      <p>暂无笔记，请先导入文档。</p>
-    </div>
+      <div v-else-if="documents.length === 0" class="empty-state">
+        <span class="empty-icon">📭</span>
+        <p>暂无笔记，请先导入文档。</p>
+      </div>
 
-    <div v-else>
-      <div class="documents-list">
-        <div v-for="doc in documents" :key="doc.id" class="doc-card">
-          <div class="doc-icon">{{ getFileIcon(doc.fileType) }}</div>
-          <div class="doc-info">
-            <div class="doc-name" :title="doc.fileName">{{ doc.fileName }}</div>
-            <div class="doc-meta">
-              <span class="meta-item">
-                <span class="meta-label">类型:</span>
-                {{ getFileTypeLabel(doc.fileType) }}
-              </span>
-              <span class="meta-item">
-                <span class="meta-label">大小:</span>
-                {{ formatFileSize(doc.fileSize) }}
-              </span>
-              <span class="meta-item">
-                <span class="meta-label">上传:</span>
-                {{ formatDate(doc.createdAt) }}
-              </span>
-              <span :class="['status-badge', doc.status]">
-                {{ getStatusLabel(doc.status) }}
-              </span>
+      <div v-else>
+        <div class="documents-list">
+          <div v-for="doc in documents" :key="doc.id" class="doc-card">
+            <div class="doc-icon">{{ getFileIcon(doc.fileType) }}</div>
+            <div class="doc-info">
+              <div class="doc-name" :title="doc.fileName">{{ doc.fileName }}</div>
+              <div class="doc-meta">
+                <span class="meta-item">
+                  <span class="meta-label">类型:</span>
+                  {{ getFileTypeLabel(doc.fileType) }}
+                </span>
+                <span class="meta-item">
+                  <span class="meta-label">大小:</span>
+                  {{ formatFileSize(doc.fileSize) }}
+                </span>
+                <span class="meta-item">
+                  <span class="meta-label">上传:</span>
+                  {{ formatDate(doc.createdAt) }}
+                </span>
+                <span :class="['status-badge', doc.status]">
+                  {{ getStatusLabel(doc.status) }}
+                </span>
+                <span v-if="doc.chunkStrategy && doc.chunkStrategy !== 'auto'" class="strategy-badge">
+                  {{ getStrategyLabel(doc.chunkStrategy) }}
+                </span>
+              </div>
+            </div>
+            <div class="doc-actions">
+              <button @click="openTreeNav(doc)" class="btn-action btn-tree" title="结构导航">🌳 导航</button>
+              <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">👁 预览</button>
+              <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">⬇ 下载</button>
+              <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">🗑 删除</button>
             </div>
           </div>
-          <div class="doc-actions">
-            <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">👁 预览</button>
-            <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">⬇ 下载</button>
-            <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">🗑 删除</button>
+        </div>
+
+        <div v-if="totalPages > 1" class="pagination">
+          <button
+            @click="changePage(currentPage - 1)"
+            :disabled="currentPage <= 1"
+            class="page-btn"
+          >上一页</button>
+          <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
+          <button
+            @click="changePage(currentPage + 1)"
+            :disabled="currentPage >= totalPages"
+            class="page-btn"
+          >下一页</button>
+        </div>
+      </div>
+
+      <div v-if="toast.show" :class="['toast', toast.type]">
+        {{ toast.message }}
+      </div>
+
+      <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
+        <div class="modal-box">
+          <h3>确认删除</h3>
+          <p>确定要删除文档「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
+          <div class="modal-actions">
+            <button @click="showDeleteConfirm = false" class="btn-cancel">取消</button>
+            <button @click="executeDelete" class="btn-confirm-delete" :disabled="deleting">
+              {{ deleting ? '删除中...' : '确认删除' }}
+            </button>
           </div>
         </div>
       </div>
 
-      <div v-if="totalPages > 1" class="pagination">
-        <button
-          @click="changePage(currentPage - 1)"
-          :disabled="currentPage <= 1"
-          class="page-btn"
-        >上一页</button>
-        <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
-        <button
-          @click="changePage(currentPage + 1)"
-          :disabled="currentPage >= totalPages"
-          class="page-btn"
-        >下一页</button>
-      </div>
+      <DocumentPreview
+        v-if="showPreview"
+        :previewData="previewData"
+        @close="showPreview = false"
+      />
     </div>
 
-    <div v-if="toast.show" :class="['toast', toast.type]">
-      {{ toast.message }}
-    </div>
+    <ChunkTreeNav
+      v-if="showTreeNav"
+      :document-id="selectedDoc.id"
+      :file-name="selectedDoc.fileName"
+      @close="showTreeNav = false"
+      @select="handleChunkSelect"
+    />
 
-    <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
-      <div class="modal-box">
-        <h3>确认删除</h3>
-        <p>确定要删除文档「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
-        <div class="modal-actions">
-          <button @click="showDeleteConfirm = false" class="btn-cancel">取消</button>
-          <button @click="executeDelete" class="btn-confirm-delete" :disabled="deleting">
-            {{ deleting ? '删除中...' : '确认删除' }}
-          </button>
+    <div v-if="selectedChunkPreview" class="chunk-preview-overlay" @click.self="selectedChunkPreview = null">
+      <div class="chunk-preview-box">
+        <div class="chunk-preview-header">
+          <h3>内容预览</h3>
+          <button @click="selectedChunkPreview = null" class="btn-close-preview">✕</button>
+        </div>
+        <div class="chunk-preview-body">
+          <div v-if="selectedChunkPreview.titlePath" class="chunk-preview-title">
+            {{ selectedChunkPreview.titlePath }}
+          </div>
+          <div class="chunk-preview-text">{{ selectedChunkPreview.textPreview }}</div>
         </div>
       </div>
     </div>
-
-    <DocumentPreview
-      v-if="showPreview"
-      :previewData="previewData"
-      @close="showPreview = false"
-    />
   </div>
 </template>
 
 <script>
 import { documentApi } from '@/api'
 import DocumentPreview from './DocumentPreview.vue'
+import ChunkTreeNav from './ChunkTreeNav.vue'
 
 export default {
   name: 'NotesPanel',
   components: {
-    DocumentPreview
+    DocumentPreview,
+    ChunkTreeNav
   },
   data() {
     return {
@@ -111,6 +142,9 @@ export default {
       deleting: false,
       showPreview: false,
       previewData: null,
+      showTreeNav: false,
+      selectedDoc: {},
+      selectedChunkPreview: null,
       toast: {
         show: false,
         message: '',
@@ -145,6 +179,15 @@ export default {
       if (page < 1 || page > this.totalPages) return
       this.currentPage = page
       this.loadDocuments()
+    },
+
+    openTreeNav(doc) {
+      this.selectedDoc = doc
+      this.showTreeNav = true
+    },
+
+    handleChunkSelect(node) {
+      this.selectedChunkPreview = node
     },
 
     async previewDocument(doc) {
@@ -223,6 +266,19 @@ export default {
       return labelMap[status] || status || '未知'
     },
 
+    getStrategyLabel(strategy) {
+      const labelMap = {
+        MarkdownChunkStrategy: 'Markdown',
+        HtmlChunkStrategy: 'HTML',
+        CodeChunkStrategy: '代码',
+        StructureAwareChunkStrategy: '结构化',
+        LineBasedChunkStrategy: '行式',
+        RecursiveChunkStrategy: '递归',
+        SemanticChunkStrategy: '语义'
+      }
+      return labelMap[strategy] || strategy
+    },
+
     formatFileSize(bytes) {
       if (!bytes || bytes === 0) return '0 B'
       const k = 1024
@@ -254,9 +310,16 @@ export default {
 </script>
 
 <style scoped>
+.notes-panel-wrapper {
+  display: flex;
+  height: 100%;
+}
+
 .notes-panel {
+  flex: 1;
   padding: 20px;
   position: relative;
+  overflow-y: auto;
 }
 
 .notes-header {
@@ -404,6 +467,15 @@ export default {
   color: #c62828;
 }
 
+.strategy-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
 .doc-actions {
   display: flex;
   gap: 6px;
@@ -417,6 +489,15 @@ export default {
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
+}
+
+.btn-tree {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.btn-tree:hover {
+  background: #c8e6c9;
 }
 
 .btn-preview {
@@ -576,5 +657,77 @@ export default {
 .btn-confirm-delete:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.chunk-preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 998;
+}
+
+.chunk-preview-box {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.chunk-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.chunk-preview-header h3 {
+  margin: 0;
+  color: #333;
+}
+
+.btn-close-preview {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #999;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.btn-close-preview:hover {
+  background: #eee;
+  color: #333;
+}
+
+.chunk-preview-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.chunk-preview-title {
+  font-weight: 600;
+  color: #1565c0;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.chunk-preview-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #333;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

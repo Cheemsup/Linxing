@@ -23,5 +23,7 @@ public class DocumentVO {
 
     private String status;
 
+    private String chunkStrategy;
+
     private OffsetDateTime createdAt;
 }

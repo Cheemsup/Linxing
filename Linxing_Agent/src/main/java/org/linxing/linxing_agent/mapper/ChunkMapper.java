@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.linxing.linxing_agent.entity.Bm25SearchResult;
 import org.linxing.linxing_agent.entity.Chunk;
 
 @Mapper
@@ -26,4 +27,14 @@ public interface ChunkMapper {
     int deleteByUserId(@Param("userId") Integer userId);
 
     int update(Chunk chunk);
+
+    List<Chunk> findSiblingsByParentChunkId(@Param("parentChunkId") Integer parentChunkId);
+
+    List<Chunk> findByDocumentIdOrdered(@Param("documentId") Integer documentId);
+
+    List<Bm25SearchResult> bm25Search(
+            @Param("userId") Integer userId,
+            @Param("keywords") String keywords,
+            @Param("limit") int limit
+    );
 }

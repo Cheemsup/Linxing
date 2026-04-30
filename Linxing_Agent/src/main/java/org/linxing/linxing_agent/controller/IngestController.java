@@ -21,7 +21,8 @@ import java.util.Set;
 public class IngestController {
 
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "txt", "md", "text", "pdf", "doc", "docx", "xls", "xlsx"
+            "txt", "md", "text", "pdf", "doc", "docx", "xls", "xlsx",
+            "java", "csv", "html", "htm"
     );
 
     private final IIngestService ingestService;

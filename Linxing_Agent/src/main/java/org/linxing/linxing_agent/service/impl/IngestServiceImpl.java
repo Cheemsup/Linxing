@@ -139,6 +139,9 @@ public class IngestServiceImpl implements IIngestService {
             case "xls", "xlsx" -> "xlsx";
             case "txt", "text" -> "txt";
             case "md" -> "md";
+            case "java" -> "java";
+            case "csv" -> "csv";
+            case "html", "htm" -> "html";
             default -> extension;
         };
     }

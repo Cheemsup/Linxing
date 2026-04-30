@@ -8,13 +8,13 @@
         type="file"
         ref="fileInput"
         @change="handleFileSelect"
-        accept=".txt,.md,.text,.pdf,.doc,.docx,.xls,.xlsx"
+        accept=".txt,.md,.text,.pdf,.doc,.docx,.xls,.xlsx,.java,.csv,.html,.htm"
         style="display: none"
       />
       <div v-if="!selectedFile" class="upload-placeholder">
         <span class="upload-icon">📄</span>
         <p>点击选择文件或拖拽文件到此处</p>
-        <span class="file-types">支持 PDF、Word(.doc/.docx)、Excel(.xls/.xlsx)、文本(.txt/.md)</span>
+        <span class="file-types">支持 PDF、Word、Excel、文本、代码、CSV、HTML</span>
       </div>
       <div v-else class="selected-file">
         <span class="file-icon">{{ getFileIcon(selectedFile.name) }}</span>
@@ -37,7 +37,7 @@
 <script>
 import { ragApi } from '@/api'
 
-const ALLOWED_EXTENSIONS = ['.txt', '.md', '.text', '.pdf', '.doc', '.docx', '.xls', '.xlsx']
+const ALLOWED_EXTENSIONS = ['.txt', '.md', '.text', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.java', '.csv', '.html', '.htm']
 
 export default {
   name: 'IngestPanel',
@@ -74,7 +74,7 @@ export default {
       if (!isValidType) {
         this.result = {
           success: false,
-          message: '不支持的文件格式，请选择 PDF、Word、Excel 或文本文件'
+          message: '不支持的文件格式，请选择 PDF、Word、Excel、文本、代码、CSV 或 HTML 文件'
         }
         return
       }
@@ -133,7 +133,11 @@ export default {
         xlsx: '📗',
         txt: '📄',
         md: '📝',
-        text: '📄'
+        text: '📄',
+        java: '☕',
+        csv: '📊',
+        html: '🌐',
+        htm: '🌐'
       }
       return iconMap[ext] || '📄'
     },

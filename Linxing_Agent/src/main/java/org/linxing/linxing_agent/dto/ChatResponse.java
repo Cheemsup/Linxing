@@ -7,10 +7,6 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-/**
- * 聊天响应DTO
- * 用于封装RAG系统生成的回答及引用来源信息
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -21,5 +17,24 @@ public class ChatResponse {
 
     private List<String> sources;
 
+    private List<SourceDetail> sourceDetails;
+
     private String sessionId;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SourceDetail {
+
+        private Integer chunkId;
+
+        private Integer documentId;
+
+        private String fileName;
+
+        private String titlePath;
+
+        private String chunkType;
+    }
 }

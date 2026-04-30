@@ -3,6 +3,7 @@ package org.linxing.linxing_agent.controller;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.constant.CommonConstants;
+import org.linxing.linxing_agent.vo.ChunkTreeVO;
 import org.linxing.linxing_agent.vo.DocumentPreviewVO;
 import org.linxing.linxing_agent.vo.DocumentVO;
 import org.linxing.linxing_agent.dto.PageResult;
@@ -19,6 +20,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 
 @Slf4j
 @RestController
@@ -86,6 +88,25 @@ public class DocumentController {
         } catch (Exception e) {
             log.error("预览文档异常: {}", e.getMessage(), e);
             return Result.error("文档预览失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/{id}/chunk-tree")
+    public Result<List<ChunkTreeVO>> getChunkTree(
+            @PathVariable Integer id,
+            @RequestParam(value = "userId", required = false, defaultValue = "1") Integer userId) {
+        if (userId == null) {
+            userId = CommonConstants.DEFAULT_USER_ID;
+        }
+        try {
+            List<ChunkTreeVO> tree = documentService.getChunkTree(id, userId);
+            return Result.success(tree);
+        } catch (IllegalArgumentException e) {
+            log.warn("获取chunk树失败: {}", e.getMessage());
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            log.error("获取chunk树异常: {}", e.getMessage(), e);
+            return Result.error("获取chunk树失败: " + e.getMessage());
         }
     }
 

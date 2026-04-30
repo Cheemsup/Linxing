@@ -113,9 +113,25 @@ export const documentApi = {
     })
   },
 
+  getChunkTree(id) {
+    const userId = authStore.getUserId()
+    return api.get(`/documents/${id}/chunk-tree`, {
+      params: { userId }
+    })
+  },
+
   getDownloadUrl(id) {
     const token = authStore.getToken()
     return `/api/documents/${id}/download?token=${token}`
+  }
+}
+
+export const chunkApi = {
+  getContext(id) {
+    const userId = authStore.getUserId()
+    return api.get(`/chunks/${id}/context`, {
+      params: { userId }
+    })
   }
 }
 

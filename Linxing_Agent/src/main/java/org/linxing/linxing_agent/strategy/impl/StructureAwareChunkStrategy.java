@@ -20,7 +20,7 @@ import java.util.Set;
 @Component("structureAwareChunkStrategy")
 public class StructureAwareChunkStrategy implements ChunkStrategy {
 
-    private static final Set<String> STRUCTURED_EXTENSIONS = Set.of("docx", "pdf");
+    private static final Set<String> STRUCTURED_EXTENSIONS = Set.of("docx", "pdf", "doc");
 
     @Override
     public boolean supports(ChunkStrategyContext context) {

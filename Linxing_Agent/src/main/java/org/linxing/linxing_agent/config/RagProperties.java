@@ -52,6 +52,10 @@ public class RagProperties {
     public static class Search {
         private int defaultTopK = CommonConstants.SEARCH_DEFAULT_TOP_K;
         private int recallSize = CommonConstants.SEARCH_RECALL_SIZE;
+        private boolean hybridEnabled = true;
+        private double vectorWeight = 0.7;
+        private double bm25Weight = 0.3;
+        private int bm25RecallSize = 20;
     }
 
     @Data

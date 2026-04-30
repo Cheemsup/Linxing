@@ -87,4 +87,38 @@
         DELETE FROM chunks WHERE user_id = #{userId}
     </delete>
 
+    <select id="findSiblingsByParentChunkId" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM chunks
+        WHERE parent_chunk_id = #{parentChunkId}
+        ORDER BY id ASC
+    </select>
+
+    <select id="findByDocumentIdOrdered" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM chunks
+        WHERE document_id = #{documentId}
+        ORDER BY chunk_level ASC, parent_chunk_id ASC, id ASC
+    </select>
+
+    <select id="bm25Search" resultType="org.linxing.linxing_agent.entity.Bm25SearchResult">
+        <![CDATA[
+        SELECT c.id               AS chunkId,
+               c.document_id      AS documentId,
+               c.chunk_text       AS chunkText,
+               c.title_path       AS titlePath,
+               c.chunk_type       AS chunkType,
+               d.file_name        AS fileName,
+               ts_rank(c.ts_content, query) AS bm25Score
+        FROM chunks c
+        CROSS JOIN to_tsquery('simple', #{keywords}) query
+        LEFT JOIN documents d ON c.document_id = d.id
+        WHERE c.user_id = #{userId}
+          AND c.is_searchable = true
+          AND c.ts_content @@ query
+        ORDER BY bm25Score DESC
+        LIMIT #{limit}
+        ]]>
+    </select>
+
 </mapper>

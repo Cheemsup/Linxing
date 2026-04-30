@@ -73,10 +73,6 @@ public class ChunkPipelineCoordinator {
                 .chunkOverlap(ragProperties.getEmbedding().getChunkOverlap())
                 .build();
 
-        if (doc.getChunkStrategy() != null && !"auto".equals(doc.getChunkStrategy())) {
-            ctx.getExtra().put("chunkStrategy", doc.getChunkStrategy());
-        }
-
         // 获取分块策略执行器
         ChunkStrategy strategy = strategyFactory.getStrategy(ctx);
         // 执行分块策略，获取分块结果

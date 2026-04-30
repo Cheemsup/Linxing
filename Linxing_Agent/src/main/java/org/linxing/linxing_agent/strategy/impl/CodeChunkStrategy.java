@@ -1,8 +1,8 @@
 package org.linxing.linxing_agent.strategy.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.strategy.RecursiveTextSplitter;
 import org.linxing.linxing_agent.strategy.ChunkResult;
 import org.linxing.linxing_agent.strategy.ChunkStrategy;
@@ -80,10 +80,10 @@ public class CodeChunkStrategy implements ChunkStrategy {
             if (blockText.length() <= maxChunkSize) {
                 results.add(ChunkResult.builder()
                         .parentChunkId(null)
-                        .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                         .chunkText(blockText)
                         .titlePath(block.titlePath())
-                        .chunkType(ChunkTypeConstants.CODE)
+                        .chunkType(ChunkType.CODE)
                         .sourceStrategy("CodeChunkStrategy")
                         .build());
             } else {
@@ -92,10 +92,10 @@ public class CodeChunkStrategy implements ChunkStrategy {
                     if (!subText.isBlank()) {
                         results.add(ChunkResult.builder()
                                 .parentChunkId(null)
-                                .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                                .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                                 .chunkText(subText)
                                 .titlePath(block.titlePath())
-                                .chunkType(ChunkTypeConstants.CODE)
+                                .chunkType(ChunkType.CODE)
                                 .sourceStrategy("CodeChunkStrategy")
                                 .build());
                     }

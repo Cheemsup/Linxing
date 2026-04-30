@@ -1,8 +1,9 @@
 package org.linxing.linxing_agent.pipeline.handler;
 
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
+import org.linxing.linxing_agent.config.LlmManager;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.LlmType;
 import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.entity.DocRecord;
 import org.linxing.linxing_agent.pipeline.ChunkProcessingContext;
@@ -22,10 +23,10 @@ public class ContextEnricher implements ChunkProcessingHandler {
 
     private static final Pattern THINK_TAG = Pattern.compile("<think>[\\s\\S]*?</think>", Pattern.CASE_INSENSITIVE);
 
-    private final OpenAiChatModel chatModel;
+    private final LlmManager llmManager;
 
-    public ContextEnricher(OpenAiChatModel chatModel) {
-        this.chatModel = chatModel;
+    public ContextEnricher(LlmManager llmManager) {
+        this.llmManager = llmManager;
     }
 
     @Override
@@ -37,7 +38,7 @@ public class ContextEnricher implements ChunkProcessingHandler {
     public boolean handle(ChunkProcessingContext context) {
         Chunk chunk = context.getChunk();
 
-        if (!ChunkTypeConstants.CONTEXT_WEAK.equals(chunk.getChunkType())
+        if (!ChunkType.CONTEXT_WEAK.equals(chunk.getChunkType())
                 || isNotBlank(chunk.getContextPrefix())) {
             return true;
         }
@@ -68,7 +69,7 @@ public class ContextEnricher implements ChunkProcessingHandler {
                 "以下文本片段来自文档\"%s\"，请用1-2句话描述它的背景和主题：\n%s",
                 docTitle, chunkText);
 
-        String response = chatModel.chat(prompt);
+        String response = llmManager.getModel(LlmType.CONTEXT_ENRICH_MODEL).chat(prompt);
         if (response != null) {
             String cleaned = THINK_TAG.matcher(response).replaceAll("").trim();
             return cleaned.replaceAll("\\s+", " ");

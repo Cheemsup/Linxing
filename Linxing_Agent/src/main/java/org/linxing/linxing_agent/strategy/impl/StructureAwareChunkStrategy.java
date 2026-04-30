@@ -1,8 +1,8 @@
 package org.linxing.linxing_agent.strategy.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.strategy.RecursiveTextSplitter;
 import org.linxing.linxing_agent.strategy.ChunkResult;
 import org.linxing.linxing_agent.strategy.ChunkStrategy;
@@ -56,10 +56,10 @@ public class StructureAwareChunkStrategy implements ChunkStrategy {
             if (trimmed.length() <= maxChunkSize) {
                 results.add(ChunkResult.builder()
                         .parentChunkId(null)
-                        .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                         .chunkText(trimmed)
                         .titlePath(null)
-                        .chunkType(ChunkTypeConstants.GENERAL)
+                        .chunkType(ChunkType.GENERAL)
                         .sourceStrategy("StructureAwareChunkStrategy")
                         .build());
             } else {
@@ -68,10 +68,10 @@ public class StructureAwareChunkStrategy implements ChunkStrategy {
                     if (!subText.isBlank()) {
                         results.add(ChunkResult.builder()
                                 .parentChunkId(null)
-                                .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                                .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                                 .chunkText(subText)
                                 .titlePath(null)
-                                .chunkType(ChunkTypeConstants.GENERAL)
+                                .chunkType(ChunkType.GENERAL)
                                 .sourceStrategy("StructureAwareChunkStrategy")
                                 .build());
                     }

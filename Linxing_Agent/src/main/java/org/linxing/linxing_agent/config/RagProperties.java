@@ -1,9 +1,12 @@
 package org.linxing.linxing_agent.config;
 
 import lombok.Data;
-import org.linxing.linxing_agent.constant.CommonConstants;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Data
 @Configuration
@@ -19,9 +22,9 @@ public class RagProperties {
 
     @Data
     public static class Embedding {
-        private String model = CommonConstants.EMBEDDING_MODEL;
-        private int chunkSize = CommonConstants.CHUNK_SIZE;
-        private int chunkOverlap = CommonConstants.CHUNK_OVERLAP;
+        private String model = RagParameters.EMBEDDING_MODEL;
+        private int chunkSize = RagParameters.CHUNK_SIZE;
+        private int chunkOverlap = RagParameters.CHUNK_OVERLAP;
     }
 
     @Data
@@ -38,20 +41,25 @@ public class RagProperties {
 
     @Data
     public static class Llm {
-        private String provider;
-        private String apiKey;
-        private String baseUrl;
-        private String groupId;
-        private String model;
+        private String defaultProvider;
+        private Map<String, LlmProviderConfig> providers = new HashMap<>();
         private Double temperature;
         private int timeoutSeconds;
         private int maxTokens;
     }
 
     @Data
+    public static class LlmProviderConfig {
+        private String apiKey;
+        private String baseUrl;
+        private String groupId;
+        private String model;
+    }
+
+    @Data
     public static class Search {
-        private int defaultTopK = CommonConstants.SEARCH_DEFAULT_TOP_K;
-        private int recallSize = CommonConstants.SEARCH_RECALL_SIZE;
+        private int defaultTopK = RagParameters.SEARCH_DEFAULT_TOP_K;
+        private int recallSize = RagParameters.SEARCH_RECALL_SIZE;
         private boolean hybridEnabled = true;
         private double vectorWeight = 0.7;
         private double bm25Weight = 0.3;
@@ -60,7 +68,7 @@ public class RagProperties {
 
     @Data
     public static class Reranker {
-        private boolean enabled = true;
+        private boolean enabled;
         private String modelPath;
         private String tokenizerPath;
         private int batchSize = 8;

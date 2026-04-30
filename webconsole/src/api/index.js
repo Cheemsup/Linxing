@@ -60,17 +60,12 @@ api.interceptors.response.use(
 
 export const ragApi = {
   chat(question, sessionId = 'default') {
-    const userId = authStore.getUserId()
-    return api.post('/rag/chat', { question, sessionId, userId })
+    return api.post('/rag/chat', { question, sessionId })
   },
 
   ingestFile(file) {
     const formData = new FormData()
     formData.append('file', file)
-    const userId = authStore.getUserId()
-    if (userId) {
-      formData.append('userId', userId)
-    }
     return api.post('/ingest/file', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
@@ -86,52 +81,35 @@ export const ragApi = {
 
 export const documentApi = {
   list(page = 1, size = 10) {
-    const userId = authStore.getUserId()
     return api.get('/documents', {
-      params: { page, size, userId }
+      params: { page, size }
     })
   },
 
   getDetail(id) {
-    const userId = authStore.getUserId()
-    return api.get(`/documents/${id}`, {
-      params: { userId }
-    })
+    return api.get(`/documents/${id}`)
   },
 
   delete(id) {
-    const userId = authStore.getUserId()
-    return api.delete(`/documents/${id}`, {
-      params: { userId }
-    })
+    return api.delete(`/documents/${id}`)
   },
 
   preview(id) {
-    const userId = authStore.getUserId()
-    return api.get(`/documents/${id}/preview`, {
-      params: { userId }
-    })
+    return api.get(`/documents/${id}/preview`)
   },
 
   getChunkTree(id) {
-    const userId = authStore.getUserId()
-    return api.get(`/documents/${id}/chunk-tree`, {
-      params: { userId }
-    })
+    return api.get(`/documents/${id}/chunk-tree`)
   },
 
   getDownloadUrl(id) {
-    const token = authStore.getToken()
-    return `/api/documents/${id}/download?token=${token}`
+    return `/api/documents/${id}/download`
   }
 }
 
 export const chunkApi = {
   getContext(id) {
-    const userId = authStore.getUserId()
-    return api.get(`/chunks/${id}/context`, {
-      params: { userId }
-    })
+    return api.get(`/chunks/${id}/context`)
   }
 }
 

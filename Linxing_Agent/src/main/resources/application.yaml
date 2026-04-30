@@ -37,6 +37,8 @@ rag:
   reranker:
     enabled: true
     batch-size: 8
+    model-path: classpath:models/ms-marco-MiniLM-L-6-v2/model.onnx
+    tokenizer-path: classpath:models/ms-marco-MiniLM-L-6-v2/tokenizer.json
 
 logging:
   level:

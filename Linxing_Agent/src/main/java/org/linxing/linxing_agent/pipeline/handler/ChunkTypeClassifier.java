@@ -1,7 +1,7 @@
 package org.linxing.linxing_agent.pipeline.handler;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
 import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.pipeline.ChunkProcessingContext;
 import org.linxing.linxing_agent.pipeline.ChunkProcessingHandler;
@@ -49,19 +49,19 @@ public class ChunkTypeClassifier implements ChunkProcessingHandler {
 
     private String classify(String text, String existingType) {
         if (CODE_BLOCK.matcher(text).find()) {
-            return ChunkTypeConstants.CODE;
+            return ChunkType.CODE;
         }
 
         if (TABLE_ROW.matcher(text).find()) {
-            return ChunkTypeConstants.TABLE;
+            return ChunkType.TABLE;
         }
 
         if (QA_PATTERN.matcher(text).find()) {
-            return ChunkTypeConstants.QA_PAIR;
+            return ChunkType.QA_PAIR;
         }
 
         if (HEADING_PATTERN.matcher(text).find()) {
-            return ChunkTypeConstants.SECTION;
+            return ChunkType.SECTION;
         }
 
         if (existingType != null && isStructuredType(existingType)) {
@@ -69,15 +69,15 @@ public class ChunkTypeClassifier implements ChunkProcessingHandler {
         }
 
         if (isWeakContext(text)) {
-            return ChunkTypeConstants.CONTEXT_WEAK;
+            return ChunkType.CONTEXT_WEAK;
         }
 
-        return ChunkTypeConstants.GENERAL;
+        return ChunkType.GENERAL;
     }
 
     private boolean isStructuredType(String chunkType) {
-        return ChunkTypeConstants.SECTION.equals(chunkType) || ChunkTypeConstants.CODE.equals(chunkType)
-                || ChunkTypeConstants.TABLE.equals(chunkType) || ChunkTypeConstants.QA_PAIR.equals(chunkType);
+        return ChunkType.SECTION.equals(chunkType) || ChunkType.CODE.equals(chunkType)
+                || ChunkType.TABLE.equals(chunkType) || ChunkType.QA_PAIR.equals(chunkType);
     }
 
     private boolean isWeakContext(String text) {

@@ -4,8 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
 import org.linxing.linxing_agent.strategy.impl.*;
 import org.linxing.linxing_agent.vo.ChunkTreeVO;
 
@@ -229,11 +228,11 @@ class ChunkTreeStructureTest {
             assertTrue(hasTitlePath, "应该有包含标题路径的节点");
 
             boolean hasCodeType = tree.stream()
-                    .anyMatch(n -> ChunkTypeConstants.CODE.equals(n.getChunkType()));
+                    .anyMatch(n -> ChunkType.CODE.equals(n.getChunkType()));
             assertTrue(hasCodeType, "应该有 CODE 类型的节点");
 
             boolean hasTableType = tree.stream()
-                    .anyMatch(n -> ChunkTypeConstants.TABLE.equals(n.getChunkType()));
+                    .anyMatch(n -> ChunkType.TABLE.equals(n.getChunkType()));
             assertTrue(hasTableType, "应该有 TABLE 类型的节点");
         }
 
@@ -356,7 +355,7 @@ class ChunkTreeStructureTest {
             assertFalse(tree.isEmpty(), "树形结构不应为空");
 
             boolean allCodeType = tree.stream()
-                    .allMatch(n -> ChunkTypeConstants.CODE.equals(n.getChunkType()));
+                    .allMatch(n -> ChunkType.CODE.equals(n.getChunkType()));
             assertTrue(allCodeType, "所有节点应该是 CODE 类型");
         }
 

@@ -7,8 +7,11 @@ import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.CommonConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.OperationType;
+import org.linxing.linxing_agent.context.BaseContext;
+import org.linxing.linxing_agent.constant.LlmType;
+import org.linxing.linxing_agent.constant.RagParameters;
+import org.linxing.linxing_agent.config.LlmManager;
 import org.linxing.linxing_agent.config.RagProperties;
 import org.linxing.linxing_agent.utils.VectorUtils;
 import org.linxing.linxing_agent.dto.ChatRequest;
@@ -21,7 +24,6 @@ import org.linxing.linxing_agent.mapper.ChunkMapper;
 import org.linxing.linxing_agent.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.service.IChatService;
 import org.linxing.linxing_agent.utils.KeywordExtractor;
-import org.linxing.linxing_agent.utils.QueryRewriter;
 import org.linxing.linxing_agent.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.utils.Reranker;
 import org.springframework.stereotype.Service;
@@ -41,12 +43,11 @@ import java.util.stream.Collectors;
 public class ChatServiceImpl implements IChatService {
 
     private final EmbeddingModel embeddingModel;
-    private final OpenAiChatModel chatLanguageModel;
+    private final LlmManager llmManager;
     private final EmbeddingMapper embeddingMapper;
     private final ChunkMapper chunkMapper;
     private final ActivityLogMapper activityLogMapper;
     private final RagProperties ragProperties;
-    private final QueryRewriter queryRewriter;
     private final Reranker reranker;
 
     /**
@@ -129,8 +130,10 @@ public class ChatServiceImpl implements IChatService {
             log.debug("[用户{}] 发送LLM请求，Prompt长度: {}字符", userId, prompt.text().length());
             long startTime = System.currentTimeMillis();
 
+            OpenAiChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
+
             // 调用 LLM 生成最终回答
-            String answer = chatLanguageModel.chat(prompt.text());
+            String answer = chatModel.chat(prompt.text());
 
             long duration = System.currentTimeMillis() - startTime;
             log.debug("[用户{}] LLM响应完成，耗时: {}ms，引用 {} 个来源", userId, duration, sources.size());
@@ -188,7 +191,7 @@ public class ChatServiceImpl implements IChatService {
 
     // 将上下文和问题填入 RAG 系统 Prompt 模板
     private Prompt buildPrompt(String context, String question) {
-        PromptTemplate promptTemplate = PromptTemplate.from(RagConstants.SYSTEM_PROMPT);
+        PromptTemplate promptTemplate = PromptTemplate.from(RagParameters.SYSTEM_PROMPT);
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("context", context);
@@ -202,8 +205,8 @@ public class ChatServiceImpl implements IChatService {
         try {
             activityLogMapper.insert(ActivityLog.builder()
                     .userId(userId)
-                    .actionType(RagConstants.ACTION_TYPE_QUERY)
-                    .targetType(RagConstants.TARGET_TYPE_DOCUMENT)
+                    .actionType(OperationType.ACTION_TYPE_QUERY)
+                    .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
                     .details("{\"sources\":" + sourceCount + "}")
                     .createdAt(OffsetDateTime.now())
                     .build());
@@ -212,9 +215,15 @@ public class ChatServiceImpl implements IChatService {
         }
     }
 
-    // 解析用户ID，未提供时使用默认值
     private Integer resolveUserId(ChatRequest request) {
-        return request.getUserId() != null ? request.getUserId() : CommonConstants.DEFAULT_USER_ID;
+        if (request.getUserId() != null) {
+            return request.getUserId();
+        }
+        Long currentId = BaseContext.getCurrentId();
+        if (currentId == null) {
+            throw new IllegalStateException("用户未登录");
+        }
+        return currentId.intValue();
     }
 
     // 截断长文本，用于日志输出

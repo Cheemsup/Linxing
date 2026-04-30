@@ -51,6 +51,9 @@ Desktop.ini
 files_store/
 models/
 
+# ==================== Linxing_Agent 模型文件（不上传）====================
+Linxing_Agent/src/main/resources/models/
+
 # ==================== 其他 ====================
 *.class
 *.jar

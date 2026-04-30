@@ -1,8 +1,8 @@
 package org.linxing.linxing_agent.strategy.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.strategy.RecursiveTextSplitter;
 import org.linxing.linxing_agent.strategy.ChunkResult;
 import org.linxing.linxing_agent.strategy.ChunkStrategy;
@@ -69,7 +69,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             if (sectionText.length() <= maxChunkSize) {
                 ChunkResult result = ChunkResult.builder()
                         .parentChunkId(null)
-                        .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                         .chunkText(sectionText)
                         .titlePath(section.titlePath())
                         .chunkType(classifyChunkType(sectionText))
@@ -82,7 +82,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
                 String level1Type = buildSectionType(sectionText);
                 ChunkResult level1 = ChunkResult.builder()
                         .parentChunkId(null)
-                        .chunkLevel(RagConstants.CHUNK_LEVEL_1)
+                        .chunkLevel(RagParameters.CHUNK_LEVEL_1)
                         .chunkText(sectionText)
                         .titlePath(section.titlePath())
                         .chunkType(level1Type)
@@ -97,7 +97,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
                         // 原子块（代码/表格）整体保留，不再拆分
                         results.add(ChunkResult.builder()
                                 .parentChunkId(level1Index)
-                                .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                                .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                                 .chunkText(block.text)
                                 .titlePath(section.titlePath())
                                 .chunkType(block.type)
@@ -110,7 +110,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
                             if (!subText.isBlank()) {
                                 results.add(ChunkResult.builder()
                                         .parentChunkId(level1Index)
-                                        .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                                         .chunkText(subText)
                                         .titlePath(section.titlePath())
                                         .chunkType(classifyChunkType(subText))
@@ -125,8 +125,8 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
 
         log.info("MarkdownChunkStrategy 分块完成，共 {} 个片段（{} 个L1 + {} 个L2）",
                 results.size(),
-                results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_1).count(),
-                results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_2).count());
+                results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1).count(),
+                results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2).count());
 
         return results;
     }
@@ -198,25 +198,25 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
     private String classifyChunkType(String text) {
         String trimmed = text.trim();
         if (trimmed.startsWith("```") || trimmed.contains("\n```")) {
-            return ChunkTypeConstants.CODE;
+            return ChunkType.CODE;
         }
         if (text.contains("|") && text.contains("---")) {
-            return ChunkTypeConstants.TABLE;
+            return ChunkType.TABLE;
         }
         if (text.matches("(?s)^#[^#].*")) {
-            return ChunkTypeConstants.SECTION;
+            return ChunkType.SECTION;
         }
-        return ChunkTypeConstants.GENERAL;
+        return ChunkType.GENERAL;
     }
 
     private String buildSectionType(String sectionText) {
         if (sectionText.startsWith("```")) {
-            return ChunkTypeConstants.CODE;
+            return ChunkType.CODE;
         }
         if (TABLE_LINE.matcher(sectionText).find()) {
-            return ChunkTypeConstants.TABLE;
+            return ChunkType.TABLE;
         }
-        return ChunkTypeConstants.SECTION;
+        return ChunkType.SECTION;
     }
 
     private record AtomicBlock(String text, String type, boolean isAtomic) {}
@@ -233,7 +233,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         List<int[]> allAtomic = mergeSortedRanges(codeRanges, tableRanges);
 
         if (allAtomic.isEmpty()) {
-            return List.of(new AtomicBlock(text, ChunkTypeConstants.GENERAL, false));
+            return List.of(new AtomicBlock(text, ChunkType.GENERAL, false));
         }
 
         List<AtomicBlock> blocks = new ArrayList<>();
@@ -243,13 +243,13 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             if (range[0] > cursor) {
                 String before = text.substring(cursor, range[0]).trim();
                 if (!before.isEmpty()) {
-                    blocks.add(new AtomicBlock(before, ChunkTypeConstants.GENERAL, false));
+                    blocks.add(new AtomicBlock(before, ChunkType.GENERAL, false));
                 }
             }
             // 原子块 → 整体保留，不再拆分
             String atomicText = text.substring(range[0], range[1]).trim();
             if (!atomicText.isEmpty()) {
-                String type = containsRange(range, codeRanges) ? ChunkTypeConstants.CODE : ChunkTypeConstants.TABLE;
+                String type = containsRange(range, codeRanges) ? ChunkType.CODE : ChunkType.TABLE;
                 blocks.add(new AtomicBlock(atomicText, type, true));
             }
             cursor = range[1];
@@ -258,7 +258,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         if (cursor < text.length()) {
             String after = text.substring(cursor).trim();
             if (!after.isEmpty()) {
-                blocks.add(new AtomicBlock(after, ChunkTypeConstants.GENERAL, false));
+                blocks.add(new AtomicBlock(after, ChunkType.GENERAL, false));
             }
         }
         return blocks;

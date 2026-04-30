@@ -1,7 +1,7 @@
 package org.linxing.linxing_agent.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.JwtClaimsConstant;
+import org.linxing.linxing_agent.constant.JwtClaims;
 import org.linxing.linxing_agent.context.BaseContext;
 import org.linxing.linxing_agent.dto.UserLoginDTO;
 import org.linxing.linxing_agent.dto.UserRegisterDTO;
@@ -91,8 +91,8 @@ public class UserServiceImpl implements IUserService {
         }
 
         Map<String, Object> claims = new HashMap<>();
-        claims.put(JwtClaimsConstant.USER_ID, user.getId());
-        claims.put(JwtClaimsConstant.USERNAME, user.getUsername());
+        claims.put(JwtClaims.USER_ID, user.getId());
+        claims.put(JwtClaims.USERNAME, user.getUsername());
 
         String token = JwtUtil.createJWT(
                 jwtProperties.getUserSecretKey(),

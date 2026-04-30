@@ -4,7 +4,7 @@ package org.linxing.linxing_agent.constant;
  * 文档处理状态常量定义类
  * 定义文档导入和处理过程中的各种状态值
  */
-public final class DocumentStatusConstants {
+public final class DocumentStatus {
 
     /**
      * 处理中文档正在被切分和向量化

@@ -3,9 +3,10 @@ package org.linxing.linxing_agent.pipeline;
 import dev.langchain4j.data.document.Document;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.config.RagProperties;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.DocumentStatusConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.DocumentStatus;
+import org.linxing.linxing_agent.constant.OperationType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.entity.ActivityLog;
 import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.entity.DocRecord;
@@ -81,7 +82,7 @@ public class ChunkPipelineCoordinator {
         List<ChunkResult> results = strategy.execute(ctx);
 
         if (results.isEmpty()) {
-            documentMapper.updateStatus(doc.getId(), DocumentStatusConstants.FAILED);
+            documentMapper.updateStatus(doc.getId(), DocumentStatus.FAILED);
             log.warn("文档 {} 分块结果为空", doc.getId());
             return 0;
         }
@@ -90,7 +91,7 @@ public class ChunkPipelineCoordinator {
         Map<Integer, Integer> resultIndexToDbId = new HashMap<>();
         for (int i = 0; i < results.size(); i++) {
             ChunkResult r = results.get(i);
-            if (r.getChunkLevel() != null && r.getChunkLevel() == RagConstants.CHUNK_LEVEL_1) {
+            if (r.getChunkLevel() != null && r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1) {
                 Chunk chunk = buildChunk(r, doc, null);
                 chunkMapper.insert(chunk);
                 resultIndexToDbId.put(i, chunk.getId());//记录大块的数据库ID，后续要根据大块ID来关联小块
@@ -112,7 +113,7 @@ public class ChunkPipelineCoordinator {
         // 目的: 建立父子关系（外键约束），同时收集到 allChunks
         for (int i = 0; i < results.size(); i++) {
             ChunkResult r = results.get(i);
-            if (r.getChunkLevel() == null || r.getChunkLevel() != RagConstants.CHUNK_LEVEL_1) {
+            if (r.getChunkLevel() == null || r.getChunkLevel() != RagParameters.CHUNK_LEVEL_1) {
                 // 将 results 中的索引位置（如 0, 3）映射为真实的数据库 ID（如 101, 105）
                 Integer parentDbId = (r.getParentChunkId() != null)
                         ? resultIndexToDbId.get(r.getParentChunkId()) : null;
@@ -137,7 +138,7 @@ public class ChunkPipelineCoordinator {
         // 刷新嵌入数据
         embeddingPersist.flush();
 
-        doc.setStatus(DocumentStatusConstants.COMPLETED);
+        doc.setStatus(DocumentStatus.COMPLETED);
         doc.setChunkStrategy(strategy.getClass().getSimpleName());
         // 更新文档状态
         documentMapper.update(doc);
@@ -145,8 +146,8 @@ public class ChunkPipelineCoordinator {
         // 记录操作日志
         activityLogMapper.insert(ActivityLog.builder()
                 .userId(doc.getUserId())
-                .actionType(RagConstants.ACTION_TYPE_UPLOAD)
-                .targetType(RagConstants.TARGET_TYPE_DOCUMENT)
+                .actionType(OperationType.ACTION_TYPE_UPLOAD)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
                 .targetId(String.valueOf(doc.getId()))
                 .details("{\"chunks\":" + allChunks.size()
                         + ",\"fileName\":\"" + escapeJson(doc.getFileName())
@@ -179,8 +180,8 @@ public class ChunkPipelineCoordinator {
         // 记录删除操作日志
         activityLogMapper.insert(ActivityLog.builder()
                 .userId(userId)
-                .actionType(RagConstants.ACTION_TYPE_DELETE)
-                .targetType(RagConstants.TARGET_TYPE_DOCUMENT)
+                .actionType(OperationType.ACTION_TYPE_DELETE)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
                 .targetId(String.valueOf(documentId))
                 .createdAt(OffsetDateTime.now())
                 .build());
@@ -192,11 +193,11 @@ public class ChunkPipelineCoordinator {
                 .documentId(doc.getId())
                 .chunkText(r.getChunkText())
                 .parentChunkId(parentDbId)
-                .chunkLevel(r.getChunkLevel() != null ? r.getChunkLevel() : RagConstants.CHUNK_LEVEL_2)
-                .chunkType(r.getChunkType() != null ? r.getChunkType() : ChunkTypeConstants.GENERAL)
+                .chunkLevel(r.getChunkLevel() != null ? r.getChunkLevel() : RagParameters.CHUNK_LEVEL_2)
+                .chunkType(r.getChunkType() != null ? r.getChunkType() : ChunkType.GENERAL)
                 .titlePath(r.getTitlePath())
                 .sourceStrategy(r.getSourceStrategy())
-                .isSearchable(r.getChunkLevel() == null || r.getChunkLevel() == RagConstants.CHUNK_LEVEL_2)
+                .isSearchable(r.getChunkLevel() == null || r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2)
                 .createdAt(OffsetDateTime.now())
                 .build();
     }

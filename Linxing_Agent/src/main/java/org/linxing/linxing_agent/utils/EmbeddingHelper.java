@@ -8,9 +8,10 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.DocumentStatusConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.DocumentStatus;
+import org.linxing.linxing_agent.constant.OperationType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.config.RagProperties;
 import org.linxing.linxing_agent.entity.ActivityLog;
 import org.linxing.linxing_agent.entity.Chunk;
@@ -49,7 +50,7 @@ public class EmbeddingHelper {
         log.info("文档分块完成，共 {} 个片段", segments.size());
 
         if (segments.isEmpty()) {
-            documentMapper.updateStatus(documentId, DocumentStatusConstants.FAILED);
+            documentMapper.updateStatus(documentId, DocumentStatus.FAILED);
             return 0;
         }
 
@@ -63,8 +64,8 @@ public class EmbeddingHelper {
                     .userId(userId)
                     .documentId(documentId)
                     .chunkText(segment.text())
-                    .chunkLevel(RagConstants.CHUNK_LEVEL_2)
-                    .chunkType(ChunkTypeConstants.GENERAL)
+                    .chunkLevel(RagParameters.CHUNK_LEVEL_2)
+                    .chunkType(ChunkType.GENERAL)
                     .sourceStrategy("RecursiveChunkStrategy")
                     .isSearchable(true)
                     .createdAt(OffsetDateTime.now())
@@ -88,12 +89,12 @@ public class EmbeddingHelper {
             embeddingMapper.batchInsertEmbeddings(embedRecords);
         }
 
-        documentMapper.updateStatus(documentId, DocumentStatusConstants.COMPLETED);
+        documentMapper.updateStatus(documentId, DocumentStatus.COMPLETED);
 
         activityLogMapper.insert(ActivityLog.builder()
                 .userId(userId)
-                .actionType(RagConstants.ACTION_TYPE_UPLOAD)
-                .targetType(RagConstants.TARGET_TYPE_DOCUMENT)
+                .actionType(OperationType.ACTION_TYPE_UPLOAD)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
                 .targetId(String.valueOf(documentId))
                 .details("{\"chunks\":" + embedRecords.size() + ",\"fileName\":\"" + fileName + "\"}")
                 .createdAt(OffsetDateTime.now())
@@ -115,8 +116,8 @@ public class EmbeddingHelper {
 
         activityLogMapper.insert(ActivityLog.builder()
                 .userId(userId)
-                .actionType(RagConstants.ACTION_TYPE_DELETE)
-                .targetType(RagConstants.TARGET_TYPE_DOCUMENT)
+                .actionType(OperationType.ACTION_TYPE_DELETE)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
                 .targetId(String.valueOf(documentId))
                 .createdAt(OffsetDateTime.now())
                 .build());

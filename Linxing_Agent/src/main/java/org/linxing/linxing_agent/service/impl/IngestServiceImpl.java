@@ -7,7 +7,7 @@ import dev.langchain4j.data.document.parser.TextDocumentParser;
 import dev.langchain4j.data.document.parser.apache.poi.ApachePoiDocumentParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.DocumentStatusConstants;
+import org.linxing.linxing_agent.constant.DocumentStatus;
 import org.linxing.linxing_agent.config.RagProperties;
 import org.linxing.linxing_agent.dto.IngestResponse;
 import org.linxing.linxing_agent.entity.DocRecord;
@@ -63,7 +63,7 @@ public class IngestServiceImpl implements IIngestService {
                     .filePath(storedFile.toString())
                     .fileSize(file.getSize())
                     .fileType(fileType)
-                    .status(DocumentStatusConstants.PROCESSING)
+                    .status(DocumentStatus.PROCESSING)
                     .createdAt(OffsetDateTime.now())
                     .build();
             documentMapper.insert(docRecord);//插入原始文件元数据记录
@@ -92,7 +92,7 @@ public class IngestServiceImpl implements IIngestService {
         } catch (Exception e) {
             log.error("文档处理异常: {}", e.getMessage(), e);
             if (docRecord != null) {
-                documentMapper.updateStatus(docRecord.getId(), DocumentStatusConstants.FAILED);
+                documentMapper.updateStatus(docRecord.getId(), DocumentStatus.FAILED);
             }
             return IngestResponse.builder()
                     .success(false)

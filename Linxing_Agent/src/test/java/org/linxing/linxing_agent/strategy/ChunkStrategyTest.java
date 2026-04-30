@@ -4,8 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.strategy.impl.*;
 
 import java.io.IOException;
@@ -50,8 +50,8 @@ class ChunkStrategyTest {
     private void printChunkResults(String label, List<ChunkResult> results) {
         System.out.println("=== " + label + " ===");
         System.out.println("总分块数: " + results.size());
-        long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_1).count();
-        long level2Count = results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_2).count();
+        long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1).count();
+        long level2Count = results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2).count();
         System.out.println("Level 1 分块数: " + level1Count);
         System.out.println("Level 2 分块数: " + level2Count);
         for (int i = 0; i < results.size(); i++) {
@@ -139,11 +139,11 @@ class ChunkStrategyTest {
             List<ChunkResult> results = strategy.execute(context);
 
             boolean hasCodeType = results.stream()
-                    .anyMatch(r -> ChunkTypeConstants.CODE.equals(r.getChunkType()));
+                    .anyMatch(r -> ChunkType.CODE.equals(r.getChunkType()));
             assertTrue(hasCodeType, "应该有 CODE 类型的分块（代码块应被正确识别）");
 
             List<ChunkResult> codeChunks = results.stream()
-                    .filter(r -> ChunkTypeConstants.CODE.equals(r.getChunkType()))
+                    .filter(r -> ChunkType.CODE.equals(r.getChunkType()))
                     .collect(Collectors.toList());
             System.out.println("=== 代码块分块 ===");
             for (ChunkResult r : codeChunks) {
@@ -164,11 +164,11 @@ class ChunkStrategyTest {
 
             List<ChunkResult> results = strategy.execute(context);
 
-            long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_1).count();
+            long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1).count();
             assertTrue(level1Count > 0, "应该有 Level 1 父 chunk（超长 section 触发）");
 
             List<ChunkResult> l2WithParent = results.stream()
-                    .filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_2 && r.getParentChunkId() != null)
+                    .filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2 && r.getParentChunkId() != null)
                     .collect(Collectors.toList());
             assertFalse(l2WithParent.isEmpty(), "应该有带 parentChunkId 的 Level 2 子 chunk");
 
@@ -190,7 +190,7 @@ class ChunkStrategyTest {
             List<ChunkResult> results = strategy.execute(context);
 
             boolean hasTableType = results.stream()
-                    .anyMatch(r -> ChunkTypeConstants.TABLE.equals(r.getChunkType()));
+                    .anyMatch(r -> ChunkType.TABLE.equals(r.getChunkType()));
             assertTrue(hasTableType, "应该有 TABLE 类型的分块（表格应被正确识别）");
         }
     }
@@ -283,9 +283,9 @@ class ChunkStrategyTest {
 
             List<ChunkResult> results = strategy.execute(context);
 
-            long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_1).count();
+            long level1Count = results.stream().filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1).count();
             long l2WithParent = results.stream()
-                    .filter(r -> r.getChunkLevel() == RagConstants.CHUNK_LEVEL_2 && r.getParentChunkId() != null)
+                    .filter(r -> r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2 && r.getParentChunkId() != null)
                     .count();
 
             System.out.println("=== HTML L1/L2 父子分块 ===");
@@ -371,7 +371,7 @@ class ChunkStrategyTest {
             assertFalse(results.isEmpty());
 
             boolean allCodeType = results.stream()
-                    .allMatch(r -> ChunkTypeConstants.CODE.equals(r.getChunkType()));
+                    .allMatch(r -> ChunkType.CODE.equals(r.getChunkType()));
             assertTrue(allCodeType, "所有分块应该是代码类型");
 
             printChunkResults("Java 代码分块结果", results);
@@ -577,7 +577,7 @@ class ChunkStrategyTest {
             assertFalse(results.isEmpty());
 
             boolean allGeneral = results.stream()
-                    .allMatch(r -> ChunkTypeConstants.GENERAL.equals(r.getChunkType()));
+                    .allMatch(r -> ChunkType.GENERAL.equals(r.getChunkType()));
             assertTrue(allGeneral, "所有分块应该是通用类型");
 
             printChunkResults("Recursive 分块结果", results);

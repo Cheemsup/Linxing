@@ -2,7 +2,7 @@ package org.linxing.linxing_agent.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.CommonConstants;
+import org.linxing.linxing_agent.context.BaseContext;
 import org.linxing.linxing_agent.dto.IngestResponse;
 import org.linxing.linxing_agent.result.Result;
 import org.linxing.linxing_agent.service.IIngestService;
@@ -28,12 +28,8 @@ public class IngestController {
     private final IIngestService ingestService;
 
     @PostMapping("/file")
-    public Result<IngestResponse> ingestFile(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "userId", required = false, defaultValue = "1") Integer userId) {
-        if (userId == null) {
-            userId = CommonConstants.DEFAULT_USER_ID;
-        }
+    public Result<IngestResponse> ingestFile(@RequestParam("file") MultipartFile file) {
+        Integer userId = getCurrentUserId();
 
         String originalFilename = file.getOriginalFilename();
         if (originalFilename != null && !isAllowedFileType(originalFilename)) {
@@ -58,7 +54,15 @@ public class IngestController {
         if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
             return false;
         }
-        String extension = fileName.substring(dotIndex + 1).toLowerCase();
-        return ALLOWED_EXTENSIONS.contains(extension);
+        String ext = fileName.substring(dotIndex + 1).toLowerCase();
+        return ALLOWED_EXTENSIONS.contains(ext);
+    }
+
+    private static Integer getCurrentUserId() {
+        Long userId = BaseContext.getCurrentId();
+        if (userId == null) {
+            throw new IllegalStateException("用户未登录");
+        }
+        return userId.intValue();
     }
 }

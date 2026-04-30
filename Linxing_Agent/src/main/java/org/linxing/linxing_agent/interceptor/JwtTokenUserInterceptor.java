@@ -2,7 +2,7 @@ package org.linxing.linxing_agent.interceptor;
 
 import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.JwtClaimsConstant;
+import org.linxing.linxing_agent.constant.JwtClaims;
 import org.linxing.linxing_agent.context.BaseContext;
 import org.linxing.linxing_agent.context.UserInfo;
 import org.linxing.linxing_agent.config.JwtProperties;
@@ -35,9 +35,9 @@ public class JwtTokenUserInterceptor implements HandlerInterceptor {
 
         try {
             Claims claims = JwtUtil.parseJWT(jwtProperties.getUserSecretKey(), token);
-            Long userId = Long.valueOf(claims.get(JwtClaimsConstant.USER_ID).toString());
-            String username = claims.get(JwtClaimsConstant.USERNAME) != null 
-                    ? claims.get(JwtClaimsConstant.USERNAME).toString() 
+            Long userId = Long.valueOf(claims.get(JwtClaims.USER_ID).toString());
+            String username = claims.get(JwtClaims.USERNAME) != null
+                    ? claims.get(JwtClaims.USERNAME).toString()
                     : null;
             
             log.info("用户认证成功: userId={}, username={}", userId, username);

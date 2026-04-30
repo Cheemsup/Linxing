@@ -8,11 +8,16 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.config.RagProperties;
 import org.linxing.linxing_agent.entity.VectorSearchResult;
+import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -52,24 +57,24 @@ public class Reranker {
                 return;
             }
 
-            Path modelFile = Paths.get(modelPath);
-            Path tokenizerFile = Paths.get(tokenizerPath);
+            Path modelFile = resolvePath(modelPath, "model.onnx");
+            Path tokenizerFile = resolvePath(tokenizerPath, "tokenizer.json");
 
-            if (!Files.exists(modelFile)) {
+            if (modelFile == null || !Files.exists(modelFile)) {
                 log.error("ONNX模型文件不存在: {}，请先下载模型文件", modelPath);
                 return;
             }
-            if (!Files.exists(tokenizerFile)) {
+            if (tokenizerFile == null || !Files.exists(tokenizerFile)) {
                 log.error("Tokenizer文件不存在: {}，请先下载tokenizer文件", tokenizerPath);
                 return;
             }
 
             synchronized (initLock) {
                 if (!initialized) {
-                    log.info("正在加载Cross-Encoder ONNX模型: {}", modelPath);
+                    log.info("正在加载Cross-Encoder ONNX模型: {}", modelFile);
                     long startTime = System.currentTimeMillis();
 
-                    scoringModel = new OnnxScoringModel(modelPath, tokenizerPath);
+                    scoringModel = new OnnxScoringModel(modelFile.toString(), tokenizerFile.toString());
 
                     long elapsed = System.currentTimeMillis() - startTime;
                     initialized = true;
@@ -79,6 +84,30 @@ public class Reranker {
         } catch (Exception e) {
             log.error("Cross-Encoder ONNX模型加载失败，重排序功能将不可用: {}", e.getMessage(), e);
         }
+    }
+
+    private Path resolvePath(String path, String defaultFileName) throws IOException {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+
+        if (path.startsWith("classpath:")) {
+            DefaultResourceLoader resourceLoader = new DefaultResourceLoader();
+            Resource resource = resourceLoader.getResource(path);
+            if (!resource.exists()) {
+                log.error("classpath资源不存在: {}", path);
+                return null;
+            }
+            Path tempFile = Files.createTempFile("reranker_", "_" + defaultFileName);
+            try (InputStream is = resource.getInputStream()) {
+                Files.copy(is, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            tempFile.toFile().deleteOnExit();
+            log.debug("classpath资源已复制到临时文件: {} → {}", path, tempFile);
+            return tempFile;
+        }
+
+        return Paths.get(path);
     }
 
     @PreDestroy

@@ -1,6 +1,6 @@
 package org.linxing.linxing_agent.pipeline.handler;
 
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.constant.RagParameters;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.pipeline.ChunkProcessingContext;
@@ -26,7 +26,7 @@ public class SearchabilityMarker implements ChunkProcessingHandler {
         Chunk chunk = context.getChunk();
 
         if (chunk.getIsSearchable() == null) {
-            boolean searchable = chunk.getChunkLevel() != null && chunk.getChunkLevel() == RagConstants.CHUNK_LEVEL_2;
+            boolean searchable = chunk.getChunkLevel() != null && chunk.getChunkLevel() == RagParameters.CHUNK_LEVEL_2;
             chunk.setIsSearchable(searchable);
             log.debug("Chunk {} 设置 isSearchable={} (chunkLevel={})",
                     chunk.getId(), searchable, chunk.getChunkLevel());

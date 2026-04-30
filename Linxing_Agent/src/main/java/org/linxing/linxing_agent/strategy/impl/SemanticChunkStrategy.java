@@ -1,9 +1,10 @@
 package org.linxing.linxing_agent.strategy.impl;
 
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.constant.ChunkTypeConstants;
-import org.linxing.linxing_agent.constant.RagConstants;
+import org.linxing.linxing_agent.config.LlmManager;
+import org.linxing.linxing_agent.constant.ChunkType;
+import org.linxing.linxing_agent.constant.LlmType;
+import org.linxing.linxing_agent.constant.RagParameters;
 import org.linxing.linxing_agent.strategy.ChunkResult;
 import org.linxing.linxing_agent.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.strategy.ChunkStrategyContext;
@@ -21,10 +22,10 @@ public class SemanticChunkStrategy implements ChunkStrategy {
 
     private static final int DEFAULT_SEMANTIC_MAX_LENGTH = 10000;
 
-    private final OpenAiChatModel chatModel;
+    private final LlmManager llmManager;
 
-    public SemanticChunkStrategy(OpenAiChatModel chatModel) {
-        this.chatModel = chatModel;
+    public SemanticChunkStrategy(LlmManager llmManager) {
+        this.llmManager = llmManager;
     }
 
     @Override
@@ -48,7 +49,7 @@ public class SemanticChunkStrategy implements ChunkStrategy {
 
         try {
             String prompt = buildPrompt(fullText);
-            String response = chatModel.chat(prompt);
+            String response = llmManager.getModel(LlmType.SEMANTIC_CHUNK_MODEL).chat(prompt);
 
             List<ChunkResult> results = parseResponse(response, fullText);
             log.info("SemanticChunkStrategy 分块完成，LLM返回 {} 个片段", results.size());
@@ -85,10 +86,10 @@ public class SemanticChunkStrategy implements ChunkStrategy {
                     if (!chunkText.isEmpty()) {
                         results.add(ChunkResult.builder()
                                 .parentChunkId(null)
-                                .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                                .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                                 .chunkText(chunkText)
                                 .titlePath(seg.summary())
-                                .chunkType(ChunkTypeConstants.GENERAL)
+                                .chunkType(ChunkType.GENERAL)
                                 .sourceStrategy("SemanticChunkStrategy")
                                 .build());
                     }
@@ -135,10 +136,10 @@ public class SemanticChunkStrategy implements ChunkStrategy {
             if (!chunk.isEmpty()) {
                 results.add(ChunkResult.builder()
                         .parentChunkId(null)
-                        .chunkLevel(RagConstants.CHUNK_LEVEL_2)
+                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
                         .chunkText(chunk)
                         .titlePath(null)
-                        .chunkType(ChunkTypeConstants.GENERAL)
+                        .chunkType(ChunkType.GENERAL)
                         .sourceStrategy("SemanticChunkStrategy")
                         .build());
             }

@@ -145,3 +145,59 @@ COMMENT ON COLUMN activity_logs.target_type IS '操作目标类型：document/ch
 COMMENT ON COLUMN activity_logs.target_id IS '操作目标ID';
 COMMENT ON COLUMN activity_logs.details IS '操作详情（JSON），记录策略、耗时、召回结果等';
 COMMENT ON COLUMN activity_logs.created_at IS '操作时间';
+
+
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id              SERIAL PRIMARY KEY,
+    user_id         INT NOT NULL,
+    title           VARCHAR(200) DEFAULT '新对话',
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE chat_sessions IS '聊天会话表，每次新建聊天会创建一个会话，即一棵对话树的根';
+COMMENT ON COLUMN chat_sessions.id IS '会话唯一ID';
+COMMENT ON COLUMN chat_sessions.user_id IS '所属用户ID';
+COMMENT ON COLUMN chat_sessions.title IS '会话标题，用户建立新聊天必须手动输入';
+COMMENT ON COLUMN chat_sessions.created_at IS '会话创建时间';
+COMMENT ON COLUMN chat_sessions.updated_at IS '会话最后活跃时间';
+
+CREATE INDEX idx_chat_sessions_user_updated 
+    ON chat_sessions(user_id, updated_at DESC);
+
+-- =============================================
+-- 7、聊天消息表 chat_messages
+-- =============================================
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id              SERIAL PRIMARY KEY,
+    user_id         INT NOT NULL,
+    session_id      INT NOT NULL,
+    parent_id       INT,
+    role            VARCHAR(10) NOT NULL CHECK (role IN ('user', 'assistant')),
+    content         TEXT NOT NULL,
+    sources         JSONB DEFAULT '[]',
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT chat_messages_session_id_fkey 
+        FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
+COMMENT ON TABLE chat_messages IS '聊天消息表，会话中的每条问答消息，通过 parent_id 构成树形结构';
+COMMENT ON COLUMN chat_messages.id IS '消息唯一ID';
+COMMENT ON COLUMN chat_messages.user_id IS '所属用户ID，冗余以支持按用户快速查询';
+COMMENT ON COLUMN chat_messages.session_id IS '所属会话ID（即树的根节点ID），用于一次拉取整棵树的所有消息';
+COMMENT ON COLUMN chat_messages.parent_id IS '直接父消息ID，NULL 表示该消息是树根下的一级节点；沿此字段回溯可得从根到当前节点的完整路径';
+COMMENT ON COLUMN chat_messages.role IS '角色：user=用户提问，assistant=助手回答';
+COMMENT ON COLUMN chat_messages.content IS '消息正文内容';
+COMMENT ON COLUMN chat_messages.sources IS '助手回答时引用的来源列表，JSON数组格式，如 [{"chunkId":1,"fileName":"xxx.md","titlePath":"章节"}]';
+COMMENT ON COLUMN chat_messages.created_at IS '消息创建时间';
+
+-- 索引：按会话拉取所有消息（构造树的核心查询）
+CREATE INDEX idx_chat_messages_session_id 
+    ON chat_messages(session_id);
+-- 索引：按用户+会话过滤
+CREATE INDEX idx_chat_messages_user_session 
+    ON chat_messages(user_id, session_id);
+-- 索引：支持按 parent_id 回溯路径
+CREATE INDEX idx_chat_messages_parent_id 
+    ON chat_messages(parent_id) WHERE parent_id IS NOT NULL;

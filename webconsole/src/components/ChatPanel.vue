@@ -318,7 +318,7 @@ export default {
         const response = await ragApi.chat({
           question: q,
           sessionId: this.activeSessionId,
-          parentMessageId: chatTreeStore.state.branchParentId
+          parentMessageId: chatTreeStore.state.branchParentId || chatTreeStore.state.activeLeafId
         })
         const data = response.data.data || response.data
 

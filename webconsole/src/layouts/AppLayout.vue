@@ -30,7 +30,7 @@
 <script>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { authStore } from '@/utils/auth'
+import { authStore } from '@/utils/authStore'
 
 export default {
   name: 'AppLayout',
@@ -63,57 +63,64 @@ export default {
 
 <style scoped>
 .app-layout {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 20px;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #f0f2f5;
 }
 
 .app-header {
   text-align: center;
-  margin-bottom: 24px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #1a73e8 0%, #4285f4 100%);
+  color: white;
+  flex-shrink: 0;
 }
 
 .app-header h1 {
-  color: #1a73e8;
-  font-size: 28px;
-  margin-bottom: 6px;
+  font-size: 22px;
+  margin-bottom: 2px;
+  color: white;
 }
 
 .subtitle {
-  color: #666;
-  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
 }
 
 .tab-nav {
   display: flex;
-  gap: 4px;
+  gap: 0;
   background: #fff;
-  border-radius: 10px;
-  padding: 4px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  margin-bottom: 20px;
+  padding: 0 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   align-items: center;
+  flex-shrink: 0;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .tab-btn {
-  flex: 1;
-  padding: 12px 16px;
+  padding: 14px 20px;
   text-align: center;
   text-decoration: none;
   color: #666;
-  border-radius: 8px;
   transition: all 0.2s;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 
 .tab-btn:hover {
-  background: #f5f5f5;
-  color: #333;
+  color: #1a73e8;
+  background: #f5f8ff;
 }
 
 .tab-btn.active {
-  background: #1a73e8;
-  color: white;
+  color: #1a73e8;
+  border-bottom-color: #1a73e8;
+  font-weight: 600;
 }
 
 .user-info {
@@ -121,23 +128,22 @@ export default {
   align-items: center;
   gap: 12px;
   margin-left: auto;
-  padding-right: 4px;
 }
 
 .username {
   color: #333;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .logout-btn {
-  padding: 6px 16px;
+  padding: 5px 14px;
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 6px;
   color: #666;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   transition: all 0.2s;
 }
 
@@ -148,28 +154,28 @@ export default {
 }
 
 .tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   background: white;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  min-height: 500px;
 }
 
 @media (max-width: 768px) {
   .tab-nav {
     flex-wrap: wrap;
+    padding: 0 10px;
   }
 
   .tab-btn {
-    flex: 1 1 calc(33.333% - 4px);
-    min-width: 100px;
+    padding: 12px 14px;
+    font-size: 13px;
   }
 
   .user-info {
     width: 100%;
-    justify-content: center;
+    justify-content: flex-end;
     margin-left: 0;
-    margin-top: 8px;
-    padding: 8px;
+    padding: 6px 10px;
     border-top: 1px solid #eee;
   }
 }

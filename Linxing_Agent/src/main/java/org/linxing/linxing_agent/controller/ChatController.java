@@ -33,6 +33,13 @@ public class ChatController {
         return Result.success(response);
     }
 
+    @PostMapping("/sessions")
+    public Result<ChatSessionVO> createSession(@RequestBody Map<String, String> body) {
+        Integer userId = getCurrentUserId();
+        String title = body.getOrDefault("title", "新对话");
+        return Result.success(chatSessionService.createSession(userId, title));
+    }
+
     @GetMapping("/sessions")
     public Result<PageResult<ChatSessionVO>> listSessions(
             @RequestParam(defaultValue = "1") int page,

@@ -22,14 +22,15 @@ export default {
   box-sizing: border-box;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Microsoft YaHei', sans-serif;
   background: #f0f2f5;
   color: #333;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 #app {
-  min-height: 100vh;
+  height: 100%;
 }
 </style>

@@ -18,5 +18,9 @@ export default {
 <style scoped>
 .ingest-view {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fafbfc;
 }
 </style>

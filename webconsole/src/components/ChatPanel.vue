@@ -3,7 +3,10 @@
     <div class="session-sidebar">
       <div class="sidebar-header">
         <h3>聊天记录</h3>
-        <button class="new-chat-btn" @click="newChat">+ 新对话</button>
+        <div class="sidebar-header-actions">
+          <button class="tree-btn" @click="showTreeModal = true" :disabled="!activeSessionId || !chatTreeStore.state.messages.length" title="查看对话树">🌲 Chat树</button>
+          <button class="new-chat-btn" @click="newChat">+ 新对话</button>
+        </div>
       </div>
       <div class="session-list">
         <div
@@ -26,26 +29,17 @@
 
     <div class="chat-panel">
       <div class="chat-messages" ref="messagesContainer">
-        <div v-if="!activeSessionId && !branchParentId" class="welcome-hint">
+        <div v-if="!activeSessionId && !chatTreeStore.state.branchParentId" class="welcome-hint">
           请从左侧选择一个会话，或点击"+ 新对话"开始
         </div>
 
-        <div v-if="branchParentId" class="branch-banner">
+        <div v-if="chatTreeStore.state.branchParentId" class="branch-banner">
           正在从选定消息分支提问
           <button class="branch-cancel" @click="cancelBranch">取消分支</button>
         </div>
 
-        <template v-for="item in flattenedMessages" :key="item.id">
-          <div
-               :class="['message-row', { 'active-path': activePath.has(item.id) }]"
-               :style="{ marginLeft: item.depth * 20 + 'px' }">
-            <span
-              v-if="item.children && item.children.length"
-              class="tree-toggle"
-              @click="toggleExpand(item.id)"
-            >{{ isExpanded(item.id) ? '▼' : '▶' }}</span>
-            <span v-else class="tree-toggle-placeholder"></span>
-
+        <template v-for="item in allMessages" :key="item.id">
+          <div class="message-row">
             <div :class="['message', item.role]">
               <div class="message-content">
                 <div v-if="item.role === 'user'" class="user-message">
@@ -72,7 +66,8 @@
                   </div>
                 </div>
               </div>
-              <div class="message-actions">
+              <div v-if="item.role === 'user'" class="message-actions">
+                <button class="action-btn" @click="reAsk(item.content)" title="编辑并重新提问">重新提问</button>
                 <button class="action-btn" @click="branchFrom(item.id)" title="从此处重新提问">分支</button>
                 <button class="action-btn action-delete" @click="handleDeleteSubtree(item.id)" title="删除此分支">删除</button>
               </div>
@@ -80,8 +75,17 @@
           </div>
         </template>
 
+        <div v-if="tempUserMsg" class="message-row">
+          <div class="message user">
+            <div class="message-content">
+              <div class="user-message">
+                <strong>你:</strong> {{ tempUserMsg.content }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="loading" class="message-row">
-          <span class="tree-toggle-placeholder"></span>
           <div class="message assistant">
             <div class="message-content">
               <div class="bot-message">
@@ -100,92 +104,147 @@
           rows="3"
         ></textarea>
         <button @click="sendQuestion" :disabled="loading || !question.trim()">
-          {{ loading ? '发送中...' : (branchParentId ? '发送分支' : '发送') }}
+          {{ loading ? '发送中...' : (chatTreeStore.state.branchParentId ? '发送分支' : '发送') }}
         </button>
       </div>
     </div>
 
-    <ChunkContextPanel
-      v-if="showContextPanel"
-      ref="contextPanel"
-      @close="showContextPanel = false"
-      @navigate="handleNavigate"
-    />
+    <div v-if="showContextPanel" class="context-overlay" @click.self="showContextPanel = false">
+      <div class="context-modal">
+        <ChunkContextPanel
+          ref="contextPanel"
+          @close="showContextPanel = false"
+          @navigate="handleNavigate"
+        />
+      </div>
+    </div>
+
+    <div v-if="showTreeModal" class="tree-overlay" @click.self="showTreeModal = false">
+      <div class="tree-modal">
+        <ChatTreePanel
+          :roots="userQuestionRoots"
+          :active-path="userQuestionActivePath"
+          @close="showTreeModal = false"
+          @select="handleTreeSelect"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import { ragApi, chatSessionApi } from '@/api'
 import ChunkContextPanel from './ChunkContextPanel.vue'
+import ChatTreePanel from './ChatTreePanel.vue'
+import { chatTreeStore } from '@/utils/chatTreeStore'
 
 export default {
   name: 'ChatPanel',
   components: {
-    ChunkContextPanel
+    ChunkContextPanel,
+    ChatTreePanel
   },
   data() {
     return {
       question: '',
-      messages: [],
       sessions: [],
       loading: false,
       activeSessionId: null,
-      activeLeafId: null,
-      branchParentId: null,
-      collapsedNodes: {},
-      showContextPanel: false
+      tempUserMsg: null,
+      showContextPanel: false,
+      showTreeModal: false
     }
   },
   computed: {
+    chatTreeStore() {
+      return chatTreeStore
+    },
     activeSessionTitle() {
       if (!this.activeSessionId) return ''
       const s = this.sessions.find(s => s.id === this.activeSessionId)
       return s ? s.title : ''
     },
     messageMap() {
-      const map = new Map()
-      this.messages.forEach(m => {
-        map.set(m.id, { ...m, children: [] })
-      })
-      this.messages.forEach(m => {
-        if (m.parentId && map.has(m.parentId)) {
-          map.get(m.parentId).children.push(map.get(m.id))
-        }
-      })
-      return map
+      return chatTreeStore.getMessageMap()
     },
     messageTree() {
       const map = this.messageMap
       const roots = []
-      this.messages.forEach(m => {
+      chatTreeStore.state.messages.forEach(m => {
         if (!m.parentId || !map.has(m.parentId)) {
           roots.push(map.get(m.id))
         }
       })
       return roots
     },
-    flattenedMessages() {
+    allMessages() {
       const result = []
-      const walk = (node, depth) => {
-        const sourceDetails = this.parseSourceDetails(node.sources)
-        result.push({ ...node, depth, sourceDetails })
-        if (node.children.length && this.isExpanded(node.id)) {
-          node.children.forEach(child => walk(child, depth + 1))
-        }
+      const activeLeafId = chatTreeStore.state.activeLeafId
+      if (!activeLeafId || !this.messageMap.has(activeLeafId)) {
+        return result
       }
-      this.messageTree.forEach(root => walk(root, 0))
+      const roots = this.messageTree
+      const walk = (node) => {
+        const enriched = { ...node, sourceDetails: this.parseSourceDetails(node.sources) }
+        result.push(enriched)
+        if (node.id === activeLeafId) {
+          return true
+        }
+        if (node.children && node.children.length) {
+          for (const child of node.children) {
+            if (walk(child)) {
+              return true
+            }
+          }
+        }
+        result.pop()
+        return false
+      }
+      for (const root of roots) {
+        if (walk(root)) {
+          break
+        }
+        result.length = 0
+      }
       return result
     },
-    activePath() {
-      const path = new Set()
-      let current = this.activeLeafId
-      const map = this.messageMap
-      while (current && map.has(current)) {
-        path.add(current)
-        const node = map.get(current)
-        current = node.parentId
+    userQuestionRoots() {
+      const buildUserTree = (node) => {
+        const questions = []
+        if (node.role === 'user') {
+          const userNode = { id: node.id, content: node.content, children: [] }
+          node.children.forEach(child => {
+            if (child.role === 'assistant') {
+              child.children.forEach(grandChild => {
+                const subs = buildUserTree(grandChild)
+                subs.forEach(sub => userNode.children.push(sub))
+              })
+            } else if (child.role === 'user') {
+              const subs = buildUserTree(child)
+              subs.forEach(sub => userNode.children.push(sub))
+            }
+          })
+          questions.push(userNode)
+        } else {
+          node.children.forEach(child => {
+            const subs = buildUserTree(child)
+            subs.forEach(sub => questions.push(sub))
+          })
+        }
+        return questions
       }
-      return path
+      const roots = []
+      this.messageTree.forEach(root => {
+        const qs = buildUserTree(root)
+        qs.forEach(q => roots.push(q))
+      })
+      return roots
+    },
+    userQuestionActivePath() {
+      return chatTreeStore.getUserActivePath()
+    },
+    activePath() {
+      return chatTreeStore.getActivePathIds()
     }
   },
   watch: {
@@ -219,16 +278,14 @@ export default {
     },
     async switchSession(id) {
       this.activeSessionId = id
-      this.branchParentId = null
-      this.activeLeafId = null
-      this.collapsedNodes = {}
+      chatTreeStore.clearBranch()
+      chatTreeStore.setActiveLeaf(null)
       this.question = ''
       await this.loadMessages()
     },
     async loadMessages() {
       if (!this.activeSessionId) {
-        this.messages = []
-        this.activeLeafId = null
+        chatTreeStore.clearMessages()
         return
       }
       try {
@@ -237,13 +294,13 @@ export default {
         if (!Array.isArray(data)) {
           data = []
         }
-        this.messages = data
+        chatTreeStore.setMessages(data)
         if (data.length > 0) {
-          this.activeLeafId = data[data.length - 1].id
+          chatTreeStore.setActiveLeaf(data[data.length - 1].id)
         }
       } catch (e) {
         console.error('加载消息失败:', e)
-        this.messages = []
+        chatTreeStore.clearMessages()
       }
       this.$nextTick(() => this.scrollToBottom())
     },
@@ -254,11 +311,14 @@ export default {
       this.question = ''
       this.loading = true
 
+      this.tempUserMsg = { content: q }
+      this.$nextTick(() => this.scrollToBottom())
+
       try {
         const response = await ragApi.chat({
           question: q,
           sessionId: this.activeSessionId,
-          parentMessageId: this.branchParentId
+          parentMessageId: chatTreeStore.state.branchParentId
         })
         const data = response.data.data || response.data
 
@@ -267,12 +327,12 @@ export default {
           await this.fetchSessions()
         }
 
-        this.activeLeafId = data.messageId || null
-        this.branchParentId = null
+        chatTreeStore.setActiveLeaf(data.messageId || null)
+        chatTreeStore.clearBranch()
         await this.loadMessages()
       } catch (error) {
         const errMsg = error.response?.data?.msg || error.response?.data?.message || error.message
-        this.messages.push({
+        chatTreeStore.state.messages.push({
           id: -Date.now(),
           role: 'assistant',
           content: '抱歉，发生了错误: ' + errMsg,
@@ -280,20 +340,31 @@ export default {
           parentId: null
         })
       } finally {
+        this.tempUserMsg = null
         this.loading = false
         this.$nextTick(() => this.scrollToBottom())
       }
     },
-    newChat() {
-      this.activeSessionId = null
-      this.activeLeafId = null
-      this.branchParentId = null
-      this.messages = []
-      this.collapsedNodes = {}
-      this.question = ''
+    async newChat() {
+      const title = prompt('请输入新对话的标题:')
+      if (!title || !title.trim()) return
+
+      try {
+        const res = await chatSessionApi.create(title.trim())
+        const newSession = res.data.data || res.data
+        if (newSession && newSession.id) {
+          this.activeSessionId = newSession.id
+          chatTreeStore.clearMessages()
+          this.question = ''
+          await this.fetchSessions()
+        }
+      } catch (e) {
+        console.error('创建会话失败:', e)
+        alert('创建会话失败: ' + (e.response?.data?.msg || e.message))
+      }
     },
     branchFrom(messageId) {
-      this.branchParentId = messageId
+      chatTreeStore.setBranchParent(messageId)
       this.question = ''
       this.$nextTick(() => {
         const textarea = this.$el.querySelector('.chat-input textarea')
@@ -301,7 +372,7 @@ export default {
       })
     },
     cancelBranch() {
-      this.branchParentId = null
+      chatTreeStore.clearBranch()
       this.question = ''
     },
     async handleDeleteSession(id) {
@@ -310,9 +381,7 @@ export default {
         await chatSessionApi.delete(id)
         if (this.activeSessionId === id) {
           this.activeSessionId = null
-          this.messages = []
-          this.activeLeafId = null
-          this.branchParentId = null
+          chatTreeStore.clearMessages()
         }
         this.sessions = this.sessions.filter(s => s.id !== id)
       } catch (e) {
@@ -324,36 +393,31 @@ export default {
       if (!confirm('确定要删除此消息及其所有回复吗？')) return
       try {
         await chatSessionApi.deleteSubtree(messageId)
-        await this.loadMessages()
-        if (this.activeLeafId === messageId || this.isDescendantOf(messageId, this.activeLeafId)) {
-          this.activeLeafId = this.findNewActiveLeaf(messageId)
+        const currentActiveLeaf = chatTreeStore.state.activeLeafId
+        if (currentActiveLeaf === messageId || chatTreeStore.isDescendantOf(messageId, currentActiveLeaf)) {
+          chatTreeStore.setActiveLeaf(chatTreeStore.findNewActiveLeaf(messageId))
         }
+        await this.loadMessages()
       } catch (e) {
         console.error('删除消息子树失败:', e)
         alert('删除失败: ' + (e.response?.data?.msg || e.message))
       }
     },
-    isDescendantOf(ancestorId, nodeId) {
-      if (!nodeId) return false
-      const map = this.messageMap
-      let current = nodeId
-      while (current && map.has(current)) {
-        if (current === ancestorId) return true
-        current = map.get(current).parentId
-      }
-      return false
+    handleTreeSelect(nodeId) {
+      const leafId = chatTreeStore.findLeafDescendant(nodeId)
+      chatTreeStore.setActiveLeaf(leafId)
+      this.showTreeModal = false
+      this.$nextTick(() => this.scrollToBottom())
     },
-    findNewActiveLeaf(excludedId) {
-      const map = this.messageMap
-      const allIds = Array.from(map.keys()).filter(id => id !== excludedId && !this.isDescendantOf(excludedId, id))
-      if (allIds.length === 0) return null
-      return allIds[allIds.length - 1]
-    },
-    toggleExpand(id) {
-      this.$set(this.collapsedNodes, id, !this.collapsedNodes[id])
-    },
-    isExpanded(id) {
-      return !this.collapsedNodes[id]
+    reAsk(content) {
+      this.question = content
+      this.$nextTick(() => {
+        const textarea = this.$el.querySelector('.chat-input textarea')
+        if (textarea) {
+          textarea.focus()
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+        }
+      })
     },
     parseSourceDetails(sourcesStr) {
       try {
@@ -412,14 +476,41 @@ export default {
   padding: 16px;
   border-bottom: 1px solid #e0e0e0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .sidebar-header h3 {
   margin: 0;
   font-size: 15px;
   color: #333;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tree-btn {
+  padding: 6px 10px;
+  background: white;
+  color: #667eea;
+  border: 1px solid #667eea;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.tree-btn:hover:not(:disabled) {
+  background: #667eea;
+  color: white;
+}
+
+.tree-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .new-chat-btn {
@@ -561,38 +652,6 @@ export default {
   margin-bottom: 8px;
   padding: 4px 8px;
   border-radius: 6px;
-  transition: background 0.15s;
-}
-
-.message-row.active-path {
-  background: #e8f5e9;
-  border-left: 2px solid #4caf50;
-}
-
-.tree-toggle {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
-  text-align: center;
-  font-size: 10px;
-  color: #888;
-  cursor: pointer;
-  margin-right: 4px;
-  margin-top: 14px;
-  user-select: none;
-  border-radius: 3px;
-}
-
-.tree-toggle:hover {
-  background: #e0e0e0;
-  color: #333;
-}
-
-.tree-toggle-placeholder {
-  flex-shrink: 0;
-  width: 16px;
-  margin-right: 4px;
 }
 
 .message {
@@ -723,5 +782,62 @@ export default {
 .chat-input button:disabled {
   background: #ccc;
   cursor: not-allowed;
+}
+
+.context-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.context-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 700px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tree-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+}
+
+.tree-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 960px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: slideUp 0.25s ease-out;
 }
 </style>

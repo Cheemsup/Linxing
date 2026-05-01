@@ -11,7 +11,7 @@ public interface ChatMessageMapper {
     int insert(ChatMessage message);
     ChatMessage selectById(@Param("id") Integer id);
     List<ChatMessage> selectBySessionId(@Param("sessionId") Integer sessionId);
-    Integer selectLatestIdBySessionId(@Param("sessionId") Integer sessionId);
+    ChatMessage selectLatestBySessionId(@Param("sessionId") Integer sessionId);
     int countBySessionId(@Param("sessionId") Integer sessionId);
     int deleteByIds(@Param("ids") List<Integer> ids);
     int deleteBySessionId(@Param("sessionId") Integer sessionId);

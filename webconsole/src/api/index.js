@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { authStore } from '@/utils/auth'
+import { authStore } from '@/utils/authStore'
 
 const api = axios.create({
   baseURL: '/api',
@@ -80,6 +80,9 @@ export const ragApi = {
 }
 
 export const chatSessionApi = {
+  create(title) {
+    return api.post('/rag/sessions', { title })
+  },
   list(page = 1, size = 20) {
     return api.get('/rag/sessions', { params: { page, size } })
   },

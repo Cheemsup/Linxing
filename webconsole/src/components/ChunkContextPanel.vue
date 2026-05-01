@@ -84,9 +84,6 @@ export default {
 
 <style scoped>
 .chunk-context-panel {
-  width: 380px;
-  min-width: 380px;
-  border-left: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
   background: #fafafa;

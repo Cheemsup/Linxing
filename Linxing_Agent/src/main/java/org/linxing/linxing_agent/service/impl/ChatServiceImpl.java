@@ -74,7 +74,8 @@ public class ChatServiceImpl implements IChatService {
             if (request.getParentMessageId() != null) {
                 parentId = request.getParentMessageId();
             } else {
-                parentId = chatMessageMapper.selectLatestIdBySessionId(sessionId);
+                ChatMessage latestMsg = chatMessageMapper.selectLatestBySessionId(sessionId);
+                parentId = (latestMsg != null) ? latestMsg.getParentId() : null;
             }
 
             ChatMessage userMsg = ChatMessage.builder()
@@ -212,20 +213,18 @@ public class ChatServiceImpl implements IChatService {
 
     private List<ChatMessage> backtrackHistory(Integer currentUserMsgId) {
         ChatMessage currentMsg = chatMessageMapper.selectById(currentUserMsgId);
-        List<ChatMessage> history = new ArrayList<>();
-        if (currentMsg == null || currentMsg.getParentId() == null) {
-            return history;
+        if (currentMsg == null) {
+            return List.of();
         }
-        Integer cursorId = currentMsg.getParentId();
-        int count = 0;
-        while (cursorId != null && count < MAX_HISTORY_ROUNDS * 2) {
-            ChatMessage msg = chatMessageMapper.selectById(cursorId);
-            if (msg == null) break;
-            history.add(0, msg);
-            cursorId = msg.getParentId();
-            count++;
+        List<ChatMessage> allMessages = chatMessageMapper.selectBySessionId(currentMsg.getSessionId());
+        List<ChatMessage> before = new ArrayList<>();
+        for (ChatMessage msg : allMessages) {
+            if (msg.getCreatedAt().isBefore(currentMsg.getCreatedAt())) {
+                before.add(msg);
+            }
         }
-        return history;
+        int start = Math.max(0, before.size() - MAX_HISTORY_ROUNDS * 2);
+        return before.subList(start, before.size());
     }
 
     private String buildHistoryContext(List<ChatMessage> history) {

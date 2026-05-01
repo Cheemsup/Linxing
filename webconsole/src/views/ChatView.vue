@@ -18,5 +18,9 @@ export default {
 <style scoped>
 .chat-view {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fafbfc;
 }
 </style>

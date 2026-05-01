@@ -151,7 +151,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '@/api/auth'
-import { authStore } from '@/utils/auth'
+import { authStore } from '@/utils/authStore'
 
 export default {
   name: 'LoginView',
@@ -377,9 +377,17 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 8s ease infinite;
   position: relative;
   overflow: hidden;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .background-decoration {
@@ -422,59 +430,63 @@ export default {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-20px); }
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-30px) scale(1.05); }
 }
 
 .auth-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  padding: 48px 40px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 48px 44px;
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   position: relative;
   z-index: 1;
-  animation: slideUp 0.5s ease-out;
+  animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(30px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(40px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .auth-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 
 .logo {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .logo-icon {
-  font-size: 56px;
+  font-size: 64px;
   display: inline-block;
-  animation: bounce 2s infinite;
+  animation: pulse 3s ease-in-out infinite;
 }
 
-@keyframes bounce {
-  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-10px); }
-  60% { transform: translateY(-5px); }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
 }
 
 .auth-title {
-  color: #1a73e8;
-  font-size: 28px;
-  font-weight: 600;
+  background: linear-gradient(135deg, #1a73e8, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 30px;
+  font-weight: 700;
   margin-bottom: 8px;
+  letter-spacing: -0.5px;
 }
 
 .auth-subtitle {
   color: #666;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .auth-form {
@@ -482,34 +494,37 @@ export default {
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .form-label {
   display: block;
   color: #333;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   margin-bottom: 8px;
+  letter-spacing: 0.3px;
 }
 
 .form-input {
   width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 15px;
-  transition: all 0.3s ease;
+  padding: 13px 16px;
+  border: 2px solid #e8e8e8;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.25s ease;
   outline: none;
+  background: #f8f9fb;
 }
 
 .form-input:focus {
-  border-color: #1a73e8;
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+  background: white;
 }
 
 .form-input:disabled {
-  background: #f5f5f5;
+  background: #f0f0f0;
   cursor: not-allowed;
 }
 
@@ -517,9 +532,13 @@ export default {
   position: relative;
 }
 
+.password-wrapper .form-input {
+  padding-right: 44px;
+}
+
 .toggle-password {
   position: absolute;
-  right: 12px;
+  right: 14px;
   top: 50%;
   transform: translateY(-50%);
   background: none;
@@ -528,34 +547,39 @@ export default {
   font-size: 18px;
   padding: 4px;
   line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.toggle-password:hover {
+  opacity: 1;
 }
 
 .field-error {
-  color: #d32f2f;
+  color: #e53935;
   font-size: 12px;
-  margin-top: 4px;
+  margin-top: 6px;
   margin-left: 4px;
 }
 
 .error-message {
-  background: #fff3f3;
+  background: #fff2f2;
   color: #d32f2f;
   padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 10px;
+  font-size: 13px;
   margin-bottom: 16px;
-  border-left: 4px solid #d32f2f;
-  animation: shake 0.4s ease-in-out;
+  border: 1px solid #ffccd5;
 }
 
 .success-message {
   background: #e8f5e9;
   color: #2e7d32;
   padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 10px;
+  font-size: 13px;
   margin-bottom: 16px;
-  border-left: 4px solid #2e7d32;
+  border: 1px solid #c8e6c9;
 }
 
 @keyframes shake {
@@ -566,11 +590,11 @@ export default {
 
 .submit-btn {
   width: 100%;
-  padding: 14px;
+  padding: 15px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
@@ -579,6 +603,7 @@ export default {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  letter-spacing: 1px;
 }
 
 .submit-btn:hover:not(:disabled) {
@@ -610,30 +635,32 @@ export default {
 
 .auth-footer {
   text-align: center;
-  color: #999;
+  color: #888;
   font-size: 13px;
   padding-top: 20px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid #eef0f2;
 }
 
 .link-btn {
-  color: #1a73e8;
+  color: #667eea;
   background: none;
   border: none;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   font-size: 13px;
   padding: 0;
+  transition: color 0.2s;
 }
 
 .link-btn:hover {
+  color: #764ba2;
   text-decoration: underline;
 }
 
 @media (max-width: 480px) {
   .auth-card {
     margin: 20px;
-    padding: 32px 24px;
+    padding: 36px 28px;
   }
 
   .auth-title {

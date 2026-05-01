@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { authStore } from '@/utils/auth'
+import { authStore } from '@/utils/authStore'
 import LoginView from '@/views/LoginView.vue'
 import ChatView from '@/views/ChatView.vue'
 import IngestView from '@/views/IngestView.vue'
@@ -21,7 +21,7 @@ const routes = [
   },
   {
     path: '/',
-    redirect: '/chat'
+    redirect: '/login'
   },
   {
     path: '/chat',

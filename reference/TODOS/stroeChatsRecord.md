@@ -546,50 +546,59 @@ public interface ChatMessageMapper {
 
 ---
 
-## Phase 5 — 后端 Controller 层
+## Phase 5 — 后端 Controller 层改造
 
-### 5.1 新增 `ChatSessionController`
+**设计决策**：不新建独立的 `ChatSessionController`。会话管理是 chat 功能的"附属"能力，所有端点直接集成到现有 `ChatController` 中。`POST /chat/sessions` 创建会话接口去掉，由 ChatServiceImpl通过接口间接调用`ChatServiceImpl.resolveSession()` 在首次聊天时自动创建。
+
+### 5.1 改造现有 `ChatController`（新增 4 个端点）
+
+在现有 [ChatController](file:///d:/JavaProjects/Linxing/Linxing_Agent/src/main/java/org/linxing/linxing_agent/controller/ChatController.java) 中新增以下方法，注入 `IChatSessionService` 和 `ChatMessageMapper`：
 
 ```java
-@RestController
-@RequestMapping("/chat")
-@RequiredArgsConstructor
-public class ChatSessionController {
+// 新增依赖注入
+private final IChatSessionService chatSessionService;
+private final ChatMessageMapper chatMessageMapper;
 
-    private final IChatSessionService chatSessionService;
+// 1. 会话列表（侧边栏用）
+@GetMapping("/sessions")
+public Result<PageResult<ChatSessionVO>> listSessions(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "20") int size) {
+    Integer userId = getCurrentUserId();
+    return Result.success(chatSessionService.listSessions(userId, page, size));
+}
 
-    @GetMapping("/sessions")
-    public Result<PageResult<ChatSessionVO>> listSessions(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        // 返回当前用户的会话列表
+// 2. 删除会话（级联删除所有消息）
+@DeleteMapping("/sessions/{sessionId}")
+public Result<Void> deleteSession(@PathVariable Integer sessionId) {
+    chatSessionService.deleteSession(sessionId);
+    return Result.success();
+}
+
+// 3. 获取会话消息树（返回平面列表，前端按 parent_id 组装）
+@GetMapping("/sessions/{sessionId}/messages")
+public Result<List<ChatMessageVO>> getMessages(@PathVariable Integer sessionId) {
+    List<ChatMessage> messages = chatMessageMapper.selectBySessionId(sessionId);
+    List<ChatMessageVO> vos = messages.stream().map(this::toMessageVO).collect(Collectors.toList());
+    return Result.success(vos);
+}
+
+// 4. 删除消息子树（递归收集子孙节点后批量删除）
+@DeleteMapping("/messages/{messageId}/subtree")
+public Result<Void> deleteSubtree(@PathVariable Integer messageId) {
+    List<Integer> ids = collectSubtreeIds(messageId);
+    if (!ids.isEmpty()) {
+        chatMessageMapper.deleteByIds(ids);
     }
-
-    @PostMapping("/sessions")
-    public Result<ChatSessionVO> createSession() {
-        // 创建新会话
-    }
-
-    @DeleteMapping("/sessions/{sessionId}")
-    public Result<Void> deleteSession(@PathVariable Integer sessionId) {
-        // 删除会话
-    }
-
-    @GetMapping("/sessions/{sessionId}/messages")
-    public Result<List<ChatMessageVO>> getMessages(@PathVariable Integer sessionId) {
-        // 获取会话的完整消息树（返回平面列表，前端按 parent_id 组装树）
-    }
-
-    @DeleteMapping("/messages/{messageId}/subtree")
-    public Result<Void> deleteSubtree(@PathVariable Integer messageId) {
-        // 递归收集该消息及其所有子孙节点 ID → 批量 DELETE
-    }
+    return Result.success();
 }
 ```
 
-### 5.2 改造 `ChatController`
+`collectSubtreeIds` 逻辑：从 `messageId` 出发，BFS/DFS 收集所有 `parent_id` 指向该节点的子孙消息 ID，返回 ID 列表。
 
-现有的 `/rag/chat` 接口保持不变（兼容），但内部逻辑按 Phase 4.2 改造。
+### 5.2 现有 `/rag/chat` 保持不变
+
+现有 `POST /rag/chat` 接口签名不变，内部逻辑已按 Phase 4.2 改造完成。
 
 ---
 
@@ -599,15 +608,15 @@ public class ChatSessionController {
 
 | 改造项 | 说明 |
 |--------|------|
-| 会话列表 | 新增左侧会话列表栏，展示用户所有会话（调用 `GET /chat/sessions`），支持切换、新建、删除 |
-| 新建聊天 | "新建聊天"按钮 → 调用 `POST /chat/sessions` → 自动切换到新会话 |
-| 加载历史 | 切换 session 时 → 调用 `GET /chat/sessions/{id}/messages` → 前端按 `parent_id` 构建树形数据结构 → 渲染为对话 |
+| 会话列表 | 新增左侧会话列表栏，展示用户所有会话（调用 `GET /rag/sessions`），支持切换、删除 |
+| 新建聊天 | "新建聊天"按钮 → 前端将 `sessionId` 置为 `null` → 用户输入问题并发送 → 后端自动创建会话 |
+| 加载历史 | 切换 session 时 → 调用 `GET /rag/sessions/{id}/messages` → 前端按 `parent_id` 构建树形数据结构 → 渲染为对话 |
 | 发送消息 | 携带当前 `sessionId` + `parentMessageId`（默认指向最新消息，分支时为被点击的历史消息ID） |
 | sessionId 持久化 | `localStorage` 记住当前活跃 sessionId，刷新后恢复 |
 | 树形展示 | 消息按树形层级展示，每个节点可折叠/展开子节点 |
 | 路径高亮 | 当前激活的消息链（从根到当前节点的 `parent_id` 链）高亮显示 |
 | 分支入口 | 每条历史消息提供"从此重新提问"按钮 → 输入框激活 → 发送时 `parentMessageId` 指向该消息 |
-| 删除子树 | 每条消息提供"删除此分支"按钮 → 调用 `DELETE /chat/messages/{id}/subtree`（后端递归收集+批量删除）→ 前端移除对应节点 |
+| 删除子树 | 每条消息提供"删除此分支"按钮 → 调用 `DELETE /rag/messages/{id}/subtree`（后端递归收集+批量删除）→ 前端移除对应节点 |
 
 ### 6.2 前端树构建伪代码
 
@@ -648,18 +657,19 @@ function getActivePath(nodeId, map) {
 ### 6.3 新增 API 调用（api/index.js）
 
 ```javascript
+// 不再有 create() —— 会话由首次聊天自动创建
 export const chatSessionApi = {
   list(page = 1, size = 20) {
-    return api.get('/chat/sessions', { params: { page, size } })
-  },
-  create() {
-    return api.post('/chat/sessions')
+    return api.get('/rag/sessions', { params: { page, size } })
   },
   delete(id) {
-    return api.delete(`/chat/sessions/${id}`)
+    return api.delete(`/rag/sessions/${id}`)
   },
   getMessages(sessionId) {
-    return api.get(`/chat/sessions/${sessionId}/messages`)
+    return api.get(`/rag/sessions/${sessionId}/messages`)
+  },
+  deleteSubtree(messageId) {
+    return api.delete(`/rag/messages/${messageId}/subtree`)
   }
 }
 ```
@@ -684,7 +694,7 @@ Phase 1 (DDL) ──→ Phase 2 (Entity/DTO) ──→ Phase 3 (Mapper) ──�
 | Phase 2 | 开发者 | 2 个 Entity + 2 个 VO + DTO 改造 |
 | Phase 3 | 开发者 | 2 个 Mapper 接口 + 2 个 XML |
 | Phase 4 | 开发者 | 1 个新 Service + ChatServiceImpl 核心改造 |
-| Phase 5 | 开发者 | 1 个新 Controller + ChatController 微调 |
+| Phase 5 | 开发者 | ChatController 改造（新增 4 个端点，不新建 Controller） |
 | Phase 6 | 开发者 | ChatPanel.vue 改造 + 新增 API + 会话管理 UI |
 
 ---

@@ -6,7 +6,7 @@ package org.linxing.linxing_agent.constant;
  */
 public final class RagParameters {
 
-    public static final String SYSTEM_PROMPT = "你是一个智能知识库助手。请基于以下参考内容回答用户问题。\n规则：\n1. 如果参考内容中没有相关信息，请明确告知用户\"知识库中未找到相关信息\"\n2. 绝对不可编造信息，仅依据提供的参考内容作答\n3. 回答时使用中文\n4. 在回答末尾标注信息来源（文件名和页码）\n\n参考内容：\n{{context}}\n\n用户问题：{{question}}\n";
+    public static final String SYSTEM_PROMPT = "你是一个智能知识库助手。请基于以下参考内容回答用户问题。\n规则：\n1. 如果参考内容中没有相关信息，请明确告知用户\"知识库中未找到相关信息\"\n2. 绝对不可编造信息，仅依据提供的参考内容作答\n3. 回答时使用中文\n4. 在回答末尾标注信息来源（文件名和页码）\n\n{{history}}参考内容：\n{{context}}\n\n用户问题：{{question}}\n";
 
     public static final short CHUNK_LEVEL_1 = 1;
 

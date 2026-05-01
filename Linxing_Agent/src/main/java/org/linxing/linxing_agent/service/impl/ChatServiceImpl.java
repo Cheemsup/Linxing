@@ -1,5 +1,7 @@
 package org.linxing.linxing_agent.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.input.Prompt;
@@ -18,8 +20,12 @@ import org.linxing.linxing_agent.dto.ChatRequest;
 import org.linxing.linxing_agent.dto.ChatResponse;
 import org.linxing.linxing_agent.entity.ActivityLog;
 import org.linxing.linxing_agent.entity.Bm25SearchResult;
+import org.linxing.linxing_agent.entity.ChatMessage;
+import org.linxing.linxing_agent.entity.ChatSession;
 import org.linxing.linxing_agent.entity.VectorSearchResult;
 import org.linxing.linxing_agent.mapper.ActivityLogMapper;
+import org.linxing.linxing_agent.mapper.ChatMessageMapper;
+import org.linxing.linxing_agent.mapper.ChatSessionMapper;
 import org.linxing.linxing_agent.mapper.ChunkMapper;
 import org.linxing.linxing_agent.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.service.IChatService;
@@ -29,30 +35,31 @@ import org.linxing.linxing_agent.utils.Reranker;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * 对话服务实现：完整的 RAG 流程 —— 向量检索 + BM25 混合检索 → RRF 融合 → 重排序 → LLM 生成回答。
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
+
+    private static final int MAX_HISTORY_ROUNDS = 10;
+    private static final int MAX_TOKENS_ESTIMATE = 8000;
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final EmbeddingModel embeddingModel;
     private final LlmManager llmManager;
     private final EmbeddingMapper embeddingMapper;
     private final ChunkMapper chunkMapper;
     private final ActivityLogMapper activityLogMapper;
+    private final ChatSessionMapper chatSessionMapper;
+    private final ChatMessageMapper chatMessageMapper;
     private final RagProperties ragProperties;
     private final Reranker reranker;
 
-    /**
-     * 主对话入口：接收用户问题，执行检索增强生成（RAG）全流程并返回回答。
-     */
     @Override
     public ChatResponse chat(ChatRequest request) {
         Integer userId = resolveUserId(request);
@@ -61,28 +68,46 @@ public class ChatServiceImpl implements IChatService {
         try {
             String originalQuery = request.getQuestion();
 
-            // 将用户问题转为向量嵌入
+            Integer sessionId = resolveSession(userId, request.getSessionId());
+
+            Integer parentId;
+            if (request.getParentMessageId() != null) {
+                parentId = request.getParentMessageId();
+            } else {
+                parentId = chatMessageMapper.selectLatestIdBySessionId(sessionId);
+            }
+
+            ChatMessage userMsg = ChatMessage.builder()
+                    .userId(userId)
+                    .sessionId(sessionId)
+                    .parentId(parentId)
+                    .role("user")
+                    .content(originalQuery)
+                    .sources("[]")
+                    .build();
+            chatMessageMapper.insert(userMsg);
+            log.debug("[用户{}] 保存用户消息 id={}, sessionId={}, parentId={}",
+                    userId, userMsg.getId(), userMsg.getSessionId(), userMsg.getParentId());
+
+            List<ChatMessage> history = backtrackHistory(userMsg.getId());
+            String historyText = buildHistoryContext(history);
+
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();
             String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
 
             int recallSize = ragProperties.getSearch().getRecallSize();
 
-            // 向量相似度检索
             List<VectorSearchResult> vectorResults = embeddingMapper.vectorSearch(userId, queryVectorString, recallSize);
 
             List<VectorSearchResult> candidates;
 
-            // 混合检索策略：向量 + BM25关键词
             if (ragProperties.getSearch().isHybridEnabled()) {
-                // 提取关键词用于BM25检索
                 String tsquery = KeywordExtractor.extractToTsquery(originalQuery);
                 if (!tsquery.isEmpty()) {
                     int bm25RecallSize = ragProperties.getSearch().getBm25RecallSize();
-                    // 执行BM25关键词检索
                     List<Bm25SearchResult> bm25Results = chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
                     log.debug("[用户{}] 混合检索: 向量候选={}, BM25候选={}", userId, vectorResults.size(), bm25Results.size());
 
-                    // RRF融合两种检索结果
                     candidates = ReciprocalRankFusion.fuse(
                             vectorResults,
                             bm25Results,
@@ -98,19 +123,12 @@ public class ChatServiceImpl implements IChatService {
                 candidates = vectorResults;
             }
 
-            // 无检索结果时直接返回兜底回答
             if (candidates.isEmpty()) {
-                return ChatResponse.builder()
-                        .answer("抱歉，在您的知识库中未找到与该问题相关的信息。")
-                        .sources(List.of())
-                        .sourceDetails(List.of())
-                        .sessionId(request.getSessionId())
-                        .build();
+                return buildEmptyResponse(sessionId, "抱歉，在您的知识库中未找到与该问题相关的信息。");
             }
 
             int finalTopK = ragProperties.getSearch().getDefaultTopK();
 
-            // Cross-Encoder 重排序：有 reranker 时精排取 TopK，否则直接截断
             List<VectorSearchResult> results;
             if (reranker.isAvailable()) {
                 log.debug("[用户{}] 开始Cross-Encoder细粒度重排序，候选数: {}, 目标TopK: {}", userId, candidates.size(), finalTopK);
@@ -119,24 +137,35 @@ public class ChatServiceImpl implements IChatService {
                 results = candidates.stream().limit(finalTopK).collect(Collectors.toList());
             }
 
-            // 将检索结果拼接为上下文、提取来源信息
             String context = buildContext(results);
             List<String> sources = extractSources(results);
             List<ChatResponse.SourceDetail> sourceDetails = extractSourceDetails(results);
 
-            // 将上下文和问题填入 Prompt 模板
-            Prompt prompt = buildPrompt(context, originalQuery);
+            Prompt prompt = buildPrompt(historyText, context, originalQuery);
 
             log.debug("[用户{}] 发送LLM请求，Prompt长度: {}字符", userId, prompt.text().length());
             long startTime = System.currentTimeMillis();
 
             OpenAiChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
 
-            // 调用 LLM 生成最终回答
             String answer = chatModel.chat(prompt.text());
 
             long duration = System.currentTimeMillis() - startTime;
             log.debug("[用户{}] LLM响应完成，耗时: {}ms，引用 {} 个来源", userId, duration, sources.size());
+
+            String sourcesJson = toSourcesJson(sourceDetails);
+
+            ChatMessage assistantMsg = ChatMessage.builder()
+                    .userId(userId)
+                    .sessionId(sessionId)
+                    .parentId(userMsg.getId())
+                    .role("assistant")
+                    .content(answer)
+                    .sources(sourcesJson)
+                    .build();
+            chatMessageMapper.insert(assistantMsg);
+
+            chatSessionMapper.updateUpdatedAt(sessionId);
 
             recordActivityLog(userId, sources.size());
 
@@ -144,21 +173,90 @@ public class ChatServiceImpl implements IChatService {
                     .answer(answer)
                     .sources(sources)
                     .sourceDetails(sourceDetails)
-                    .sessionId(request.getSessionId())
+                    .sessionId(sessionId)
+                    .messageId(assistantMsg.getId())
                     .build();
 
         } catch (Exception e) {
             log.error("[用户{}] 处理请求时发生异常: {}", userId, e.getMessage(), e);
-            return ChatResponse.builder()
-                    .answer("抱歉，处理您的问题时出现了错误，请稍后重试。如果问题持续存在，请联系管理员。")
-                    .sources(List.of())
-                    .sourceDetails(List.of())
-                    .sessionId(request.getSessionId())
-                    .build();
+            return buildEmptyResponse(request.getSessionId(),
+                    "抱歉，处理您的问题时出现了错误，请稍后重试。如果问题持续存在，请联系管理员。");
         }
     }
 
-    // 将检索结果格式化为带来源标注的上下文字符串
+    private ChatResponse buildEmptyResponse(Integer sessionId, String answer) {
+        return ChatResponse.builder()
+                .answer(answer)
+                .sources(List.of())
+                .sourceDetails(List.of())
+                .sessionId(sessionId)
+                .build();
+    }
+
+    private Integer resolveSession(Integer userId, Integer sessionId) {
+        if (sessionId != null) {
+            ChatSession session = chatSessionMapper.selectById(sessionId);
+            if (session != null) {
+                return sessionId;
+            }
+            log.debug("[用户{}] 会话 {} 不存在，将创建新会话", userId, sessionId);
+        }
+        ChatSession session = ChatSession.builder()
+                .userId(userId)
+                .title("新对话")
+                .build();
+        chatSessionMapper.insert(session);
+        log.info("[用户{}] 自动创建新会话 id={}", userId, session.getId());
+        return session.getId();
+    }
+
+    private List<ChatMessage> backtrackHistory(Integer currentUserMsgId) {
+        ChatMessage currentMsg = chatMessageMapper.selectById(currentUserMsgId);
+        List<ChatMessage> history = new ArrayList<>();
+        if (currentMsg == null || currentMsg.getParentId() == null) {
+            return history;
+        }
+        Integer cursorId = currentMsg.getParentId();
+        int count = 0;
+        while (cursorId != null && count < MAX_HISTORY_ROUNDS * 2) {
+            ChatMessage msg = chatMessageMapper.selectById(cursorId);
+            if (msg == null) break;
+            history.add(0, msg);
+            cursorId = msg.getParentId();
+            count++;
+        }
+        return history;
+    }
+
+    private String buildHistoryContext(List<ChatMessage> history) {
+        if (history.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("历史对话：\n");
+        int estimatedChars = 0;
+        List<ChatMessage> truncated = new ArrayList<>();
+        for (int i = history.size() - 1; i >= 0; i--) {
+            ChatMessage msg = history.get(i);
+            estimatedChars += msg.getContent().length();
+            if (estimatedChars / 2 > MAX_TOKENS_ESTIMATE / 2) break;
+            truncated.add(0, msg);
+        }
+        for (ChatMessage msg : truncated) {
+            String prefix = "user".equals(msg.getRole()) ? "用户：" : "助手：";
+            sb.append(prefix).append(msg.getContent()).append("\n\n");
+        }
+        return sb.toString();
+    }
+
+    private String toSourcesJson(List<ChatResponse.SourceDetail> sourceDetails) {
+        try {
+            return objectMapper.writeValueAsString(sourceDetails);
+        } catch (JsonProcessingException e) {
+            log.warn("序列化 sources 失败: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
     private String buildContext(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> "【来源:" + r.fileName() +
@@ -167,7 +265,6 @@ public class ChatServiceImpl implements IChatService {
                 .collect(Collectors.joining("\n\n---\n\n"));
     }
 
-    // 提取去重后的来源列表（文件名 > 标题路径）
     private List<String> extractSources(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> r.fileName() +
@@ -176,7 +273,6 @@ public class ChatServiceImpl implements IChatService {
                 .collect(Collectors.toList());
     }
 
-    // 提取来源详情（含 chunkId、documentId 等，供前端展示）
     private List<ChatResponse.SourceDetail> extractSourceDetails(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> ChatResponse.SourceDetail.builder()
@@ -189,18 +285,17 @@ public class ChatServiceImpl implements IChatService {
                 .collect(Collectors.toList());
     }
 
-    // 将上下文和问题填入 RAG 系统 Prompt 模板
-    private Prompt buildPrompt(String context, String question) {
+    private Prompt buildPrompt(String historyText, String context, String question) {
         PromptTemplate promptTemplate = PromptTemplate.from(RagParameters.SYSTEM_PROMPT);
 
         Map<String, Object> variables = new HashMap<>();
+        variables.put("history", historyText);
         variables.put("context", context);
         variables.put("question", question);
 
         return promptTemplate.apply(variables);
     }
 
-    // 记录用户查询活动日志，失败不影响主流程
     private void recordActivityLog(Integer userId, int sourceCount) {
         try {
             activityLogMapper.insert(ActivityLog.builder()
@@ -226,7 +321,6 @@ public class ChatServiceImpl implements IChatService {
         return currentId.intValue();
     }
 
-    // 截断长文本，用于日志输出
     private static String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";

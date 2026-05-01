@@ -19,7 +19,9 @@ public class ChatResponse {
 
     private List<SourceDetail> sourceDetails;
 
-    private String sessionId;
+    private Integer sessionId;
+
+    private Integer messageId;
 
     @Data
     @Builder

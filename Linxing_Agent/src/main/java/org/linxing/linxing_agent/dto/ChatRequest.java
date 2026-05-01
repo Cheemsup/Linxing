@@ -17,8 +17,9 @@ public class ChatRequest {
     @Size(max = 2000, message = "问题长度不能超过2000个字符")
     private String question;
 
-    @Size(max = 100, message = "会话ID长度不能超过100个字符")
-    private String sessionId;
+    private Integer sessionId;
+
+    private Integer parentMessageId;
 
     private Integer userId;
 }

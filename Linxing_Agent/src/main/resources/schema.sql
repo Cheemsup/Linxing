@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
+COMMENT ON TABLE users IS '系统用户';
+COMMENT ON COLUMN users.id IS '用户唯一ID';
+COMMENT ON COLUMN users.username IS '登录用户名';
+COMMENT ON COLUMN users.password_hash IS '密码哈希值';
+COMMENT ON COLUMN users.created_at IS '账户创建时间';
+
 -- =============================================
 -- 2. 文档表 documents
 -- =============================================
@@ -36,6 +42,17 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS idx_documents_user_status ON documents(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
+
+COMMENT ON TABLE documents IS '原始文档元信息';
+COMMENT ON COLUMN documents.id IS '文档唯一ID';
+COMMENT ON COLUMN documents.user_id IS '所属用户ID';
+COMMENT ON COLUMN documents.file_name IS '文件名';
+COMMENT ON COLUMN documents.file_path IS '文件存储路径';
+COMMENT ON COLUMN documents.file_size IS '文件大小（字节）';
+COMMENT ON COLUMN documents.file_type IS '文件类型，如 docx, pdf, markdown, txt';
+COMMENT ON COLUMN documents.status IS '处理状态：processing/completed/failed';
+COMMENT ON COLUMN documents.chunk_strategy IS '文档最终采用的分块策略';
+COMMENT ON COLUMN documents.created_at IS '上传时间';
 
 -- =============================================
 -- 3. 分块索引表 chunks（核心关联表，支持分层 Small-to-Big 检索）
@@ -66,6 +83,21 @@ CREATE INDEX IF NOT EXISTS idx_chunks_type ON chunks(chunk_type);
 CREATE INDEX IF NOT EXISTS idx_chunks_source_strategy ON chunks(source_strategy);
 CREATE INDEX IF NOT EXISTS idx_chunks_ts_content ON chunks USING GIN (ts_content);
 
+COMMENT ON TABLE chunks IS '文档切片表（chunk），支持分层、Small-to-Big检索和全文检索';
+COMMENT ON COLUMN chunks.id IS 'chunk唯一ID';
+COMMENT ON COLUMN chunks.user_id IS '所属用户ID';
+COMMENT ON COLUMN chunks.document_id IS '所属文档ID';
+COMMENT ON COLUMN chunks.parent_chunk_id IS '父chunk ID，用于Small-to-Big';
+COMMENT ON COLUMN chunks.chunk_level IS '层级：1=大粒度块，2=小粒度检索块';
+COMMENT ON COLUMN chunks.chunk_text IS 'chunk的原始文本型内容';
+COMMENT ON COLUMN chunks.chunk_type IS '块类型：general, section, qa_pair, context_weak, code, table 等';
+COMMENT ON COLUMN chunks.title_path IS '标题路径，如"项目Alpha > 2025-01 会议 > 决策"，用于增强语义和前端展示';
+COMMENT ON COLUMN chunks.context_prefix IS '为弱上下文块生成的背景描述文本，检索时拼接到向量化文本前';
+COMMENT ON COLUMN chunks.source_strategy IS '该块的生成策略名称';
+COMMENT ON COLUMN chunks.is_searchable IS '是否参与向量检索（仅小粒度块为true）';
+COMMENT ON COLUMN chunks.ts_content IS '全文检索向量，由chunk_text使用to_tsvector生成';
+COMMENT ON COLUMN chunks.created_at IS '创建时间';
+
 -- =============================================
 -- 4. 向量存储表 embeddings（pgvector 核心表）
 -- =============================================
@@ -88,6 +120,15 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
 CREATE INDEX IF NOT EXISTS idx_embeddings_meta_chunk_type ON embeddings(((metadata ->> 'chunk_type')));
 CREATE INDEX IF NOT EXISTS idx_embeddings_meta_parent_id ON embeddings(((metadata ->> 'parent_chunk_id')));
 
+COMMENT ON TABLE embeddings IS '向量存储，映射chunks表';
+COMMENT ON COLUMN embeddings.id IS '自增主键ID';
+COMMENT ON COLUMN embeddings.user_id IS '所属用户ID（冗余，便于按用户过滤）';
+COMMENT ON COLUMN embeddings.document_id IS '所属文档ID';
+COMMENT ON COLUMN embeddings.chunk_id IS '关联的chunk ID，一对一关系';
+COMMENT ON COLUMN embeddings.embedding IS '向量数据，pgvector类型';
+COMMENT ON COLUMN embeddings.text IS '可空；实际输入embedding模型的文本，调试使用';
+COMMENT ON COLUMN embeddings.metadata IS '冗余存储的chunk元数据，用于快速过滤：包含parent_chunk_id, chunk_type, title_path, strategy等';
+
 -- =============================================
 -- 5. 操作日志表 activity_logs
 -- =============================================
@@ -103,6 +144,15 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_user_time ON activity_logs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_action_date ON activity_logs(action_type, created_at);
+
+COMMENT ON TABLE activity_logs IS '用户操作日志，用于审计和检索质量分析';
+COMMENT ON COLUMN activity_logs.id IS '日志ID';
+COMMENT ON COLUMN activity_logs.user_id IS '用户ID';
+COMMENT ON COLUMN activity_logs.action_type IS '操作类型：upload/query/delete';
+COMMENT ON COLUMN activity_logs.target_type IS '操作目标类型：document/chunk';
+COMMENT ON COLUMN activity_logs.target_id IS '操作目标ID';
+COMMENT ON COLUMN activity_logs.details IS '操作详情（JSON），记录策略、耗时、召回结果等';
+COMMENT ON COLUMN activity_logs.created_at IS '操作时间';
 
 -- =============================================
 -- 6、聊天会话表 chat_sessions

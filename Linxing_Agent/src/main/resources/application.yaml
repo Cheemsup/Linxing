@@ -10,9 +10,9 @@ spring:
       max-request-size: 50MB
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://127.0.0.1:5432/vectordb
-    username: postgres
-    password: ${DB_PASSWORD:}
+    url: jdbc:postgresql://${PG_HOST}:${PG_PORT}/${PG_DATABASE}
+    username: ${PG_USER}
+    password: ${PG_PASSWORD}
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -25,20 +25,48 @@ server:
   port: 8080
 
 rag:
+  store-path: ${RAG_STORE_PATH}
   vector-store:
+    host: ${RAG_VECTOR_HOST}
+    port: ${RAG_VECTOR_PORT}
+    database: ${RAG_VECTOR_DATABASE}
+    user: ${RAG_VECTOR_USER}
+    password: ${RAG_VECTOR_PASSWORD}
     table: embeddings
     dimension: 512
   llm:
-    provider: minimax
-    model: MiniMax-M2.7
+    default-provider: ${LLM_DEFAULT_PROVIDER}
     temperature: 0.3
     timeout-seconds: 60
     max-tokens: 2048
+    providers:
+      minimax:
+        model: ${MINIMAX_MODEL}
+        api-key: ${MINIMAX_API_KEY}
+        base-url: ${MINIMAX_BASE_URL}
+        group-id: ${MINIMAX_GROUP_ID}
+      deepseek:
+        model: ${DEEPSEEK_MODEL}
+        api-key: ${DEEPSEEK_API_KEY}
+        base-url: ${DEEPSEEK_BASE_URL}
+      glm:
+        model: ${GLM_MODEL}
+        api-key: ${GLM_API_KEY}
+        base-url: ${GLM_BASE_URL}
+      kimi:
+        model: ${KIMI_MODEL}
+        api-key: ${KIMI_API_KEY}
+        base-url: ${KIMI_BASE_URL}
   reranker:
     enabled: true
     batch-size: 8
     model-path: classpath:models/ms-marco-MiniLM-L-6-v2/model.onnx
     tokenizer-path: classpath:models/ms-marco-MiniLM-L-6-v2/tokenizer.json
+
+jwt:
+  secret-key: ${JWT_SECRET_KEY}
+  ttl: ${JWT_TTL}
+  token-name: ${JWT_TOKEN_NAME}
 
 logging:
   level:

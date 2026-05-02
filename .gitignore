@@ -49,10 +49,18 @@ Desktop.ini
 
 # ==================== 项目数据（不上传）====================
 files_store/
-models/
 
-# ==================== Linxing_Agent 模型文件（不上传）====================
-Linxing_Agent/src/main/resources/models/
+# ==================== NetBeans / Gradle ====================
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ==================== 参考资料 ====================
+reference/TODOS/
 
 # ==================== 其他 ====================
 *.class
@@ -61,3 +69,4 @@ Linxing_Agent/src/main/resources/models/
 *.ear
 *.bak
 *.tmp
+*.orig

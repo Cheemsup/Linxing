@@ -25,6 +25,7 @@
             <div
               class="tree-custom-node"
               :class="nodeClass(data.nodeId)"
+              :title="data.fullContent"
               @click.stop="handleNodeClick(data)"
             >
               {{ data.label }}
@@ -81,7 +82,8 @@ export default {
       const mapNode = (node) => {
         const mapped = {
           label: this.truncateLabel(node.content || ''),
-          nodeId: node.id
+          nodeId: node.id,
+          fullContent: node.content || ''
         }
         if (node.children && node.children.length > 0) {
           mapped.children = node.children.map(mapNode)

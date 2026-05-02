@@ -33,11 +33,6 @@
           请从左侧选择一个会话，或点击"+ 新对话"开始
         </div>
 
-        <div v-if="chatTreeStore.state.branchParentId" class="branch-banner">
-          正在从选定消息分支提问
-          <button class="branch-cancel" @click="cancelBranch">取消分支</button>
-        </div>
-
         <template v-for="item in allMessages" :key="item.id">
           <div class="message-row">
             <div :class="['message', item.role]">
@@ -67,9 +62,10 @@
                 </div>
               </div>
               <div v-if="item.role === 'user'" class="message-actions">
-                <button class="action-btn" @click="reAsk(item.content)" title="编辑并重新提问">重新提问</button>
+                <button class="action-btn" @click="reAsk(item.id, item.content)" title="从此处分支并重新提问">重新提问</button>
                 <button class="action-btn" @click="branchFrom(item.id)" title="从此处重新提问">分支</button>
                 <button class="action-btn action-delete" @click="handleDeleteSubtree(item.id)" title="删除此分支">删除</button>
+                <button v-if="item.id === chatTreeStore.state.branchParentId" class="action-btn action-cancel-branch" @click="cancelBranch" title="取消从此处分支">取消分支</button>
               </div>
             </div>
           </div>
@@ -103,8 +99,12 @@
           placeholder="输入你的问题，例如：我的笔记中关于XXX的内容是什么？"
           rows="3"
         ></textarea>
-        <button @click="sendQuestion" :disabled="loading || !question.trim()">
-          {{ loading ? '发送中...' : (chatTreeStore.state.branchParentId ? '发送分支' : '发送') }}
+        <button
+          @click="sendQuestion"
+          :disabled="loading || !question.trim()"
+          :class="chatTreeStore.state.branchParentId ? 'btn-send-branch' : ''"
+        >
+          {{ loading ? '发送中...' : (chatTreeStore.state.branchParentId ? '发送新分支消息' : '发送') }}
         </button>
       </div>
     </div>
@@ -184,27 +184,40 @@ export default {
         return result
       }
       const roots = this.messageTree
+
+      const containsLeaf = (node) => {
+        if (node.id === activeLeafId) return true
+        if (node.children && node.children.length) {
+          return node.children.some(child => containsLeaf(child))
+        }
+        return false
+      }
+
       const walk = (node) => {
         const enriched = { ...node, sourceDetails: this.parseSourceDetails(node.sources) }
         result.push(enriched)
         if (node.id === activeLeafId) {
-          return true
+          return
         }
         if (node.children && node.children.length) {
-          for (const child of node.children) {
-            if (walk(child)) {
-              return true
+          const activeChild = node.children.find(c => containsLeaf(c))
+          if (activeChild) {
+            for (const child of node.children) {
+              if (child !== activeChild && child.role === 'assistant') {
+                const enrichedSibling = { ...child, sourceDetails: this.parseSourceDetails(child.sources) }
+                result.push(enrichedSibling)
+              }
             }
+            walk(activeChild)
           }
         }
-        result.pop()
-        return false
       }
+
       for (const root of roots) {
-        if (walk(root)) {
+        if (containsLeaf(root)) {
+          walk(root)
           break
         }
-        result.length = 0
       }
       return result
     },
@@ -409,7 +422,8 @@ export default {
       this.showTreeModal = false
       this.$nextTick(() => this.scrollToBottom())
     },
-    reAsk(content) {
+    reAsk(messageId, content) {
+      chatTreeStore.setBranchParent(messageId)
       this.question = content
       this.$nextTick(() => {
         const textarea = this.$el.querySelector('.chat-input textarea')
@@ -609,34 +623,6 @@ export default {
   font-size: 14px;
 }
 
-.branch-banner {
-  background: #fff3e0;
-  border: 1px solid #ffcc80;
-  border-radius: 6px;
-  padding: 8px 14px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  color: #e65100;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.branch-cancel {
-  background: none;
-  border: 1px solid #e65100;
-  color: #e65100;
-  padding: 2px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.branch-cancel:hover {
-  background: #e65100;
-  color: white;
-}
-
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -754,6 +740,17 @@ export default {
   background: #ffebee;
 }
 
+.action-cancel-branch {
+  color: #e65100;
+  border-color: #e65100;
+}
+
+.action-cancel-branch:hover {
+  background: #fff3e0;
+  color: #e65100;
+  border-color: #e65100;
+}
+
 .chat-input {
   display: flex;
   gap: 12px;
@@ -780,6 +777,15 @@ export default {
 }
 
 .chat-input button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.chat-input .btn-send-branch {
+  background: #e65100;
+}
+
+.chat-input .btn-send-branch:disabled {
   background: #ccc;
   cursor: not-allowed;
 }

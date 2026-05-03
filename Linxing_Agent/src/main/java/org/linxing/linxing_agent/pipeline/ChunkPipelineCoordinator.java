@@ -87,13 +87,18 @@ public class ChunkPipelineCoordinator {
             return 0;
         }
 
+        // Pre-pass: 按 results 列表顺序（文档原始顺序）为所有 result 预分配全局 sort_order
+        Map<Integer, Integer> resultIndexToSortOrder = new LinkedHashMap<>();
+        for (int i = 0; i < results.size(); i++) {
+            resultIndexToSortOrder.put(i, i + 1);
+        }
+
         // Pass 1: 先将所有 ChunkLevel=1（大分块）插入到数据库
-        int sortOrderCounter = 1;
         Map<Integer, Integer> resultIndexToDbId = new LinkedHashMap<>();
         for (int i = 0; i < results.size(); i++) {
             ChunkResult r = results.get(i);
             if (r.getChunkLevel() != null && r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1) {
-                Chunk chunk = buildChunk(r, doc, null, sortOrderCounter++);
+                Chunk chunk = buildChunk(r, doc, null, resultIndexToSortOrder.get(i));
                 chunkMapper.insert(chunk);
                 resultIndexToDbId.put(i, chunk.getId());
             }
@@ -103,7 +108,7 @@ public class ChunkPipelineCoordinator {
         List<Chunk> allChunks = new ArrayList<>();
 
         for (Map.Entry<Integer, Integer> entry : resultIndexToDbId.entrySet()) {
-            Chunk chunk = buildChunk(results.get(entry.getKey()), doc, null, sortOrderCounter++);
+            Chunk chunk = buildChunk(results.get(entry.getKey()), doc, null, resultIndexToSortOrder.get(entry.getKey()));
             chunk.setId(entry.getValue());
             allChunks.add(chunk);
         }
@@ -113,7 +118,7 @@ public class ChunkPipelineCoordinator {
             if (r.getChunkLevel() == null || r.getChunkLevel() != RagParameters.CHUNK_LEVEL_1) {
                 Integer parentDbId = (r.getParentChunkId() != null)
                         ? resultIndexToDbId.get(r.getParentChunkId()) : null;
-                Chunk chunk = buildChunk(r, doc, parentDbId, sortOrderCounter++);
+                Chunk chunk = buildChunk(r, doc, parentDbId, resultIndexToSortOrder.get(i));
                 chunkMapper.insert(chunk);
                 allChunks.add(chunk);
             }

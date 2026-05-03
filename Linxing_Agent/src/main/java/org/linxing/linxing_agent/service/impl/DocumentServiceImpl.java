@@ -219,28 +219,35 @@ public class DocumentServiceImpl implements IDocumentService {
                 .collect(Collectors.toList());
 
         List<ChunkTreeVO> tree = new ArrayList<>();
+        int level1Idx = 0;
         for (Chunk level1 : level1Chunks) {
-            ChunkTreeVO node = toChunkTreeVO(level1);
+            ChunkTreeVO node = toChunkTreeVO(level1, ++level1Idx);
             List<Chunk> children = childrenMap.getOrDefault(level1.getId(), List.of());
-            node.setChildren(children.stream()
-                    .map(this::toChunkTreeVO)
-                    .collect(Collectors.toList()));
+            List<ChunkTreeVO> childVOs = new ArrayList<>();
+            int childIdx = 0;
+            for (Chunk child : children) {
+                childVOs.add(toChunkTreeVO(child, ++childIdx));
+            }
+            node.setChildren(childVOs);
             tree.add(node);
         }
 
         if (level1Chunks.isEmpty() && !allChunks.isEmpty()) {
-            return allChunks.stream()
-                    .map(this::toChunkTreeVO)
-                    .collect(Collectors.toList());
+            List<ChunkTreeVO> flatTree = new ArrayList<>();
+            int flatIdx = 0;
+            for (Chunk c : allChunks) {
+                flatTree.add(toChunkTreeVO(c, ++flatIdx));
+            }
+            return flatTree;
         }
 
         return tree;
     }
 
-    private ChunkTreeVO toChunkTreeVO(Chunk chunk) {
+    private ChunkTreeVO toChunkTreeVO(Chunk chunk, int siblingIndex) {
         String preview = chunk.getChunkText();
-        if (preview != null && preview.length() > 200) {
-            preview = preview.substring(0, 200) + "...";
+        if (preview != null && preview.length() > 8000) {
+            preview = preview.substring(0, 8000) + "...";
         }
         return ChunkTreeVO.builder()
                 .chunkId(chunk.getId())
@@ -248,6 +255,7 @@ public class DocumentServiceImpl implements IDocumentService {
                 .chunkLevel(chunk.getChunkLevel())
                 .chunkType(chunk.getChunkType())
                 .textPreview(preview)
+                .siblingIndex(siblingIndex)
                 .children(List.of())
                 .build();
     }

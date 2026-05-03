@@ -1,5 +1,7 @@
 <template>
-  <div class="tree-node">
+  <div
+    :class="['tree-node', { dimmed: activeTypeFilter && node.chunkType !== activeTypeFilter }]"
+  >
     <div
       :class="['node-content', { selected: selectedChunkId === node.chunkId }]"
       @click="handleClick"
@@ -10,6 +12,7 @@
         @click.stop="toggleExpand"
       >▶</span>
       <span v-else class="expand-placeholder"></span>
+      <span class="sibling-index">{{ node.siblingIndex }}</span>
       <span :class="['chunk-type-badge', node.chunkType]">{{ getTypeLabel(node.chunkType) }}</span>
       <span class="node-title" :title="node.titlePath || node.textPreview">
         {{ node.titlePath || truncateText(node.textPreview, 40) }}
@@ -21,6 +24,8 @@
         :key="child.chunkId"
         :node="child"
         :selected-chunk-id="selectedChunkId"
+        :active-type-filter="activeTypeFilter"
+        :document-id="documentId"
         @select="$emit('select', $event)"
       />
     </div>
@@ -38,6 +43,14 @@ export default {
     selectedChunkId: {
       type: Number,
       default: null
+    },
+    activeTypeFilter: {
+      type: String,
+      default: null
+    },
+    documentId: {
+      type: Number,
+      default: null
     }
   },
   emits: ['select'],
@@ -49,14 +62,50 @@ export default {
   computed: {
     hasChildren() {
       return this.node.children && this.node.children.length > 0
+    },
+    storageKey() {
+      return `chunk-tree-state:${this.documentId}`
     }
   },
+  mounted() {
+    this.restoreState()
+  },
   methods: {
+    getCollapsedSet() {
+      try {
+        const raw = localStorage.getItem(this.storageKey)
+        return raw ? new Set(JSON.parse(raw)) : new Set()
+      } catch {
+        return new Set()
+      }
+    },
+    saveCollapsedSet(set) {
+      try {
+        localStorage.setItem(this.storageKey, JSON.stringify([...set]))
+      } catch {
+        // ignore quota errors
+      }
+    },
+    restoreState() {
+      if (this.hasChildren) {
+        const collapsedSet = this.getCollapsedSet()
+        this.isExpanded = !collapsedSet.has(this.node.chunkId)
+      }
+    },
     handleClick() {
       this.$emit('select', this.node)
     },
     toggleExpand() {
       this.isExpanded = !this.isExpanded
+      if (this.documentId != null) {
+        const collapsedSet = this.getCollapsedSet()
+        if (this.isExpanded) {
+          collapsedSet.delete(this.node.chunkId)
+        } else {
+          collapsedSet.add(this.node.chunkId)
+        }
+        this.saveCollapsedSet(collapsedSet)
+      }
     },
     getTypeLabel(type) {
       const map = {
@@ -80,6 +129,10 @@ export default {
 <style scoped>
 .tree-node {
   font-size: 13px;
+}
+
+.tree-node.dimmed > .node-content {
+  opacity: 0.3;
 }
 
 .node-content {
@@ -119,6 +172,15 @@ export default {
   flex-shrink: 0;
 }
 
+.sibling-index {
+  color: #bbb;
+  font-size: 11px;
+  font-weight: 500;
+  min-width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 .chunk-type-badge {
   padding: 1px 6px;
   border-radius: 3px;
@@ -155,16 +217,5 @@ export default {
 .chunk-type-badge.context_weak {
   background: #fce4ec;
   color: #c62828;
-}
-
-.node-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #333;
-}
-
-.node-children {
-  padding-left: 16px;
 }
 </style>

@@ -23,5 +23,7 @@ public class ChunkTreeVO {
 
     private String textPreview;
 
+    private Integer siblingIndex;
+
     private List<ChunkTreeVO> children;
 }

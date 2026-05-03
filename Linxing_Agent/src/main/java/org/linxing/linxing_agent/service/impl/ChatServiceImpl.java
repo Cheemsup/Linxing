@@ -70,13 +70,7 @@ public class ChatServiceImpl implements IChatService {
 
             Integer sessionId = resolveSession(userId, request.getSessionId());
 
-            Integer parentId;
-            if (request.getParentMessageId() != null) {
-                parentId = request.getParentMessageId();
-            } else {
-                ChatMessage latestMsg = chatMessageMapper.selectLatestBySessionId(sessionId);
-                parentId = (latestMsg != null) ? latestMsg.getParentId() : null;
-            }
+            Integer parentId = request.getParentMessageId();
 
             ChatMessage userMsg = ChatMessage.builder()
                     .userId(userId)

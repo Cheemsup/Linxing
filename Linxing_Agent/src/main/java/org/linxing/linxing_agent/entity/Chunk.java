@@ -41,5 +41,7 @@ public class Chunk {
 
     private String tsContent;
 
+    private Integer sortOrder;
+
     private OffsetDateTime createdAt;
 }

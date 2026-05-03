@@ -328,10 +328,18 @@ export default {
       this.$nextTick(() => this.scrollToBottom())
 
       try {
+        let parentMessageId
+        if (chatTreeStore.state.branchParentId) {
+          const map = chatTreeStore.getMessageMap()
+          const branchNode = map.get(chatTreeStore.state.branchParentId)
+          parentMessageId = branchNode ? branchNode.parentId : null
+        } else {
+          parentMessageId = chatTreeStore.state.activeLeafId
+        }
         const response = await ragApi.chat({
           question: q,
           sessionId: this.activeSessionId,
-          parentMessageId: chatTreeStore.state.branchParentId || chatTreeStore.state.activeLeafId
+          parentMessageId: parentMessageId
         })
         const data = response.data.data || response.data
 

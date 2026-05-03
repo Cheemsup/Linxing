@@ -16,22 +16,23 @@
         <result column="source_strategy" property="sourceStrategy"/>
         <result column="is_searchable" property="isSearchable"/>
         <result column="ts_content" property="tsContent"/>
+        <result column="sort_order" property="sortOrder"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <sql id="BaseColumnList">
         id, user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
         chunk_type, title_path, context_prefix, source_strategy,
-        is_searchable, ts_content, created_at
+        is_searchable, ts_content, sort_order, created_at
     </sql>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO chunks (user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
                             chunk_type, title_path, context_prefix, source_strategy,
-                            is_searchable)
+                            is_searchable, sort_order)
         VALUES (#{userId}, #{documentId}, #{parentChunkId}, #{chunkLevel}, #{chunkText},
                 #{chunkType}, #{titlePath}, #{contextPrefix}, #{sourceStrategy},
-                #{isSearchable})
+                #{isSearchable}, #{sortOrder})
     </insert>
 
     <select id="findById" resultMap="BaseResultMap">
@@ -91,14 +92,14 @@
         SELECT <include refid="BaseColumnList"/>
         FROM chunks
         WHERE parent_chunk_id = #{parentChunkId}
-        ORDER BY id ASC
+        ORDER BY sort_order ASC
     </select>
 
     <select id="findByDocumentIdOrdered" resultMap="BaseResultMap">
         SELECT <include refid="BaseColumnList"/>
         FROM chunks
         WHERE document_id = #{documentId}
-        ORDER BY chunk_level ASC, parent_chunk_id ASC, id ASC
+        ORDER BY sort_order ASC
     </select>
 
     <select id="bm25Search" resultType="org.linxing.linxing_agent.entity.Bm25SearchResult">

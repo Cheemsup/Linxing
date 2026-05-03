@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     source_strategy VARCHAR(50),
     is_searchable   BOOLEAN DEFAULT TRUE,
     ts_content      TSVECTOR,
+    sort_order      INTEGER,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT chunks_document_id_fkey FOREIGN KEY(document_id) REFERENCES documents(id),
     CONSTRAINT chunks_parent_chunk_id_fkey FOREIGN KEY(parent_chunk_id) REFERENCES chunks(id)
@@ -82,6 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_level ON chunks(chunk_level);
 CREATE INDEX IF NOT EXISTS idx_chunks_type ON chunks(chunk_type);
 CREATE INDEX IF NOT EXISTS idx_chunks_source_strategy ON chunks(source_strategy);
 CREATE INDEX IF NOT EXISTS idx_chunks_ts_content ON chunks USING GIN (ts_content);
+CREATE INDEX IF NOT EXISTS idx_chunks_document_sort ON chunks(document_id, sort_order);
 
 COMMENT ON TABLE chunks IS '文档切片表（chunk），支持分层、Small-to-Big检索和全文检索';
 COMMENT ON COLUMN chunks.id IS 'chunk唯一ID';
@@ -96,6 +98,7 @@ COMMENT ON COLUMN chunks.context_prefix IS '为弱上下文块生成的背景描
 COMMENT ON COLUMN chunks.source_strategy IS '该块的生成策略名称';
 COMMENT ON COLUMN chunks.is_searchable IS '是否参与向量检索（仅小粒度块为true）';
 COMMENT ON COLUMN chunks.ts_content IS '全文检索向量，由chunk_text使用to_tsvector生成';
+COMMENT ON COLUMN chunks.sort_order IS '同一文档内 chunk 的全局排序序号，保证与原始文档内容顺序一致';
 COMMENT ON COLUMN chunks.created_at IS '创建时间';
 
 -- =============================================

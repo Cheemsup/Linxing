@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -88,36 +88,32 @@ public class ChunkPipelineCoordinator {
         }
 
         // Pass 1: 先将所有 ChunkLevel=1（大分块）插入到数据库
-        Map<Integer, Integer> resultIndexToDbId = new HashMap<>();
+        int sortOrderCounter = 1;
+        Map<Integer, Integer> resultIndexToDbId = new LinkedHashMap<>();
         for (int i = 0; i < results.size(); i++) {
             ChunkResult r = results.get(i);
             if (r.getChunkLevel() != null && r.getChunkLevel() == RagParameters.CHUNK_LEVEL_1) {
-                Chunk chunk = buildChunk(r, doc, null);
+                Chunk chunk = buildChunk(r, doc, null, sortOrderCounter++);
                 chunkMapper.insert(chunk);
-                resultIndexToDbId.put(i, chunk.getId());//记录大块的数据库ID，后续要根据大块ID来关联小块
+                resultIndexToDbId.put(i, chunk.getId());
             }
         }
 
         // Pass 2: 插入所有 ChunkLevel=2（小分块），并收集所有分块
         List<Chunk> allChunks = new ArrayList<>();
 
-        // 循环A: 将已入库的 Level 1 大块重建为 Chunk 对象并收集（注意results中的对象是不能够直接传入后续的Pass3，此处进行对象重建）
-        // 目的: 让 Level 1 也能进入 Pass 3 的流水线处理（生成 tsContent、分类等）
         for (Map.Entry<Integer, Integer> entry : resultIndexToDbId.entrySet()) {
-            Chunk chunk = buildChunk(results.get(entry.getKey()), doc, null);
+            Chunk chunk = buildChunk(results.get(entry.getKey()), doc, null, sortOrderCounter++);
             chunk.setId(entry.getValue());
             allChunks.add(chunk);
         }
 
-        // 循环B: 插入 Level 2 小块，并将逻辑 parentId 转换为真实 DB ID
-        // 目的: 建立父子关系（外键约束），同时收集到 allChunks
         for (int i = 0; i < results.size(); i++) {
             ChunkResult r = results.get(i);
             if (r.getChunkLevel() == null || r.getChunkLevel() != RagParameters.CHUNK_LEVEL_1) {
-                // 将 results 中的索引位置（如 0, 3）映射为真实的数据库 ID（如 101, 105）
                 Integer parentDbId = (r.getParentChunkId() != null)
                         ? resultIndexToDbId.get(r.getParentChunkId()) : null;
-                Chunk chunk = buildChunk(r, doc, parentDbId);
+                Chunk chunk = buildChunk(r, doc, parentDbId, sortOrderCounter++);
                 chunkMapper.insert(chunk);
                 allChunks.add(chunk);
             }
@@ -187,7 +183,7 @@ public class ChunkPipelineCoordinator {
                 .build());
     }
 
-    private Chunk buildChunk(ChunkResult r, DocRecord doc, Integer parentDbId) {
+    private Chunk buildChunk(ChunkResult r, DocRecord doc, Integer parentDbId, int sortOrder) {
         return Chunk.builder()
                 .userId(doc.getUserId())
                 .documentId(doc.getId())
@@ -198,6 +194,7 @@ public class ChunkPipelineCoordinator {
                 .titlePath(r.getTitlePath())
                 .sourceStrategy(r.getSourceStrategy())
                 .isSearchable(r.getChunkLevel() == null || r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2)
+                .sortOrder(sortOrder)
                 .createdAt(OffsetDateTime.now())
                 .build();
     }

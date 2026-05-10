@@ -77,6 +77,11 @@ rag:
   cache:
     doc-preview-ttl: ${RAG_CACHE_DOC_PREVIEW_TTL:3600}
     session-messages-ttl: ${RAG_CACHE_SESSION_MSGS_TTL:1800}
+    semantic-cache:
+      enabled: ${RAG_SEMANTIC_CACHE_ENABLED:true}
+      threshold: ${RAG_SEMANTIC_CACHE_THRESHOLD:0.95}
+      quota-per-user: ${RAG_SEMANTIC_CACHE_QUOTA:100}
+      quantization: ${RAG_SEMANTIC_CACHE_QUANT:NOQUANT}
 
 jwt:
   secret-key: ${JWT_SECRET_KEY}

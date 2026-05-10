@@ -77,7 +77,16 @@ public class RagProperties {
 
     @Data
     public static class Cache {
-        private int docPreviewTtl = RagParameters.CACHE_DOC_PREVIEW_TTL;
-        private int sessionMessagesTtl = RagParameters.CACHE_SESSION_MESSAGES_TTL;
+        private int docPreviewTtl;
+        private int sessionMessagesTtl;
+        private SemanticCache semanticCache = new SemanticCache();
+    }
+
+    @Data
+    public static class SemanticCache {
+        private boolean enabled;
+        private double threshold;
+        private int quotaPerUser;
+        private String quantization;
     }
 }

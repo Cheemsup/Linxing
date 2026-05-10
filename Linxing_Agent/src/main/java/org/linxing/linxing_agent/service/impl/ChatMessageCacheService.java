@@ -1,7 +1,5 @@
 package org.linxing.linxing_agent.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.config.RagProperties;
@@ -9,6 +7,7 @@ import org.linxing.linxing_agent.constant.RedisKeysPrefix;
 import org.linxing.linxing_agent.vo.ChatMessageVO;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,7 +36,7 @@ public class ChatMessageCacheService {
                 try {
                     ChatMessageVO vo = objectMapper.readValue((String) entry.getValue(), ChatMessageVO.class);
                     result.add(vo);
-                } catch (JsonProcessingException e) {
+                } catch (Exception e) {
                     log.warn("反序列化缓存消息失败, msgId={}: {}", entry.getKey(), e.getMessage());
                 }
             }

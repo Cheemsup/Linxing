@@ -1,6 +1,5 @@
 package org.linxing.linxing_agent.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -21,6 +20,7 @@ import org.linxing.linxing_agent.service.IDocumentService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -43,6 +43,7 @@ public class DocumentServiceImpl implements IDocumentService {
     private final StringRedisTemplate stringRedisTemplate;
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
+    private final SemanticCacheService semanticCacheService;
 
     @Override
     public PageResult<DocumentVO> listDocuments(Integer userId, int page, int size) {
@@ -82,6 +83,8 @@ public class DocumentServiceImpl implements IDocumentService {
         chunkPipelineCoordinator.deleteByDocumentId(userId, id);
 
         evictPreviewCache(id);
+
+        semanticCacheService.clearUserCache(userId);
 
         try {
             Path filePath = Paths.get(record.getFilePath());

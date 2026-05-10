@@ -35,6 +35,7 @@ public class IngestServiceImpl implements IIngestService {
     private final ChunkPipelineCoordinator chunkPipelineCoordinator;
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
+    private final SemanticCacheService semanticCacheService;
 
     @Override
     @Transactional
@@ -75,6 +76,8 @@ public class IngestServiceImpl implements IIngestService {
             document.metadata().put("stored_path", storedFile.toString());
 
             int chunksCount = chunkPipelineCoordinator.processDocument(docRecord, document.text(), document);//根据策略选择器+责任链，对文档进行切分、向量化和持久化
+
+            semanticCacheService.clearUserCache(userId);
 
             return IngestResponse.builder()
                     .success(true)

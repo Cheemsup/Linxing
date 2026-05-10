@@ -1,7 +1,5 @@
 package org.linxing.linxing_agent.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.input.Prompt;
@@ -36,6 +34,7 @@ import org.linxing.linxing_agent.utils.Reranker;
 import org.linxing.linxing_agent.vo.ChatMessageVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -63,6 +62,7 @@ public class ChatServiceImpl implements IChatService {
     private final RagProperties ragProperties;
     private final Reranker reranker;
     private final ChatMessageCacheService chatMessageCacheService;
+    private final SemanticCacheService semanticCacheService;
 
     @Override
     public ChatResponse chat(ChatRequest request) {
@@ -93,6 +93,58 @@ public class ChatServiceImpl implements IChatService {
 
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();
             String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
+
+            SemanticCacheService.CacheResult cacheResult =
+                    semanticCacheService.lookup(userId, queryEmbedding.vector());
+
+            if (cacheResult.isHit()) {
+                SemanticCacheService.CacheEntry cached = cacheResult.getEntry();
+
+                List<ChatResponse.SourceDetail> cachedSourceDetails = List.of();
+                try {
+                    cachedSourceDetails = objectMapper.readValue(
+                            cached.getSources(),
+                            objectMapper.getTypeFactory().constructCollectionType(
+                                    List.class, ChatResponse.SourceDetail.class));
+                } catch (Exception e) {
+                    log.warn("[语义缓存] 反序列化sources失败: {}", e.getMessage());
+                }
+
+                List<String> cachedSources = cachedSourceDetails.stream()
+                        .map(sd -> sd.getFileName() +
+                                (sd.getTitlePath() != null ? " > " + sd.getTitlePath() : ""))
+                        .distinct()
+                        .collect(Collectors.toList());
+
+                ChatMessage assistantMsg = ChatMessage.builder()
+                        .userId(userId)
+                        .sessionId(sessionId)
+                        .parentId(userMsg.getId())
+                        .role("assistant")
+                        .content(cached.getAnswer())
+                        .sources(cached.getSources())
+                        .build();
+                chatMessageMapper.insert(assistantMsg);
+
+                chatMessageCacheService.appendMessages(sessionId, List.of(
+                        toMessageVO(userMsg),
+                        toMessageVO(assistantMsg)
+                ));
+
+                chatSessionMapper.updateUpdatedAt(sessionId);
+
+                recordActivityLog(userId, cachedSourceDetails.size());
+
+                log.info("[用户{}] 语义缓存命中，跳过RAG流程，score={}", userId, cacheResult.getScore());
+
+                return ChatResponse.builder()
+                        .answer(cached.getAnswer())
+                        .sources(cachedSources)
+                        .sourceDetails(cachedSourceDetails)
+                        .sessionId(sessionId)
+                        .messageId(assistantMsg.getId())
+                        .build();
+            }
 
             int recallSize = ragProperties.getSearch().getRecallSize();
 
@@ -175,6 +227,9 @@ public class ChatServiceImpl implements IChatService {
 
             recordActivityLog(userId, sources.size());
 
+            semanticCacheService.store(userId, queryEmbedding.vector(),
+                    originalQuery, answer, sourcesJson);
+
             return ChatResponse.builder()
                     .answer(answer)
                     .sources(sources)
@@ -255,7 +310,7 @@ public class ChatServiceImpl implements IChatService {
     private String toSourcesJson(List<ChatResponse.SourceDetail> sourceDetails) {
         try {
             return objectMapper.writeValueAsString(sourceDetails);
-        } catch (JsonProcessingException e) {
+        } catch (Exception e) {
             log.warn("序列化 sources 失败: {}", e.getMessage());
             return "[]";
         }

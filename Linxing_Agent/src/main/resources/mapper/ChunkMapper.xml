@@ -110,7 +110,8 @@
                c.title_path       AS titlePath,
                c.chunk_type       AS chunkType,
                d.file_name        AS fileName,
-               ts_rank(c.ts_content, query) AS bm25Score
+               ts_rank(c.ts_content, query) AS bm25Score,
+               c.parent_chunk_id  AS parentChunkId
         FROM chunks c
         CROSS JOIN to_tsquery('simple', #{keywords}) query
         LEFT JOIN documents d ON c.document_id = d.id

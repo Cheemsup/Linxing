@@ -7,6 +7,7 @@ public record Bm25SearchResult(
         String titlePath,
         String chunkType,
         String fileName,
-        Double bm25Score
+        Double bm25Score,
+        Integer parentChunkId
 ) {
 }

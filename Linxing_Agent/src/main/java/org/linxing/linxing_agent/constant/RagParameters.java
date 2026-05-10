@@ -22,6 +22,10 @@ public final class RagParameters {
 
     public static final int SEARCH_RECALL_SIZE = 20;
 
+    public static final int CACHE_DOC_PREVIEW_TTL = 3600;
+
+    public static final int CACHE_SESSION_MESSAGES_TTL = 1800;
+
     /**
      * 目标类型：文档
      */

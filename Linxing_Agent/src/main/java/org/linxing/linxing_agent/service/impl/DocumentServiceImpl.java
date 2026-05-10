@@ -1,10 +1,13 @@
 package org.linxing.linxing_agent.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.linxing.linxing_agent.config.RagProperties;
+import org.linxing.linxing_agent.constant.RedisKeysPrefix;
 import org.linxing.linxing_agent.vo.ChunkTreeVO;
 import org.linxing.linxing_agent.vo.DocumentPreviewVO;
 import org.linxing.linxing_agent.vo.DocumentVO;
@@ -15,6 +18,7 @@ import org.linxing.linxing_agent.mapper.ChunkMapper;
 import org.linxing.linxing_agent.mapper.DocumentMapper;
 import org.linxing.linxing_agent.pipeline.ChunkPipelineCoordinator;
 import org.linxing.linxing_agent.service.IDocumentService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +29,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +40,9 @@ public class DocumentServiceImpl implements IDocumentService {
     private final DocumentMapper documentMapper;
     private final ChunkMapper chunkMapper;
     private final ChunkPipelineCoordinator chunkPipelineCoordinator;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final RagProperties ragProperties;
+    private final ObjectMapper objectMapper;
 
     @Override
     public PageResult<DocumentVO> listDocuments(Integer userId, int page, int size) {
@@ -73,6 +81,8 @@ public class DocumentServiceImpl implements IDocumentService {
 
         chunkPipelineCoordinator.deleteByDocumentId(userId, id);
 
+        evictPreviewCache(id);
+
         try {
             Path filePath = Paths.get(record.getFilePath());
             Files.deleteIfExists(filePath);
@@ -92,26 +102,37 @@ public class DocumentServiceImpl implements IDocumentService {
             throw new IllegalArgumentException("无权访问该文档");
         }
 
+        DocumentPreviewVO cached = getPreviewFromCache(id);
+        if (cached != null) {
+            log.debug("文档预览命中缓存, docId={}", id);
+            return cached;
+        }
+
         String fileType = record.getFileType();
         Path filePath = Paths.get(record.getFilePath());
 
+        DocumentPreviewVO result;
+
         if ("pdf".equalsIgnoreCase(fileType)) {
-            return previewPdf(record, filePath);
+            result = previewPdf(record, filePath);
         } else if ("txt".equalsIgnoreCase(fileType) || "md".equalsIgnoreCase(fileType) || "text".equalsIgnoreCase(fileType)
                 || "java".equalsIgnoreCase(fileType) || "csv".equalsIgnoreCase(fileType) || "html".equalsIgnoreCase(fileType)) {
-            return previewText(record, filePath);
+            result = previewText(record, filePath);
         } else if ("doc".equalsIgnoreCase(fileType) || "docx".equalsIgnoreCase(fileType)
                 || "xls".equalsIgnoreCase(fileType) || "xlsx".equalsIgnoreCase(fileType)) {
-            return previewOffice(record, filePath);
+            result = previewOffice(record, filePath);
+        } else {
+            result = DocumentPreviewVO.builder()
+                    .id(record.getId())
+                    .fileName(record.getFileName())
+                    .fileType(fileType)
+                    .previewType("unsupported")
+                    .textContent("该文件类型暂不支持在线预览，请下载后查看。")
+                    .build();
         }
 
-        return DocumentPreviewVO.builder()
-                .id(record.getId())
-                .fileName(record.getFileName())
-                .fileType(fileType)
-                .previewType("unsupported")
-                .textContent("该文件类型暂不支持在线预览，请下载后查看。")
-                .build();
+        putPreviewToCache(id, result);
+        return result;
     }
 
     @Override
@@ -258,5 +279,38 @@ public class DocumentServiceImpl implements IDocumentService {
                 .siblingIndex(siblingIndex)
                 .children(List.of())
                 .build();
+    }
+
+    private DocumentPreviewVO getPreviewFromCache(Integer docId) {
+        try {
+            String key = RedisKeysPrefix.DOC_PREVIEW + docId;
+            String cached = stringRedisTemplate.opsForValue().get(key);
+            if (cached != null) {
+                return objectMapper.readValue(cached, DocumentPreviewVO.class);
+            }
+        } catch (Exception e) {
+            log.warn("读取文档预览缓存失败, docId={}: {}", docId, e.getMessage());
+        }
+        return null;
+    }
+
+    private void putPreviewToCache(Integer docId, DocumentPreviewVO vo) {
+        try {
+            String key = RedisKeysPrefix.DOC_PREVIEW + docId;
+            int ttl = ragProperties.getCache().getDocPreviewTtl();
+            String json = objectMapper.writeValueAsString(vo);
+            stringRedisTemplate.opsForValue().set(key, json, ttl, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("写入文档预览缓存失败, docId={}: {}", docId, e.getMessage());
+        }
+    }
+
+    private void evictPreviewCache(Integer docId) {
+        try {
+            String key = RedisKeysPrefix.DOC_PREVIEW + docId;
+            stringRedisTemplate.delete(key);
+        } catch (Exception e) {
+            log.warn("清除文档预览缓存失败, docId={}: {}", docId, e.getMessage());
+        }
     }
 }

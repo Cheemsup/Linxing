@@ -22,6 +22,7 @@ import org.linxing.linxing_agent.entity.ActivityLog;
 import org.linxing.linxing_agent.entity.Bm25SearchResult;
 import org.linxing.linxing_agent.entity.ChatMessage;
 import org.linxing.linxing_agent.entity.ChatSession;
+import org.linxing.linxing_agent.entity.Chunk;
 import org.linxing.linxing_agent.entity.VectorSearchResult;
 import org.linxing.linxing_agent.mapper.ActivityLogMapper;
 import org.linxing.linxing_agent.mapper.ChatMessageMapper;
@@ -32,11 +33,14 @@ import org.linxing.linxing_agent.service.IChatService;
 import org.linxing.linxing_agent.utils.KeywordExtractor;
 import org.linxing.linxing_agent.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.utils.Reranker;
+import org.linxing.linxing_agent.vo.ChatMessageVO;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -45,7 +49,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
-
     private static final int MAX_HISTORY_ROUNDS = 10;
     private static final int MAX_TOKENS_ESTIMATE = 8000;
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -59,6 +62,7 @@ public class ChatServiceImpl implements IChatService {
     private final ChatMessageMapper chatMessageMapper;
     private final RagProperties ragProperties;
     private final Reranker reranker;
+    private final ChatMessageCacheService chatMessageCacheService;
 
     @Override
     public ChatResponse chat(ChatRequest request) {
@@ -132,6 +136,8 @@ public class ChatServiceImpl implements IChatService {
                 results = candidates.stream().limit(finalTopK).collect(Collectors.toList());
             }
 
+            results = expandToParentChunks(results, userId);
+
             String context = buildContext(results);
             List<String> sources = extractSources(results);
             List<ChatResponse.SourceDetail> sourceDetails = extractSourceDetails(results);
@@ -159,6 +165,11 @@ public class ChatServiceImpl implements IChatService {
                     .sources(sourcesJson)
                     .build();
             chatMessageMapper.insert(assistantMsg);
+
+            chatMessageCacheService.appendMessages(sessionId, List.of(
+                    toMessageVO(userMsg),
+                    toMessageVO(assistantMsg)
+            ));
 
             chatSessionMapper.updateUpdatedAt(sessionId);
 
@@ -250,6 +261,52 @@ public class ChatServiceImpl implements IChatService {
         }
     }
 
+    private List<VectorSearchResult> expandToParentChunks(List<VectorSearchResult> results, Integer userId) {
+        List<Integer> parentIds = results.stream()
+                .map(VectorSearchResult::parentChunkId)
+                .filter(pid -> pid != null)
+                .distinct()
+                .toList();
+
+        if (parentIds.isEmpty()) {
+            log.debug("[用户{}] 无小块需要替换为大块", userId);
+            return results;
+        }
+
+        Map<Integer, Chunk> parentMap = chunkMapper.findByIds(parentIds).stream()
+                .collect(Collectors.toMap(Chunk::getId, c -> c));
+
+        log.debug("[用户{}] Small-to-Big替换: 检索到{}个小块，涉及{}个大块", userId, results.size(), parentIds.size());
+
+        LinkedHashMap<Integer, VectorSearchResult> expanded = new LinkedHashMap<>();
+        for (VectorSearchResult r : results) {
+            Integer parentId = r.parentChunkId();
+            if (parentId != null && parentMap.containsKey(parentId)) {
+                if (!expanded.containsKey(parentId)) {
+                    Chunk parent = parentMap.get(parentId);
+                    expanded.put(parentId, new VectorSearchResult(
+                            r.id(),
+                            r.score(),
+                            r.text(),
+                            r.metadata(),
+                            parent.getId(),
+                            parent.getDocumentId(),
+                            r.fileName(),
+                            parent.getChunkType() != null ? parent.getChunkType() : r.chunkType(),
+                            parent.getTitlePath() != null ? parent.getTitlePath() : r.titlePath(),
+                            parent.getChunkText(),
+                            null
+                    ));
+                }
+            } else {
+                expanded.put(r.chunkId(), r);
+            }
+        }
+
+        log.debug("[用户{}] Small-to-Big替换完成: {}条结果 → {}条（去重后）", userId, results.size(), expanded.size());
+        return new ArrayList<>(expanded.values());
+    }
+
     private String buildContext(List<VectorSearchResult> results) {
         return results.stream()
                 .map(r -> "【来源:" + r.fileName() +
@@ -317,5 +374,18 @@ public class ChatServiceImpl implements IChatService {
     private static String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
+    }
+
+    private ChatMessageVO toMessageVO(ChatMessage msg) {
+        return ChatMessageVO.builder()
+                .id(msg.getId())
+                .userId(msg.getUserId())
+                .sessionId(msg.getSessionId())
+                .parentId(msg.getParentId())
+                .role(msg.getRole())
+                .content(msg.getContent())
+                .sources(msg.getSources())
+                .createdAt(msg.getCreatedAt())
+                .build();
     }
 }

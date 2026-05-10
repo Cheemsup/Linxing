@@ -13,6 +13,18 @@ spring:
     url: jdbc:postgresql://${PG_HOST}:${PG_PORT}/${PG_DATABASE}
     username: ${PG_USER}
     password: ${PG_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -62,6 +74,9 @@ rag:
     batch-size: 8
     model-path: classpath:models/ms-marco-MiniLM-L-6-v2/model.onnx
     tokenizer-path: classpath:models/ms-marco-MiniLM-L-6-v2/tokenizer.json
+  cache:
+    doc-preview-ttl: ${RAG_CACHE_DOC_PREVIEW_TTL:3600}
+    session-messages-ttl: ${RAG_CACHE_SESSION_MSGS_TTL:1800}
 
 jwt:
   secret-key: ${JWT_SECRET_KEY}

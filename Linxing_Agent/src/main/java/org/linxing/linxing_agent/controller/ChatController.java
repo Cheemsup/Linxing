@@ -11,6 +11,7 @@ import org.linxing.linxing_agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.result.Result;
 import org.linxing.linxing_agent.service.IChatService;
 import org.linxing.linxing_agent.service.IChatSessionService;
+import org.linxing.linxing_agent.service.impl.ChatMessageCacheService;
 import org.linxing.linxing_agent.vo.ChatMessageVO;
 import org.linxing.linxing_agent.vo.ChatSessionVO;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +27,7 @@ public class ChatController {
     private final IChatService chatService;
     private final IChatSessionService chatSessionService;
     private final ChatMessageMapper chatMessageMapper;
+    private final ChatMessageCacheService chatMessageCacheService;
 
     @PostMapping("/chat")
     public Result<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
@@ -56,16 +58,27 @@ public class ChatController {
 
     @GetMapping("/sessions/{sessionId}/messages")
     public Result<List<ChatMessageVO>> getMessages(@PathVariable Integer sessionId) {
+        List<ChatMessageVO> cached = chatMessageCacheService.getMessages(sessionId);
+        if (cached != null) {
+            return Result.success(cached);
+        }
+
         List<ChatMessage> messages = chatMessageMapper.selectBySessionId(sessionId);
         List<ChatMessageVO> vos = messages.stream().map(this::toMessageVO).collect(Collectors.toList());
+
+        chatMessageCacheService.putMessages(sessionId, vos);
         return Result.success(vos);
     }
 
     @DeleteMapping("/messages/{messageId}/subtree")
     public Result<Void> deleteSubtree(@PathVariable Integer messageId) {
+        ChatMessage root = chatMessageMapper.selectById(messageId);
         List<Integer> ids = collectSubtreeIds(messageId);
         if (!ids.isEmpty()) {
             chatMessageMapper.deleteByIds(ids);
+            if (root != null) {
+                chatMessageCacheService.deleteMessages(root.getSessionId(), ids);
+            }
         }
         return Result.success();
     }

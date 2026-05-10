@@ -21,6 +21,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
+    private final ChatMessageCacheService chatMessageCacheService;
 
     @Override
     @Transactional
@@ -52,6 +53,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
     public void deleteSession(Integer sessionId) {
         chatMessageMapper.deleteBySessionId(sessionId);
         chatSessionMapper.deleteById(sessionId);
+        chatMessageCacheService.deleteSession(sessionId);
         log.info("删除会话 {} 及其所有消息", sessionId);
     }
 

@@ -19,6 +19,7 @@ public class RagProperties {
     private Llm llm = new Llm();
     private Search search = new Search();
     private Reranker reranker = new Reranker();
+    private Cache cache = new Cache();
 
     @Data
     public static class Embedding {
@@ -72,5 +73,11 @@ public class RagProperties {
         private String modelPath;
         private String tokenizerPath;
         private int batchSize = 8;
+    }
+
+    @Data
+    public static class Cache {
+        private int docPreviewTtl = RagParameters.CACHE_DOC_PREVIEW_TTL;
+        private int sessionMessagesTtl = RagParameters.CACHE_SESSION_MESSAGES_TTL;
     }
 }

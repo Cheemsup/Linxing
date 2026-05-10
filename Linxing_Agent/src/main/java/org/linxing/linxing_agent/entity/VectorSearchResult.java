@@ -10,6 +10,7 @@ public record VectorSearchResult(
         String fileName,
         String chunkType,
         String titlePath,
-        String chunkText
+        String chunkText,
+        Integer parentChunkId
 ) {
 }

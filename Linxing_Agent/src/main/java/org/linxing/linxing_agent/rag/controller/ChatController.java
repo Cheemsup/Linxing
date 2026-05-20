@@ -60,7 +60,11 @@ public class ChatController {
     public Result<List<ChatMessageVO>> getMessages(@PathVariable Integer sessionId) {
         List<ChatMessageVO> cached = chatMessageCacheService.getMessages(sessionId);
         if (cached != null) {
-            return Result.success(cached);
+            int dbCount = chatMessageMapper.countBySessionId(sessionId);
+            if (cached.size() == dbCount) {
+                return Result.success(cached);
+            }
+            chatMessageCacheService.deleteSession(sessionId);
         }
 
         List<ChatMessage> messages = chatMessageMapper.selectBySessionId(sessionId);

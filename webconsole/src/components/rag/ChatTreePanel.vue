@@ -16,10 +16,10 @@
           direction="horizontal"
           :childrenKey="'children'"
           :wheelZoom="true"
-          :hierarchyMargin="80"
-          :neighborMargin="16"
+          :hierarchyMargin="120"
+          :neighborMargin="20"
           :showKnot="true"
-          :stretchLength="16"
+          :stretchLength="10"
         >
           <template #node="{ data }">
             <div

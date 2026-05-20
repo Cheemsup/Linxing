@@ -216,7 +216,6 @@ export default {
       for (const root of roots) {
         if (containsLeaf(root)) {
           walk(root)
-          break
         }
       }
       return result
@@ -296,7 +295,7 @@ export default {
       this.question = ''
       await this.loadMessages()
     },
-    async loadMessages() {
+    async loadMessages(activeLeafId = null) {
       if (!this.activeSessionId) {
         chatTreeStore.clearMessages()
         return
@@ -308,7 +307,9 @@ export default {
           data = []
         }
         chatTreeStore.setMessages(data)
-        if (data.length > 0) {
+        if (activeLeafId) {
+          chatTreeStore.setActiveLeaf(activeLeafId)
+        } else if (data.length > 0) {
           chatTreeStore.setActiveLeaf(data[data.length - 1].id)
         }
       } catch (e) {
@@ -330,6 +331,9 @@ export default {
       try {
         let parentMessageId
         if (chatTreeStore.state.branchParentId) {
+          // 分支时，新消息作为 branchParentId 指向的 user 消息的兄弟
+          // 后端将 parentMessageId 作为新 user 消息的 parentId
+          // 所以需要传被分支 user 消息的 parentId（即上一轮 assistant 的 id）
           const map = chatTreeStore.getMessageMap()
           const branchNode = map.get(chatTreeStore.state.branchParentId)
           parentMessageId = branchNode ? branchNode.parentId : null
@@ -348,9 +352,9 @@ export default {
           await this.fetchSessions()
         }
 
-        chatTreeStore.setActiveLeaf(data.messageId || null)
+        const newMessageId = data.messageId || null
         chatTreeStore.clearBranch()
-        await this.loadMessages()
+        await this.loadMessages(newMessageId)
       } catch (error) {
         const errMsg = error.response?.data?.msg || error.response?.data?.message || error.message
         chatTreeStore.state.messages.push({
@@ -415,10 +419,14 @@ export default {
       try {
         await chatSessionApi.deleteSubtree(messageId)
         const currentActiveLeaf = chatTreeStore.state.activeLeafId
+        let newActiveLeaf = null
         if (currentActiveLeaf === messageId || chatTreeStore.isDescendantOf(messageId, currentActiveLeaf)) {
-          chatTreeStore.setActiveLeaf(chatTreeStore.findNewActiveLeaf(messageId))
+          newActiveLeaf = chatTreeStore.findNewActiveLeaf(messageId)
+          chatTreeStore.setActiveLeaf(newActiveLeaf)
+        } else {
+          newActiveLeaf = currentActiveLeaf
         }
-        await this.loadMessages()
+        await this.loadMessages(newActiveLeaf)
       } catch (e) {
         console.error('删除消息子树失败:', e)
         alert('删除失败: ' + (e.response?.data?.msg || e.message))

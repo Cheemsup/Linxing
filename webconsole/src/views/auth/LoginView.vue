@@ -151,7 +151,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { authApi } from '@/api/auth'
-import { authStore } from '@/utils/authStore'
+import { authStore } from '@/stores/authStore'
 
 export default {
   name: 'LoginView',

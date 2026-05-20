@@ -1,22 +1,22 @@
 <template>
-  <div class="ingest-view">
-    <IngestPanel />
+  <div class="notes-view">
+    <NotesPanel />
   </div>
 </template>
 
 <script>
-import IngestPanel from '@/components/IngestPanel.vue'
+import NotesPanel from '@/components/rag/NotesPanel.vue'
 
 export default {
-  name: 'IngestView',
+  name: 'NotesView',
   components: {
-    IngestPanel
+    NotesPanel
   }
 }
 </script>
 
 <style scoped>
-.ingest-view {
+.notes-view {
   height: 100%;
   display: flex;
   flex-direction: column;

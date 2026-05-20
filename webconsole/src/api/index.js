@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { authStore } from '@/utils/authStore'
+import { authStore } from '@/stores/authStore'
 
 const api = axios.create({
   baseURL: '/api',
@@ -57,96 +57,5 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
-
-export const ragApi = {
-  chat({ question, sessionId, parentMessageId }) {
-    return api.post('/rag/chat', { question, sessionId, parentMessageId })
-  },
-
-  ingestFile(file) {
-    const formData = new FormData()
-    formData.append('file', file)
-    return api.post('/ingest/file', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      timeout: 120000
-    })
-  },
-
-  ingest(filePath, category = '') {
-    return api.post('/ingest', { filePath, category })
-  }
-}
-
-export const chatSessionApi = {
-  create(title) {
-    return api.post('/rag/sessions', { title })
-  },
-  list(page = 1, size = 20) {
-    return api.get('/rag/sessions', { params: { page, size } })
-  },
-  delete(id) {
-    return api.delete(`/rag/sessions/${id}`)
-  },
-  getMessages(sessionId) {
-    return api.get(`/rag/sessions/${sessionId}/messages`)
-  },
-  deleteSubtree(messageId) {
-    return api.delete(`/rag/messages/${messageId}/subtree`)
-  }
-}
-
-export const documentApi = {
-  list(page = 1, size = 10) {
-    return api.get('/documents', {
-      params: { page, size }
-    })
-  },
-
-  getDetail(id) {
-    return api.get(`/documents/${id}`)
-  },
-
-  delete(id) {
-    return api.delete(`/documents/${id}`)
-  },
-
-  preview(id) {
-    return api.get(`/documents/${id}/preview`)
-  },
-
-  getChunkTree(id) {
-    return api.get(`/documents/${id}/chunk-tree`)
-  },
-
-  getDownloadUrl(id) {
-    return `/api/documents/${id}/download`
-  }
-}
-
-export const chunkApi = {
-  getContext(id) {
-    return api.get(`/chunks/${id}/context`)
-  }
-}
-
-export const noteApi = {
-  list() {
-    return documentApi.list(1, 100)
-  },
-
-  get(id) {
-    return documentApi.getDetail(id)
-  },
-
-  save(note) {
-    return api.post('/notes', note)
-  },
-
-  delete(id) {
-    return documentApi.delete(id)
-  }
-}
 
 export default api

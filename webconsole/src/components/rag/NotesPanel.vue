@@ -119,7 +119,7 @@
 </template>
 
 <script>
-import { documentApi } from '@/api'
+import { documentApi } from '@/api/rag/document'
 import DocumentPreview from './DocumentPreview.vue'
 import ChunkTreeNav from './ChunkTreeNav.vue'
 

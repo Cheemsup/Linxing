@@ -5,7 +5,7 @@
 </template>
 
 <script>
-import ChatPanel from '@/components/ChatPanel.vue'
+import ChatPanel from '@/components/rag/ChatPanel.vue'
 
 export default {
   name: 'ChatView',

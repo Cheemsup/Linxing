@@ -42,7 +42,7 @@
 </template>
 
 <script>
-import { documentApi } from '@/api'
+import { documentApi } from '@/api/rag/document'
 import ChunkTreeNode from './ChunkTreeNode.vue'
 
 export default {

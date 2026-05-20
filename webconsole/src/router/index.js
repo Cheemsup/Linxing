@@ -1,9 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { authStore } from '@/utils/authStore'
-import LoginView from '@/views/LoginView.vue'
-import ChatView from '@/views/ChatView.vue'
-import IngestView from '@/views/IngestView.vue'
-import NotesView from '@/views/NotesView.vue'
+import { authStore } from '@/stores/authStore'
+import LoginView from '@/views/auth/LoginView.vue'
+import ChatView from '@/views/rag/ChatView.vue'
+import IngestView from '@/views/rag/IngestView.vue'
+import NotesView from '@/views/rag/NotesView.vue'
 
 const routes = [
   {

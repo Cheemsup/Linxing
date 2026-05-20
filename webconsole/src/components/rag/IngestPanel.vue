@@ -35,7 +35,7 @@
 </template>
 
 <script>
-import { ragApi } from '@/api'
+import { ingestApi } from '@/api/rag/ingest'
 
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.text', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.java', '.csv', '.html', '.htm']
 
@@ -95,7 +95,7 @@ export default {
       this.result = null
 
       try {
-        const response = await ragApi.ingestFile(this.selectedFile)
+        const response = await ingestApi.ingestFile(this.selectedFile)
         const resData = response.data
         if (resData.code === 1) {
           const data = resData.data || {}

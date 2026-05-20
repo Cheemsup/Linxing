@@ -51,7 +51,7 @@
 </template>
 
 <script>
-import { chunkApi } from '@/api'
+import { chunkApi } from '@/api/rag/chunk'
 
 export default {
   name: 'ChunkContextPanel',

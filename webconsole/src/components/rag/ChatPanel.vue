@@ -133,10 +133,10 @@
 </template>
 
 <script>
-import { ragApi, chatSessionApi } from '@/api'
+import { ragApi, chatSessionApi } from '@/api/rag/chat'
 import ChunkContextPanel from './ChunkContextPanel.vue'
 import ChatTreePanel from './ChatTreePanel.vue'
-import { chatTreeStore } from '@/utils/chatTreeStore'
+import { chatTreeStore } from '@/stores/rag/chatTreeStore'
 
 export default {
   name: 'ChatPanel',

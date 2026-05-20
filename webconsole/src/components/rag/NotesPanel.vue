@@ -205,9 +205,22 @@ export default {
       }
     },
 
-    downloadDocument(id) {
-      const url = documentApi.getDownloadUrl(id)
-      window.open(url, '_blank')
+    async downloadDocument(id) {
+      try {
+        const doc = this.documents.find(d => d.id === id)
+        const response = await documentApi.download(id)
+        const blob = response.data
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = doc ? doc.fileName : 'download'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } catch (error) {
+        this.showToast('下载失败: ' + (error.message || '未知错误'), 'error')
+      }
     },
 
     confirmDelete(doc) {

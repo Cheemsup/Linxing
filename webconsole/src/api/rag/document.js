@@ -25,6 +25,12 @@ export const documentApi = {
 
   getDownloadUrl(id) {
     return `/api/documents/${id}/download`
+  },
+
+  download(id) {
+    return api.get(`/documents/${id}/download`, {
+      responseType: 'blob'
+    })
   }
 }
 

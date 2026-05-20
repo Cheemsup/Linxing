@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.rag.mapper.ChatSessionMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.rag.entity.ChatSession">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="title" property="title"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
+        VALUES (#{userId}, #{title}, NOW(), NOW())
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT id, user_id, title, created_at, updated_at
+        FROM chat_sessions WHERE id = #{id}
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, title, created_at, updated_at
+        FROM chat_sessions
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*) FROM chat_sessions WHERE user_id = #{userId}
+    </select>
+
+    <update id="updateTitle">
+        UPDATE chat_sessions SET title = #{title}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateUpdatedAt">
+        UPDATE chat_sessions SET updated_at = NOW() WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM chat_sessions WHERE id = #{id}
+    </delete>
+
+</mapper>

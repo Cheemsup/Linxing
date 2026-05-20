@@ -1,0 +1,42 @@
+package org.linxing.linxing_agent.rag.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ChatResponse {
+
+    private String answer;
+
+    private List<String> sources;
+
+    private List<SourceDetail> sourceDetails;
+
+    private Integer sessionId;
+
+    private Integer messageId;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SourceDetail {
+
+        private Integer chunkId;
+
+        private Integer documentId;
+
+        private String fileName;
+
+        private String titlePath;
+
+        private String chunkType;
+    }
+}

@@ -7,7 +7,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @SpringBootApplication
 @EnableTransactionManagement
-@MapperScan("org.linxing.linxing_agent.mapper")
+@MapperScan({"org.linxing.linxing_agent.rag.mapper", "org.linxing.linxing_agent.user.mapper"})
 public class LinxingAgentApplication {
 
     public static void main(String[] args) {

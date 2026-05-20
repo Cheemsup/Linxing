@@ -2,7 +2,7 @@
   <div class="app-layout">
     <header class="app-header">
       <h1>Personal Note RAG</h1>
-      <p class="subtitle">基于 LangChain4j + BGE + ChromaDB 的个人笔记知识库问答系统</p>
+      <p class="subtitle">基于 LangChain4j + BGE + PostgreSQL/pgvector 的个人笔记知识库问答系统</p>
     </header>
 
     <nav class="tab-nav">

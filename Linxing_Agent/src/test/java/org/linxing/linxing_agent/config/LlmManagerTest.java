@@ -2,7 +2,8 @@ package org.linxing.linxing_agent.config;
 
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import org.junit.jupiter.api.Test;
-import org.linxing.linxing_agent.constant.LlmType;
+import org.linxing.linxing_agent.common.constant.LlmType;
+import org.linxing.linxing_agent.common.config.LlmManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 

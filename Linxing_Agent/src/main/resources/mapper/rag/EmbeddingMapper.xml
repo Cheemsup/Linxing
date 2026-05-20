@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.rag.mapper.EmbeddingMapper">
+
+    <insert id="batchInsertEmbeddings">
+        <foreach collection="list" item="item" separator=";">
+            INSERT INTO embeddings (user_id, document_id, chunk_id, embedding, "text", metadata)
+            VALUES (#{item.userId},
+                    #{item.documentId},
+                    #{item.chunkId},
+                    #{item.embeddingVector}::vector(512),
+                    #{item.text},
+                    #{item.metadata}::jsonb)
+        </foreach>
+    </insert>
+
+    <select id="vectorSearch" resultType="org.linxing.linxing_agent.rag.entity.VectorSearchResult">
+        <![CDATA[
+        SELECT e.id,
+               1 - (e.embedding <=> #{queryVector}::vector) AS score,
+               e."text",
+               e.metadata::text         AS metadata,
+               e.chunk_id               AS chunkId,
+               e.document_id            AS documentId,
+               d.file_name              AS fileName,
+               c.chunk_type             AS chunkType,
+               c.title_path             AS titlePath,
+               c.chunk_text             AS chunkText,
+               c.parent_chunk_id        AS parentChunkId
+        FROM embeddings e
+                 LEFT JOIN chunks c ON e.chunk_id = c.id
+                 LEFT JOIN documents d ON e.document_id = d.id
+        WHERE e.user_id = #{userId}
+        ORDER BY e.embedding <=> #{queryVector}::vector
+        LIMIT #{limit}
+    ]]>
+    </select>
+
+    <delete id="deleteByChunkIds">
+        DELETE FROM embeddings WHERE chunk_id IN
+        <foreach collection="chunkIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="deleteByUserId">
+        DELETE FROM embeddings WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

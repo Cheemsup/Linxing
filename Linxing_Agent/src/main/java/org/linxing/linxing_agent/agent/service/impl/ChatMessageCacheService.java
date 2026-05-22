@@ -1,10 +1,10 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.agent.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
-import org.linxing.linxing_agent.rag.vo.ChatMessageVO;
+import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;

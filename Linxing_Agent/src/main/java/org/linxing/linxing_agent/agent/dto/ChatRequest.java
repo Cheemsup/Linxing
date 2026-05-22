@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.dto;
+package org.linxing.linxing_agent.agent.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;

@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.entity;
+package org.linxing.linxing_agent.agent.entity;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,10 +11,13 @@ import java.time.OffsetDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ChatSession {
+public class ChatMessage {
     private Integer id;
     private Integer userId;
-    private String title;
+    private Integer sessionId;
+    private Integer parentId;
+    private String role;
+    private String content;
+    private String sources;
     private OffsetDateTime createdAt;
-    private OffsetDateTime updatedAt;
 }

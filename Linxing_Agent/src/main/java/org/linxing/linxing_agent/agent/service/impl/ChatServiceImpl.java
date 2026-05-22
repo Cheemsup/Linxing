@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.agent.service.impl;
 
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -14,24 +14,24 @@ import org.linxing.linxing_agent.rag.constant.RagParameters;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.utils.VectorUtils;
-import org.linxing.linxing_agent.rag.dto.ChatRequest;
-import org.linxing.linxing_agent.rag.dto.ChatResponse;
+import org.linxing.linxing_agent.agent.dto.ChatRequest;
+import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.rag.entity.ActivityLog;
 import org.linxing.linxing_agent.rag.entity.Bm25SearchResult;
-import org.linxing.linxing_agent.rag.entity.ChatMessage;
-import org.linxing.linxing_agent.rag.entity.ChatSession;
+import org.linxing.linxing_agent.agent.entity.ChatMessage;
+import org.linxing.linxing_agent.agent.entity.ChatSession;
 import org.linxing.linxing_agent.rag.entity.Chunk;
 import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
 import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
-import org.linxing.linxing_agent.rag.mapper.ChatMessageMapper;
-import org.linxing.linxing_agent.rag.mapper.ChatSessionMapper;
+import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
+import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
 import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
-import org.linxing.linxing_agent.rag.service.IChatService;
+import org.linxing.linxing_agent.agent.service.IChatService;
 import org.linxing.linxing_agent.rag.utils.KeywordExtractor;
 import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.rag.utils.Reranker;
-import org.linxing.linxing_agent.rag.vo.ChatMessageVO;
+import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 

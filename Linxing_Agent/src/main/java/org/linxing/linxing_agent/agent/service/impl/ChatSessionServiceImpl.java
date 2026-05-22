@@ -1,13 +1,13 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.agent.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.common.result.PageResult;
-import org.linxing.linxing_agent.rag.entity.ChatSession;
-import org.linxing.linxing_agent.rag.mapper.ChatMessageMapper;
-import org.linxing.linxing_agent.rag.mapper.ChatSessionMapper;
-import org.linxing.linxing_agent.rag.service.IChatSessionService;
-import org.linxing.linxing_agent.rag.vo.ChatSessionVO;
+import org.linxing.linxing_agent.agent.entity.ChatSession;
+import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
+import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
+import org.linxing.linxing_agent.agent.service.IChatSessionService;
+import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

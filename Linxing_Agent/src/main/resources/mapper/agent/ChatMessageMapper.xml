@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="org.linxing.linxing_agent.rag.mapper.ChatMessageMapper">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.ChatMessageMapper">
 
-    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.rag.entity.ChatMessage">
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.ChatMessage">
         <id column="id" property="id"/>
         <result column="user_id" property="userId"/>
         <result column="session_id" property="sessionId"/>

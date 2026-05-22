@@ -1,19 +1,19 @@
-package org.linxing.linxing_agent.rag.controller;
+package org.linxing.linxing_agent.agent.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
-import org.linxing.linxing_agent.rag.dto.ChatRequest;
-import org.linxing.linxing_agent.rag.dto.ChatResponse;
+import org.linxing.linxing_agent.agent.dto.ChatRequest;
+import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.common.result.PageResult;
-import org.linxing.linxing_agent.rag.entity.ChatMessage;
-import org.linxing.linxing_agent.rag.mapper.ChatMessageMapper;
+import org.linxing.linxing_agent.agent.entity.ChatMessage;
+import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.common.result.Result;
-import org.linxing.linxing_agent.rag.service.IChatService;
-import org.linxing.linxing_agent.rag.service.IChatSessionService;
-import org.linxing.linxing_agent.rag.service.impl.ChatMessageCacheService;
-import org.linxing.linxing_agent.rag.vo.ChatMessageVO;
-import org.linxing.linxing_agent.rag.vo.ChatSessionVO;
+import org.linxing.linxing_agent.agent.service.IChatService;
+import org.linxing.linxing_agent.agent.service.IChatSessionService;
+import org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheService;
+import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
+import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;

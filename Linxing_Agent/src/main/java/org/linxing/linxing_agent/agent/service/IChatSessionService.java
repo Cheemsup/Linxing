@@ -1,6 +1,6 @@
-package org.linxing.linxing_agent.rag.service;
+package org.linxing.linxing_agent.agent.service;
 
-import org.linxing.linxing_agent.rag.vo.ChatSessionVO;
+import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.linxing.linxing_agent.common.result.PageResult;
 
 public interface IChatSessionService {

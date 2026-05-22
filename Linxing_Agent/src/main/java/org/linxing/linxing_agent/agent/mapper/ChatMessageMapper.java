@@ -1,8 +1,8 @@
-package org.linxing.linxing_agent.rag.mapper;
+package org.linxing.linxing_agent.agent.mapper;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.linxing.linxing_agent.rag.entity.ChatMessage;
+import org.linxing.linxing_agent.agent.entity.ChatMessage;
 
 import java.util.List;
 

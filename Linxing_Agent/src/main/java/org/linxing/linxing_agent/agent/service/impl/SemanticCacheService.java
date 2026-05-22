@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.agent.service.impl;
 
 import lombok.Data;
 import lombok.RequiredArgsConstructor;

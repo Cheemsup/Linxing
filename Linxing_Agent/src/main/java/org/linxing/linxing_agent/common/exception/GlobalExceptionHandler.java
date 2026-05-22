@@ -1,7 +1,7 @@
 package org.linxing.linxing_agent.common.exception;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.rag.dto.ChatResponse;
+import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.user.exception.AccountDisabledException;
 import org.linxing.linxing_agent.user.exception.AccountNotFoundException;

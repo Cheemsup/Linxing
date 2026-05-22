@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.vo;
+package org.linxing.linxing_agent.agent.vo;
 
 import lombok.Builder;
 import lombok.Data;

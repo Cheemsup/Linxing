@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.linxing.linxing_agent.agent.service.impl.SemanticCacheService;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
 import org.linxing.linxing_agent.rag.vo.ChunkTreeVO;

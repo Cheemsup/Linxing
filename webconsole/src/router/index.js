@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { authStore } from '@/stores/authStore'
 import LoginView from '@/views/auth/LoginView.vue'
+import SearchView from '@/views/rag/SearchView.vue'
 import ChatView from '@/views/rag/ChatView.vue'
 import IngestView from '@/views/rag/IngestView.vue'
 import NotesView from '@/views/rag/NotesView.vue'
@@ -22,6 +23,15 @@ const routes = [
   {
     path: '/',
     redirect: '/login'
+  },
+  {
+    path: '/search',
+    name: 'Search',
+    component: SearchView,
+    meta: {
+      title: '知识库搜索',
+      requiresAuth: true
+    }
   },
   {
     path: '/chat',
@@ -65,7 +75,7 @@ router.beforeEach((to, from, next) => {
   if (to.meta.requiresAuth && !isAuthenticated) {
     next('/login')
   } else if ((to.path === '/login' || to.path === '/register') && isAuthenticated) {
-    next('/chat')
+    next('/search')
   } else {
     next()
   }

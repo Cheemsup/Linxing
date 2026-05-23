@@ -12,25 +12,17 @@ import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
 import org.linxing.linxing_agent.common.config.LlmManager;
-import org.linxing.linxing_agent.rag.config.RagProperties;
-import org.linxing.linxing_agent.rag.utils.VectorUtils;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
+import org.linxing.linxing_agent.rag.dto.SearchResult;
 import org.linxing.linxing_agent.rag.entity.ActivityLog;
-import org.linxing.linxing_agent.rag.entity.Bm25SearchResult;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
-import org.linxing.linxing_agent.rag.entity.Chunk;
-import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
 import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
-import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
-import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.agent.service.IChatService;
-import org.linxing.linxing_agent.rag.utils.KeywordExtractor;
-import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
-import org.linxing.linxing_agent.rag.utils.Reranker;
+import org.linxing.linxing_agent.rag.service.ISearchService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -38,7 +30,6 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -53,13 +44,10 @@ public class ChatServiceImpl implements IChatService {
 
     private final EmbeddingModel embeddingModel;
     private final LlmManager llmManager;
-    private final EmbeddingMapper embeddingMapper;
-    private final ChunkMapper chunkMapper;
+    private final ISearchService searchService;
     private final ActivityLogMapper activityLogMapper;
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
-    private final RagProperties ragProperties;
-    private final Reranker reranker;
     private final ChatMessageCacheService chatMessageCacheService;
     private final SemanticCacheService semanticCacheService;
 
@@ -91,7 +79,6 @@ public class ChatServiceImpl implements IChatService {
             String historyText = buildHistoryContext(history);
 
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();
-            String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
 
             SemanticCacheService.CacheResult cacheResult =
                     semanticCacheService.lookup(userId, queryEmbedding.vector());
@@ -145,49 +132,11 @@ public class ChatServiceImpl implements IChatService {
                         .build();
             }
 
-            int recallSize = ragProperties.getSearch().getRecallSize();
+            List<SearchResult> results = searchService.search(userId, originalQuery, 0, true);
 
-            List<VectorSearchResult> vectorResults = embeddingMapper.vectorSearch(userId, queryVectorString, recallSize);
-
-            List<VectorSearchResult> candidates;
-
-            if (ragProperties.getSearch().isHybridEnabled()) {
-                String tsquery = KeywordExtractor.extractToTsquery(originalQuery);
-                if (!tsquery.isEmpty()) {
-                    int bm25RecallSize = ragProperties.getSearch().getBm25RecallSize();
-                    List<Bm25SearchResult> bm25Results = chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
-                    log.debug("[用户{}] 混合检索: 向量候选={}, BM25候选={}", userId, vectorResults.size(), bm25Results.size());
-
-                    candidates = ReciprocalRankFusion.fuse(
-                            vectorResults,
-                            bm25Results,
-                            ragProperties.getSearch().getVectorWeight(),
-                            ragProperties.getSearch().getBm25Weight()
-                    );
-                    log.debug("[用户{}] RRF融合后候选数: {}", userId, candidates.size());
-                } else {
-                    log.debug("[用户{}] 未提取到有效关键词，仅使用向量检索", userId);
-                    candidates = vectorResults;
-                }
-            } else {
-                candidates = vectorResults;
-            }
-
-            if (candidates.isEmpty()) {
+            if (results.isEmpty()) {
                 return buildEmptyResponse(sessionId, "抱歉，在您的知识库中未找到与该问题相关的信息。");
             }
-
-            int finalTopK = ragProperties.getSearch().getDefaultTopK();
-
-            List<VectorSearchResult> results;
-            if (reranker.isAvailable()) {
-                log.debug("[用户{}] 开始Cross-Encoder细粒度重排序，候选数: {}, 目标TopK: {}", userId, candidates.size(), finalTopK);
-                results = reranker.rerank(originalQuery, candidates, finalTopK);
-            } else {
-                results = candidates.stream().limit(finalTopK).collect(Collectors.toList());
-            }
-
-            results = expandToParentChunks(results, userId);
 
             String context = buildContext(results);
             List<String> sources = extractSources(results);
@@ -315,76 +264,30 @@ public class ChatServiceImpl implements IChatService {
         }
     }
 
-    private List<VectorSearchResult> expandToParentChunks(List<VectorSearchResult> results, Integer userId) {
-        List<Integer> parentIds = results.stream()
-                .map(VectorSearchResult::parentChunkId)
-                .filter(pid -> pid != null)
-                .distinct()
-                .toList();
-
-        if (parentIds.isEmpty()) {
-            log.debug("[用户{}] 无小块需要替换为大块", userId);
-            return results;
-        }
-
-        Map<Integer, Chunk> parentMap = chunkMapper.findByIds(parentIds).stream()
-                .collect(Collectors.toMap(Chunk::getId, c -> c));
-
-        log.debug("[用户{}] Small-to-Big替换: 检索到{}个小块，涉及{}个大块", userId, results.size(), parentIds.size());
-
-        LinkedHashMap<Integer, VectorSearchResult> expanded = new LinkedHashMap<>();
-        for (VectorSearchResult r : results) {
-            Integer parentId = r.parentChunkId();
-            if (parentId != null && parentMap.containsKey(parentId)) {
-                if (!expanded.containsKey(parentId)) {
-                    Chunk parent = parentMap.get(parentId);
-                    expanded.put(parentId, new VectorSearchResult(
-                            r.id(),
-                            r.score(),
-                            r.text(),
-                            r.metadata(),
-                            parent.getId(),
-                            parent.getDocumentId(),
-                            r.fileName(),
-                            parent.getChunkType() != null ? parent.getChunkType() : r.chunkType(),
-                            parent.getTitlePath() != null ? parent.getTitlePath() : r.titlePath(),
-                            parent.getChunkText(),
-                            null
-                    ));
-                }
-            } else {
-                expanded.put(r.chunkId(), r);
-            }
-        }
-
-        log.debug("[用户{}] Small-to-Big替换完成: {}条结果 → {}条（去重后）", userId, results.size(), expanded.size());
-        return new ArrayList<>(expanded.values());
-    }
-
-    private String buildContext(List<VectorSearchResult> results) {
+    private String buildContext(List<SearchResult> results) {
         return results.stream()
-                .map(r -> "【来源:" + r.fileName() +
-                        (r.titlePath() != null ? " > " + r.titlePath() : "") +
-                        "】\n" + r.chunkText())
+                .map(r -> "【来源:" + r.getFileName() +
+                        (r.getTitlePath() != null ? " > " + r.getTitlePath() : "") +
+                        "】\n" + r.getChunkText())
                 .collect(Collectors.joining("\n\n---\n\n"));
     }
 
-    private List<String> extractSources(List<VectorSearchResult> results) {
+    private List<String> extractSources(List<SearchResult> results) {
         return results.stream()
-                .map(r -> r.fileName() +
-                        (r.titlePath() != null ? " > " + r.titlePath() : ""))
+                .map(r -> r.getFileName() +
+                        (r.getTitlePath() != null ? " > " + r.getTitlePath() : ""))
                 .distinct()
                 .collect(Collectors.toList());
     }
 
-    private List<ChatResponse.SourceDetail> extractSourceDetails(List<VectorSearchResult> results) {
+    private List<ChatResponse.SourceDetail> extractSourceDetails(List<SearchResult> results) {
         return results.stream()
                 .map(r -> ChatResponse.SourceDetail.builder()
-                        .chunkId(r.chunkId())
-                        .documentId(r.documentId())
-                        .fileName(r.fileName())
-                        .titlePath(r.titlePath())
-                        .chunkType(r.chunkType())
+                        .chunkId(r.getChunkId())
+                        .documentId(r.getDocumentId())
+                        .fileName(r.getFileName())
+                        .titlePath(r.getTitlePath())
+                        .chunkType(r.getChunkType())
                         .build())
                 .collect(Collectors.toList());
     }

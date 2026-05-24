@@ -24,13 +24,13 @@ import java.util.List;
 
 @Slf4j
 @RestController
-@RequestMapping("/documents")
+@RequestMapping("/rag")
 @RequiredArgsConstructor
 public class DocumentController {
 
     private final IDocumentService documentService;
 
-    @GetMapping
+    @GetMapping("/documents")
     public Result<PageResult<DocumentVO>> listDocuments(
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
@@ -39,14 +39,14 @@ public class DocumentController {
         return Result.success(result);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/documents/{id}")
     public Result<DocumentVO> getDocumentDetail(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         DocumentVO vo = documentService.getDocumentDetail(id, userId);
         return Result.success(vo);
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/documents/{id}")
     public Result<Void> deleteDocument(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         try {
@@ -61,7 +61,7 @@ public class DocumentController {
         }
     }
 
-    @GetMapping("/{id}/preview")
+    @GetMapping("/documents/{id}/preview")
     public Result<DocumentPreviewVO> previewDocument(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         try {
@@ -76,7 +76,7 @@ public class DocumentController {
         }
     }
 
-    @GetMapping("/{id}/chunk-tree")
+    @GetMapping("/documents/{id}/chunk-tree")
     public Result<List<ChunkTreeVO>> getChunkTree(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         try {
@@ -91,7 +91,7 @@ public class DocumentController {
         }
     }
 
-    @GetMapping("/{id}/download")
+    @GetMapping("/documents/{id}/download")
     public ResponseEntity<Resource> downloadDocument(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         String filePath = documentService.getFilePath(id, userId);

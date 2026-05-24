@@ -44,20 +44,24 @@ public class SearchServiceImpl implements ISearchService {
         Embedding queryEmbedding = embeddingModel.embed(query).content();
         String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
 
+        //进行向量搜索，得到结果
         List<VectorSearchResult> vectorResults =
                 embeddingMapper.vectorSearch(userId, queryVectorString, recallSize);
 
-        List<VectorSearchResult> candidates;
+        List<VectorSearchResult> candidates;//最终结果
 
+        //用户选择混合搜索 && 系统开放混合搜索功能，则进行混合搜索
         if (hybrid && ragProperties.getSearch().isHybridEnabled()) {
             String tsquery = KeywordExtractor.extractToTsquery(query);
             if (!tsquery.isEmpty()) {
                 int bm25RecallSize = ragProperties.getSearch().getBm25RecallSize();
+                //进行BM25搜索，得到结果
                 List<Bm25SearchResult> bm25Results =
                         chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
                 log.debug("[搜索] 用户{} 混合检索: 向量候选={}, BM25候选={}",
                         userId, vectorResults.size(), bm25Results.size());
 
+                //根据两种结果分数权重进行融合排序，得到最终结果
                 candidates = ReciprocalRankFusion.fuse(
                         vectorResults,
                         bm25Results,
@@ -81,12 +85,12 @@ public class SearchServiceImpl implements ISearchService {
         if (reranker.isAvailable()) {
             log.debug("[搜索] 用户{} 开始Cross-Encoder重排序，候选数: {}, 目标TopK: {}",
                     userId, candidates.size(), effectiveTopK);
-            results = reranker.rerank(query, candidates, effectiveTopK);
+            results = reranker.rerank(query, candidates, effectiveTopK);//重排
         } else {
             results = candidates.stream().limit(effectiveTopK).collect(Collectors.toList());
         }
 
-        results = expandToParentChunks(results, userId);
+        results = expandToParentChunks(results, userId);//small2big处理
 
         return results.stream()
                 .map(r -> SearchResult.builder()
@@ -102,6 +106,7 @@ public class SearchServiceImpl implements ISearchService {
                 .collect(Collectors.toList());
     }
 
+    //small2big检索，将存在parent块的chunk再进行一次父块检索，作为最终返回的chunk
     private List<VectorSearchResult> expandToParentChunks(List<VectorSearchResult> results, Integer userId) {
         List<Integer> parentIds = results.stream()
                 .map(VectorSearchResult::parentChunkId)

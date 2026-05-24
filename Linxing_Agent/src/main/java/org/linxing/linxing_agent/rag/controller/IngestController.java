@@ -16,7 +16,7 @@ import java.util.Set;
 
 @Slf4j
 @RestController
-@RequestMapping("/ingest")
+@RequestMapping("/rag")
 @RequiredArgsConstructor
 public class IngestController {
 
@@ -27,7 +27,7 @@ public class IngestController {
 
     private final IIngestService ingestService;
 
-    @PostMapping("/file")
+    @PostMapping("/ingest/file")
     public Result<IngestResponse> ingestFile(@RequestParam("file") MultipartFile file) {
         Integer userId = getCurrentUserId();
 

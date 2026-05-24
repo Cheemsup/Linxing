@@ -214,3 +214,31 @@ CREATE INDEX idx_chat_messages_user_session
 -- 索引：支持按 parent_id 回溯路径
 CREATE INDEX idx_chat_messages_parent_id 
     ON chat_messages(parent_id) WHERE parent_id IS NOT NULL;
+
+-- =============================================
+-- 8、Agent执行步骤表 agent_steps
+-- =============================================
+CREATE TABLE IF NOT EXISTS agent_steps (
+    id              SERIAL PRIMARY KEY,
+    chat_message_id INT,
+    session_id      INT NOT NULL,
+    step_order      INT NOT NULL DEFAULT 0,
+    step_type       VARCHAR(20) NOT NULL CHECK (step_type IN ('thought', 'tool_call', 'tool_result', 'final', 'error')),
+    content         TEXT,
+    tool_name       VARCHAR(100),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_steps IS 'Agent执行步骤记录表，记录ReAct循环中的每一步（思考/工具调用/工具结果/最终答案）';
+COMMENT ON COLUMN agent_steps.id IS '步骤唯一ID';
+COMMENT ON COLUMN agent_steps.chat_message_id IS '关联的助手消息ID，NULL表示步骤尚未绑定消息';
+COMMENT ON COLUMN agent_steps.session_id IS '所属会话ID';
+COMMENT ON COLUMN agent_steps.step_order IS '步骤顺序，从1开始';
+COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thought=思考, tool_call=工具调用, tool_result=工具结果, final=最终答案, error=错误';
+COMMENT ON COLUMN agent_steps.content IS '步骤内容：思考文本、工具调用参数、工具返回结果或最终答案';
+COMMENT ON COLUMN agent_steps.tool_name IS '工具名称，仅tool_call/tool_result类型有值';
+COMMENT ON COLUMN agent_steps.created_at IS '步骤创建时间';
+
+CREATE INDEX idx_agent_steps_session_id ON agent_steps(session_id);
+CREATE INDEX idx_agent_steps_chat_message_id ON agent_steps(chat_message_id);
+CREATE INDEX idx_agent_steps_session_step ON agent_steps(session_id, step_order);

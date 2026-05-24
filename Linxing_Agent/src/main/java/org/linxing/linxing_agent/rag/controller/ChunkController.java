@@ -10,13 +10,13 @@ import org.springframework.web.bind.annotation.*;
 
 @Slf4j
 @RestController
-@RequestMapping("/chunks")
+@RequestMapping("/rag")
 @RequiredArgsConstructor
 public class ChunkController {
 
     private final IChunkService chunkService;
 
-    @GetMapping("/{id}/context")
+    @GetMapping("/chunks/{id}/context")
     public Result<ChunkContextVO> getChunkContext(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
         try {

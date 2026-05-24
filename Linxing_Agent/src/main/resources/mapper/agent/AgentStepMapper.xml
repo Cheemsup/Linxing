@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.AgentStepMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.AgentStep">
+        <id column="id" property="id"/>
+        <result column="chat_message_id" property="chatMessageId"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="step_order" property="stepOrder"/>
+        <result column="step_type" property="stepType"/>
+        <result column="content" property="content"/>
+        <result column="tool_name" property="toolName"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO agent_steps (chat_message_id, session_id, step_order, step_type, content, tool_name, created_at)
+        VALUES (#{chatMessageId}, #{sessionId}, #{stepOrder}, #{stepType}, #{content}, #{toolName}, NOW())
+    </insert>
+
+    <select id="selectByChatMessageId" resultMap="BaseResultMap">
+        SELECT id, chat_message_id, session_id, step_order, step_type, content, tool_name, created_at
+        FROM agent_steps
+        WHERE chat_message_id = #{chatMessageId}
+        ORDER BY step_order ASC
+    </select>
+
+    <select id="selectBySessionId" resultMap="BaseResultMap">
+        SELECT id, chat_message_id, session_id, step_order, step_type, content, tool_name, created_at
+        FROM agent_steps
+        WHERE session_id = #{sessionId}
+        ORDER BY chat_message_id, step_order ASC
+    </select>
+
+    <delete id="deleteBySessionId">
+        DELETE FROM agent_steps WHERE session_id = #{sessionId}
+    </delete>
+
+</mapper>

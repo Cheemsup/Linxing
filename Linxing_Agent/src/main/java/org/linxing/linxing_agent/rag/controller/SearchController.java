@@ -17,13 +17,13 @@ import java.util.List;
 
 @Slf4j
 @RestController
-@RequestMapping("/search")
+@RequestMapping("/rag")
 @RequiredArgsConstructor
 public class SearchController {
 
     private final ISearchService searchService;
 
-    @PostMapping
+    @PostMapping("/search")
     public Result<List<SearchResultVO>> search(@RequestBody SearchRequest request) {
         Integer userId = getCurrentUserId();
         int topK = request.getTopK() != null ? request.getTopK() : 0;
@@ -33,6 +33,8 @@ public class SearchController {
 
         List<SearchResult> results = searchService.search(userId, request.getQuery(), topK, hybrid);
 
+        //将搜索结果进行处理，返回VO性质的最终结果
+        //TODO：后续可考虑将这部分逻辑代码移动到更好的地方而不在controller
         List<SearchResultVO> vos = results.stream()
                 .map(this::toVO)
                 .toList();

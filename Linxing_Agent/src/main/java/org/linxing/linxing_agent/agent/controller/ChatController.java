@@ -1,6 +1,5 @@
 package org.linxing.linxing_agent.agent.controller;
 
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
@@ -15,12 +14,15 @@ import org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/rag")
+@RequestMapping("/agent")
 @RequiredArgsConstructor
 public class ChatController {
 
@@ -29,10 +31,70 @@ public class ChatController {
     private final ChatMessageMapper chatMessageMapper;
     private final ChatMessageCacheService chatMessageCacheService;
 
-    @PostMapping("/chat")
-    public Result<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
-        ChatResponse response = chatService.chat(request);
-        return Result.success(response);
+    @GetMapping("/chat")
+    public SseEmitter agentChat(
+            @RequestParam String query,
+            @RequestParam(required = false) Integer sessionId,
+            @RequestParam(required = false) Integer parentMessageId) {
+        SseEmitter emitter = new SseEmitter(300_000L);
+
+        Long userId = BaseContext.getCurrentId();
+        Integer resolvedUserId = userId != null ? userId.intValue() : null;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (resolvedUserId != null) {
+                    BaseContext.setCurrentId(userId);
+                }
+
+                ChatRequest request = ChatRequest.builder()
+                        .question(query)
+                        .sessionId(sessionId)
+                        .parentMessageId(parentMessageId)
+                        .userId(resolvedUserId)
+                        .build();
+
+                ChatResponse response = chatService.chat(request);
+
+                Map<String, Object> resultData = new LinkedHashMap<>();
+                resultData.put("type", "result");
+                resultData.put("answer", response.getAnswer());
+                resultData.put("sources", response.getSources());
+                resultData.put("sourceDetails", response.getSourceDetails());
+                resultData.put("sessionId", response.getSessionId());
+                resultData.put("messageId", response.getMessageId());
+                emitter.send(SseEmitter.event()
+                        .name("message")
+                        .data(resultData));
+
+                Map<String, Object> doneData = new LinkedHashMap<>();
+                doneData.put("type", "done");
+                emitter.send(SseEmitter.event()
+                        .name("message")
+                        .data(doneData));
+                emitter.complete();
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+            } catch (Exception e) {
+                try {
+                    Map<String, Object> errorData = new LinkedHashMap<>();
+                    errorData.put("type", "error");
+                    errorData.put("message", e.getMessage());
+                    emitter.send(SseEmitter.event()
+                            .name("message")
+                            .data(errorData));
+                    emitter.complete();
+                } catch (IOException ex) {
+                    emitter.completeWithError(ex);
+                }
+            } finally {
+                if (resolvedUserId != null) {
+                    BaseContext.clear();
+                }
+            }
+        });
+
+        return emitter;
     }
 
     @PostMapping("/sessions")

@@ -328,47 +328,85 @@ export default {
       this.tempUserMsg = { content: q }
       this.$nextTick(() => this.scrollToBottom())
 
-      try {
-        let parentMessageId
-        if (chatTreeStore.state.branchParentId) {
-          // 分支时，新消息作为 branchParentId 指向的 user 消息的兄弟
-          // 后端将 parentMessageId 作为新 user 消息的 parentId
-          // 所以需要传被分支 user 消息的 parentId（即上一轮 assistant 的 id）
-          const map = chatTreeStore.getMessageMap()
-          const branchNode = map.get(chatTreeStore.state.branchParentId)
-          parentMessageId = branchNode ? branchNode.parentId : null
-        } else {
-          parentMessageId = chatTreeStore.state.activeLeafId
-        }
-        const response = await ragApi.chat({
-          question: q,
-          sessionId: this.activeSessionId,
-          parentMessageId: parentMessageId
-        })
-        const data = response.data.data || response.data
-
-        if (data.sessionId && !this.activeSessionId) {
-          this.activeSessionId = data.sessionId
-          await this.fetchSessions()
-        }
-
-        const newMessageId = data.messageId || null
-        chatTreeStore.clearBranch()
-        await this.loadMessages(newMessageId)
-      } catch (error) {
-        const errMsg = error.response?.data?.msg || error.response?.data?.message || error.message
-        chatTreeStore.state.messages.push({
-          id: -Date.now(),
-          role: 'assistant',
-          content: '抱歉，发生了错误: ' + errMsg,
-          sources: '[]',
-          parentId: null
-        })
-      } finally {
-        this.tempUserMsg = null
-        this.loading = false
-        this.$nextTick(() => this.scrollToBottom())
+      let parentMessageId
+      if (chatTreeStore.state.branchParentId) {
+        const map = chatTreeStore.getMessageMap()
+        const branchNode = map.get(chatTreeStore.state.branchParentId)
+        parentMessageId = branchNode ? branchNode.parentId : null
+      } else {
+        parentMessageId = chatTreeStore.state.activeLeafId
       }
+
+      const vm = this
+      ragApi.chatStream({
+        question: q,
+        sessionId: this.activeSessionId,
+        parentMessageId: parentMessageId,
+        onMessage(data) {
+          if (data.type === 'error') {
+            vm.tempUserMsg = null
+            vm.loading = false
+            chatTreeStore.state.messages.push({
+              id: -Date.now(),
+              role: 'assistant',
+              content: '抱歉，发生了错误: ' + (data.message || '未知错误'),
+              sources: '[]',
+              parentId: null
+            })
+            vm.$nextTick(() => vm.scrollToBottom())
+            return
+          }
+          if (data.type === 'result') {
+            if (data.sessionId && !vm.activeSessionId) {
+              vm.activeSessionId = data.sessionId
+              vm.fetchSessions()
+            }
+            chatTreeStore.clearBranch()
+
+            const userMsg = {
+              id: -Date.now(),
+              userId: null,
+              sessionId: data.sessionId,
+              parentId: parentMessageId,
+              role: 'user',
+              content: q,
+              sources: '[]',
+              createdAt: new Date().toISOString()
+            }
+
+            const assistantMsg = {
+              id: data.messageId || -Date.now() + 1,
+              userId: null,
+              sessionId: data.sessionId,
+              parentId: userMsg.id,
+              role: 'assistant',
+              content: data.answer,
+              sources: JSON.stringify(data.sourceDetails || []),
+              createdAt: new Date().toISOString()
+            }
+
+            chatTreeStore.state.messages.push(userMsg, assistantMsg)
+            chatTreeStore.setActiveLeaf(assistantMsg.id)
+          }
+        },
+        onError(err) {
+          vm.tempUserMsg = null
+          vm.loading = false
+          chatTreeStore.state.messages.push({
+            id: -Date.now(),
+            role: 'assistant',
+            content: '抱歉，发生了错误: ' + (err.message || '连接失败'),
+            sources: '[]',
+            parentId: null
+          })
+        },
+        onDone() {
+          vm.tempUserMsg = null
+          vm.loading = false
+          vm.$nextTick(() => vm.scrollToBottom())
+          vm.fetchSessions()
+        }
+      })
     },
     async newChat() {
       const title = prompt('请输入新对话的标题:')

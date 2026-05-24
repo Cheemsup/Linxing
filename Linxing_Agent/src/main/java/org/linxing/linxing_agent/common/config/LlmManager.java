@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.common.config;
 
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
@@ -17,6 +18,7 @@ import java.util.Set;
 public class LlmManager {
 
     private final Map<String, OpenAiChatModel> models = new LinkedHashMap<>();
+    private final Map<String, OpenAiStreamingChatModel> streamingModels = new LinkedHashMap<>();
     private final RagProperties ragProperties;
     private String defaultProvider;
 
@@ -39,7 +41,7 @@ public class LlmManager {
             String name = entry.getKey();
             RagProperties.LlmProviderConfig config = entry.getValue();
 
-            OpenAiChatModel model = OpenAiChatModel.builder()
+            OpenAiChatModel.OpenAiChatModelBuilder modelBuilder = OpenAiChatModel.builder()
                     .baseUrl(config.getBaseUrl())
                     .apiKey(config.getApiKey())
                     .modelName(config.getModel())
@@ -47,8 +49,13 @@ public class LlmManager {
                     .timeout(Duration.ofSeconds(llm.getTimeoutSeconds()))
                     .maxTokens(llm.getMaxTokens())
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+
+            if (config.getReturnThinking() != null) {
+                modelBuilder.returnThinking(config.getReturnThinking());
+            }
+
+            OpenAiChatModel model = modelBuilder.build();
 
             models.put(name, model);
             log.info("LLM provider [{}] 初始化完成: model={}, baseUrl={}", name, config.getModel(), config.getBaseUrl());
@@ -79,6 +86,38 @@ public class LlmManager {
 
     public OpenAiChatModel getDefaultModel() {
         return getModel(defaultProvider);
+    }
+
+    public OpenAiStreamingChatModel getStreamingModel(String provider) {
+        OpenAiStreamingChatModel model = streamingModels.get(provider);
+        if (model != null) {
+            return model;
+        }
+
+        RagProperties.Llm llm = ragProperties.getLlm();
+        Map<String, RagProperties.LlmProviderConfig> providers = llm.getProviders();
+        RagProperties.LlmProviderConfig config = providers.get(provider);
+        if (config == null) {
+            throw new IllegalArgumentException("未知的LLM provider: " + provider);
+        }
+
+        model = OpenAiStreamingChatModel.builder()
+                .baseUrl(config.getBaseUrl())
+                .apiKey(config.getApiKey())
+                .modelName(config.getModel())
+                .temperature(llm.getTemperature())
+                .timeout(Duration.ofSeconds(llm.getTimeoutSeconds()))
+                .maxTokens(llm.getMaxTokens())
+                .logRequests(true)
+                .logResponses(true)
+                .build();
+        streamingModels.put(provider, model);
+        log.info("Streaming LLM provider [{}] 初始化完成: model={}", provider, config.getModel());
+        return model;
+    }
+
+    public OpenAiStreamingChatModel getDefaultStreamingModel() {
+        return getStreamingModel(defaultProvider);
     }
 
     public String getDefaultProvider() {

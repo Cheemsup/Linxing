@@ -61,6 +61,7 @@ rag:
         model: ${DEEPSEEK_MODEL}
         api-key: ${DEEPSEEK_API_KEY}
         base-url: ${DEEPSEEK_BASE_URL}
+        return-thinking: true
       glm:
         model: ${GLM_MODEL}
         api-key: ${GLM_API_KEY}

@@ -89,6 +89,10 @@ jwt:
   ttl: ${JWT_TTL}
   token-name: ${JWT_TOKEN_NAME}
 
+agent:
+  skills:
+    path: ${AGENT_SKILLS_PATH:}
+
 logging:
   level:
     root: INFO

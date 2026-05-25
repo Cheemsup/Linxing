@@ -12,6 +12,7 @@ import org.linxing.linxing_agent.agent.tool.ToolRegistry;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -62,12 +63,16 @@ public class ToolCatalogTool implements Tool {
         return JsonObjectSchema.builder().build();
     }
 
+    private static final Set<String> META_TOOLS = Set.of(
+            "tool_catalog", "tool_resolve", "skill_catalog", "skill_resolve"
+    );
+
     @Override
     public ToolCallResult execute(ToolCallRequest request) {
         Catalog catalog = registry.catalog();
-        //过滤掉自身和 tool_resolve，避免目录中出现元工具
+        //过滤掉所有元工具（catalog/resolve），避免目录中出现元工具
         List<CatalogEntry> filtered = catalog.getEntries().stream()
-                .filter(e -> !NAME.equals(e.getName()) && !"tool_resolve".equals(e.getName()))
+                .filter(e -> !META_TOOLS.contains(e.getName()))
                 .collect(Collectors.toList());
         Catalog displayCatalog = new Catalog(filtered);
         return ToolCallResult.success(request.getToolCallId(), NAME, displayCatalog.toPromptText());

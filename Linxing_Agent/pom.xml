@@ -207,6 +207,12 @@
             <version>6.2.0</version>
         </dependency>
 
+        <!-- ==================== Caffeine（本地 LRU 缓存） ==================== -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
 
     </dependencies>
 

@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.agent.tool;
 
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import org.linxing.linxing_agent.agent.core.AgentContext;
 
 import java.util.List;
 
@@ -44,8 +45,17 @@ public interface Tool {
 
     /**
      * 执行工具调用
-     * @param request
+     * @param request 工具调用请求
+     * @param context Agent 运行时上下文，提供 userId、query 等信息
      * @return
      */
-    ToolCallResult execute(ToolCallRequest request);
+    ToolCallResult execute(ToolCallRequest request, AgentContext context);
+
+    /**
+     * @deprecated 使用 {@link #execute(ToolCallRequest, AgentContext)} 代替
+     */
+    @Deprecated
+    default ToolCallResult execute(ToolCallRequest request) {
+        throw new UnsupportedOperationException("请使用 execute(request, context)");
+    }
 }

@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 对用户问题的语义缓存
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

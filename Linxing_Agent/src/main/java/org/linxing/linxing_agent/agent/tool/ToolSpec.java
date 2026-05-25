@@ -4,6 +4,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import lombok.Builder;
 import lombok.Data;
+import org.linxing.linxing_agent.agent.core.AgentContext;
 
 @Data
 @Builder
@@ -29,9 +30,10 @@ public class ToolSpec {
     /**
      * 委托执行器执行工具调用
      * @param request
+     * @param context
      * @return
      */
-    public ToolCallResult execute(ToolCallRequest request) {
-        return executor.execute(request);
+    public ToolCallResult execute(ToolCallRequest request, AgentContext context) {
+        return executor.execute(request, context);
     }
 }

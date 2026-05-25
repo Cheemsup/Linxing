@@ -12,6 +12,9 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
+import org.linxing.linxing_agent.agent.catalog.Catalog;
+import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
+import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.linxing.linxing_agent.agent.tool.ToolRegistry;
@@ -22,29 +25,57 @@ import org.springframework.stereotype.Component;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 public class AgentExecutor {
 
     private static final int MAX_STEPS = 10;
-    private static final String AGENT_SYSTEM_PROMPT =
-            "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。你的能力包括：\n"
-                    + "- search_knowledge_base: 搜索用户知识库中的笔记内容\n\n"
-                    + "工作流程：\n"
-                    + "1. 先思考用户的问题需要哪些信息\n"
-                    + "2. 如果问题涉及用户笔记中的内容，使用 search_knowledge_base 搜索\n"
-                    + "3. 基于搜索结果给出准确、完整的回答\n"
-                    + "4. 如果搜索结果不相关或不足，可以调整关键词再次搜索\n"
-                    + "5. 仅依据搜索结果回答，不要编造信息\n\n"
-                    + "回答时务必标注信息来源（文件名和标题路径）。";
+
+    private static final String SYSTEM_PROMPT_TEMPLATE =
+            "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。\n\n"
+            + "工作流程：\n"
+            + "1. 先思考用户的问题需要哪些信息\n"
+            + "2. 查看下方【可用能力】目录，确认是否有匹配的工具或技能\n"
+            + "3. 如需了解工具或技能的详细用法，使用 resolve 获取完整定义\n"
+            + "4. 基于获取的信息给出准确、完整的回答\n"
+            + "5. 仅依据获取的信息回答，不要编造信息\n\n"
+            + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
+            + "%s";
 
     private final ToolRegistry toolRegistry;
+    private final List<CatalogProvider> catalogProviders;
     private final AgentStepMapper agentStepMapper;
 
-    public AgentExecutor(ToolRegistry toolRegistry, AgentStepMapper agentStepMapper) {
+    public AgentExecutor(ToolRegistry toolRegistry, List<CatalogProvider> catalogProviders,
+                         AgentStepMapper agentStepMapper) {
         this.toolRegistry = toolRegistry;
+        this.catalogProviders = catalogProviders;
         this.agentStepMapper = agentStepMapper;
+    }
+
+    /**
+     * 动态构建系统提示词，注入工具与技能目录信息
+     */
+    private String buildSystemPrompt() {
+        List<CatalogEntry> allEntries = new ArrayList<>();
+        for (CatalogProvider provider : catalogProviders) {
+            allEntries.addAll(provider.catalogEntries());
+        }
+
+        List<CatalogEntry> filtered = allEntries.stream()
+                .filter(e -> !Catalog.META_TOOLS.contains(e.getName()))
+                .collect(Collectors.toList());
+
+        if (filtered.isEmpty()) {
+            return String.format(SYSTEM_PROMPT_TEMPLATE, "");
+        }
+
+        Catalog catalog = new Catalog(filtered);
+        String catalogSection = "【可用能力】\n" + catalog.toPromptText() + "\n\n"
+                + "你可以先查看目录了解可用能力，再决定使用哪些工具或技能。";
+        return String.format(SYSTEM_PROMPT_TEMPLATE, catalogSection);
     }
 
     /**
@@ -56,7 +87,7 @@ public class AgentExecutor {
     public AgentResult execute(AgentContext context, OpenAiChatModel chatModel) {
         List<AgentStepVO> recordedSteps = new ArrayList<>();
 
-        context.getMemory().add(SystemMessage.from(AGENT_SYSTEM_PROMPT));//注入系统提示词
+        context.getMemory().add(SystemMessage.from(buildSystemPrompt()));//注入动态系统提示词
 
         int stepNumber = 0;
         AiMessage lastAiMessage = null;
@@ -118,7 +149,7 @@ public class AgentExecutor {
                         toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
                                 "未知工具: " + toolReq.name());
                     } else {
-                        toolResult = toolSpec.execute(toolCallRequest);//委托执行工具调用
+                        toolResult = toolSpec.execute(toolCallRequest, context);//委托执行工具调用
                     }
 
                     ToolExecutionRequest execReq = ToolExecutionRequest.builder()

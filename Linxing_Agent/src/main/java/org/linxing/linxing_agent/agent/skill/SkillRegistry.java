@@ -3,6 +3,8 @@ package org.linxing.linxing_agent.agent.skill;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
+import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
@@ -14,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 技能注册中心
@@ -23,7 +26,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent> {
+public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>, CatalogProvider {
 
     private final Map<String, SkillMetadata> metadataIndex = new LinkedHashMap<>();
 
@@ -77,20 +80,37 @@ public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>
                 String.join(", ", metadataIndex.keySet()));
     }
 
-    //Phase 1: 返回所有技能的目录，内存维护
-    public SkillCatalog catalog() {
-        List<SkillCatalogEntry> entries = new ArrayList<>();
+    @Override
+    public List<CatalogEntry> catalogEntries() {
+        List<CatalogEntry> entries = new ArrayList<>();
         for (SkillMetadata metadata : metadataIndex.values()) {
-            entries.add(new SkillCatalogEntry(
-                    metadata.getName(),
-                    metadata.getDescription()
-            ));
+            entries.add(CatalogEntry.skill(metadata.getName(), metadata.getDescription()));
         }
-        return new SkillCatalog(entries);
+        return entries;
     }
 
-    //Phase 2: 按需获取技能完整指令（磁盘读取 + 缓存）
-    public List<SkillInstructions> resolve(List<String> names) {
+    @Override
+    public String resolve(List<String> names) {
+        List<SkillInstructions> instructions = resolveInstructions(names);
+        if (instructions.isEmpty()) {
+            return "未找到指定的技能，请先调用 catalog 查看可用列表。";
+        }
+        return instructions.stream()
+                .map(instr -> "## 技能: " + instr.getName() + "\n\n"
+                        + instr.getInstructions() + "\n\n"
+                        + (instr.getToolNames() != null && !instr.getToolNames().isEmpty()
+                        ? "关联工具: " + String.join(", ", instr.getToolNames()) + "\n\n"
+                        : "")
+                        + (instr.getResourcePaths() != null && !instr.getResourcePaths().isEmpty()
+                        ? "可用参考资源: " + String.join(", ", instr.getResourcePaths()) + "\n\n"
+                        : ""))
+                .collect(Collectors.joining("---\n\n"));
+    }
+
+    /**
+     * 按需获取技能完整指令（磁盘读取 + 缓存）
+     */
+    public List<SkillInstructions> resolveInstructions(List<String> names) {
         List<SkillInstructions> result = new ArrayList<>();
         for (String name : names) {
             SkillInstructions instructions = instructionsCache.get(name, key -> {
@@ -108,7 +128,9 @@ public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>
         return result;
     }
 
-    //Phase 3: 按需获取技能的参考资源文件（磁盘读取，不缓存）
+    /**
+     * 按需获取技能的参考资源文件（磁盘读取，不缓存）
+     */
     public String loadResource(String skillName, String resourcePath) {
         SkillMetadata metadata = metadataIndex.get(skillName);
         if (metadata == null) {

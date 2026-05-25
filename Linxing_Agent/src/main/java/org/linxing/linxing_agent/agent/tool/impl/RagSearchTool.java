@@ -6,10 +6,10 @@ import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
-import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.rag.dto.SearchResult;
 import org.linxing.linxing_agent.rag.service.ISearchService;
 import org.springframework.stereotype.Component;
@@ -71,9 +71,9 @@ public class RagSearchTool implements Tool {
     }
 
     @Override
-    public ToolCallResult execute(ToolCallRequest request) {
-        Long userIdLong = BaseContext.getCurrentId();
-        if (userIdLong == null) {
+    public ToolCallResult execute(ToolCallRequest request, AgentContext context) {
+        Integer userId = context.getUserId();
+        if (userId == null) {
             return ToolCallResult.failure(request.getToolCallId(), NAME, "用户未登录");
         }
 
@@ -96,7 +96,6 @@ public class RagSearchTool implements Tool {
         }
 
         try {
-            int userId = userIdLong.intValue();
             log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, topK);
             List<SearchResult> results = searchService.search(userId, query, topK, true);
 

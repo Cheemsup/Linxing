@@ -2,6 +2,8 @@ package org.linxing.linxing_agent.agent.tool;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
+import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.stereotype.Component;
@@ -10,10 +12,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent> {
+public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>, CatalogProvider {
 
     private final Map<String, ToolSpec> tools = new LinkedHashMap<>();
 
@@ -78,11 +81,11 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent> 
     }
 
     /**
-     * 批量获取指定工具的完整 ToolSpec，用于渐进式披露优化中
-     * @param names 工具名称列表
+     * 批量获取指定工具的完整 ToolSpec
+     * @param names
      * @return
      */
-    public List<ToolSpec> resolve(List<String> names) {
+    public List<ToolSpec> resolveSpecs(List<String> names) {
         List<ToolSpec> result = new ArrayList<>();
         for (String name : names) {
             ToolSpec spec = tools.get(name);
@@ -95,37 +98,32 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent> 
         return result;
     }
 
-    /**
-     * 生成工具目录内容并返回，只含简要tool信息不含完整 Schema
-     * 被使用的链路：LLM -> ToolCatalogTool.execute() -> ToolRegistry.catalog() -> Catalog && CatalogEntry
-     * @return 工具目录
-     */
-    public Catalog catalog() {
+    @Override
+    public List<CatalogEntry> catalogEntries() {
         List<CatalogEntry> entries = new ArrayList<>();
         for (ToolSpec spec : tools.values()) {
             Tool executor = spec.getExecutor();
-            entries.add(new CatalogEntry(
+            entries.add(CatalogEntry.tool(
                     spec.getName(),
                     executor.brief(),
                     executor.whenToUse(),
                     executor.prerequisites()
             ));
         }
-        return new Catalog(entries);
+        return entries;
     }
 
-    /**
-     * 生成目录工具自身的 LangChain4j 规格（tool_catalog + tool_resolve）
-     * @return
-     */
-    public List<ToolSpecification> catalogToolSpecs() {
-        List<ToolSpecification> specs = new ArrayList<>();
-        for (ToolSpec tool : tools.values()) {
-            if ("tool_catalog".equals(tool.getName()) || "tool_resolve".equals(tool.getName())) {
-                specs.add(tool.toLangChain4jSpec());
-            }
-        }
-        return specs;
+    @Override
+    public String resolve(List<String> names) {
+        List<ToolSpec> specs = resolveSpecs(names);
+        String resultText = specs.stream()
+                .map(spec -> "## 工具: " + spec.getName() + "\n\n"
+                        + spec.getDescription() + "\n\n"
+                        + "参数:\n```json\n" + spec.getParameters() + "\n```")
+                .collect(Collectors.joining("\n\n---\n\n"));
+        return resultText.isBlank()
+                ? "未找到指定的工具，请先调用 catalog 查看可用列表。"
+                : resultText;
     }
 
     /**

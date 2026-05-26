@@ -123,7 +123,7 @@ public class ChatController {
         List<ChatMessageVO> cached = chatMessageCacheService.getMessages(sessionId);
         if (cached != null) {
             int dbCount = chatMessageMapper.countBySessionId(sessionId);
-            if (cached.size() == dbCount) {
+            if (cached.size() == dbCount && isValidCache(cached)) {
                 return Result.success(cached);
             }
             chatMessageCacheService.deleteSession(sessionId);
@@ -134,6 +134,11 @@ public class ChatController {
 
         chatMessageCacheService.putMessages(sessionId, vos);
         return Result.success(vos);
+    }
+
+    private boolean isValidCache(List<ChatMessageVO> messages) {
+        return messages.stream().noneMatch(
+                m -> "assistant".equals(m.getRole()) && m.getParentId() == null);
     }
 
     @DeleteMapping("/messages/{messageId}/subtree")

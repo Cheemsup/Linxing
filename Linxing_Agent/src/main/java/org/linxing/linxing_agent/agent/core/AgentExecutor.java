@@ -10,6 +10,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.memory.WindowMemory;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.catalog.Catalog;
@@ -83,7 +84,12 @@ public class AgentExecutor {
                 progressiveMode ? "渐进披露" : "全量注入",
                 toolRegistry.size(), skillRegistry.size(), disclosureThreshold);
 
-        context.getMemory().add(SystemMessage.from(buildSystemPrompt(progressiveMode)));//通过progressiveMode影响system prompt内容
+        SystemMessage systemMessage = SystemMessage.from(buildSystemPrompt(progressiveMode));
+        if (context.getMemory() instanceof WindowMemory wm) {
+            wm.setSystemMessage(systemMessage);
+        } else {
+            context.getMemory().add(systemMessage);
+        }
 
         List<ToolSpecification> initialSpecs = buildInitialToolSpecs(progressiveMode);//通过progressiveMode影响初始提供的工具内容
         Set<String> activatedToolNames = new HashSet<>();
@@ -190,7 +196,7 @@ public class AgentExecutor {
                     // 记录工具返回结果步骤
                     AgentStep obsStep = buildStep(context.getSessionId(), null, stepNumber,
                             "tool_result",
-                            toolResult.isSuccess() ? truncate(toolResult.getResult(), 2000) : toolResult.getError(),
+                            toolResult.isSuccess() ? toolResult.getResult() : toolResult.getError(),
                             toolReq.name());
                     agentStepMapper.insert(obsStep);
                     recordedSteps.add(toStepVO(obsStep));

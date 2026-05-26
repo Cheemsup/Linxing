@@ -310,7 +310,8 @@ export default {
         if (activeLeafId) {
           chatTreeStore.setActiveLeaf(activeLeafId)
         } else if (data.length > 0) {
-          chatTreeStore.setActiveLeaf(data[data.length - 1].id)
+          const lastAssistant = data.filter(m => m.role === 'assistant').pop()
+          chatTreeStore.setActiveLeaf(lastAssistant ? lastAssistant.id : data[data.length - 1].id)
         }
       } catch (e) {
         console.error('加载消息失败:', e)

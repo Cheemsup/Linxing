@@ -9,6 +9,7 @@ import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,6 +38,7 @@ public class ChatMessageService {
                 .role("user")
                 .content(content)
                 .sources("[]")
+                .createdAt(OffsetDateTime.now())
                 .build();
         chatMessageMapper.insert(userMsg);
         log.debug("[用户{}] 保存用户消息 id={}, sessionId={}, parentId={}",
@@ -57,6 +59,7 @@ public class ChatMessageService {
                 .role("assistant")
                 .content(content)
                 .sources(sourcesJson)
+                .createdAt(OffsetDateTime.now())
                 .build();
         chatMessageMapper.insert(assistantMsg);
         return assistantMsg;
@@ -116,6 +119,21 @@ public class ChatMessageService {
      */
     public void touchSession(Integer sessionId) {
         chatSessionMapper.updateUpdatedAt(sessionId);
+    }
+
+    /**
+     * 加载会话中的最近消息作为 context 兜底
+     */
+    public List<ChatMessage> loadRecentMessages(Integer sessionId) {
+        List<ChatMessage> allMessages = chatMessageMapper.selectBySessionId(sessionId);
+        if (allMessages.isEmpty()) {
+            return List.of();
+        }
+        int maxMessages = MAX_HISTORY_ROUNDS * 2;
+        if (allMessages.size() > maxMessages) {
+            return allMessages.subList(allMessages.size() - maxMessages, allMessages.size());
+        }
+        return allMessages;
     }
 
     public ChatMessageVO toMessageVO(ChatMessage msg) {

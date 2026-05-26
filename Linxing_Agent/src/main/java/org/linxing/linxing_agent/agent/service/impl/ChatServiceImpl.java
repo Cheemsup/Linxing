@@ -57,6 +57,9 @@ public class ChatServiceImpl implements IChatService {
                     userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息
 
             List<ChatMessage> history = chatMessageService.backtrackHistory(userMsg.getId());//沿parentId链路回溯对话历史
+            if (history.isEmpty() && request.getParentMessageId() != null && sessionId != null) {
+                history = chatMessageService.loadRecentMessages(sessionId);
+            }
 
             //向量化query，用于语义缓存匹配
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();
@@ -70,19 +73,9 @@ public class ChatServiceImpl implements IChatService {
 
             ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery);//ReAct Agent循环
 
-            //Redis写入对话消息缓存
-            chatMessageCacheService.appendMessages(sessionId, List.of(
-                    chatMessageService.toMessageVO(userMsg),
-                    chatMessageService.toMessageVO(ChatMessage.builder()
-                            .id(agentResponse.getMessageId())
-                            .userId(userId)
-                            .sessionId(sessionId)
-                            .role("assistant")
-                            .content(agentResponse.getAnswer())
-                            .sources(agentResponse.getSources() != null
-                                    ? agentResponse.getSources().toString() : "[]")
-                            .build())
-            ));
+            semanticCacheService.store(userId, queryEmbedding.vector(), originalQuery,
+                    agentResponse.getAnswer(),
+                    sourceExtractor.toSourcesJson(agentResponse.getSourceDetails()));
 
             chatMessageService.touchSession(sessionId);//更新会话的最近更新时间
 
@@ -135,6 +128,11 @@ public class ChatServiceImpl implements IChatService {
         ChatMessage assistantMsg = chatMessageService.saveAssistantMessage(
                 userId, sessionId, userMsg.getId(), result.getAnswer(), sourcesJson);//持久化助手消息
 
+        chatMessageCacheService.appendMessages(sessionId, List.of(
+                chatMessageService.toMessageVO(userMsg),
+                chatMessageService.toMessageVO(assistantMsg)
+        ));
+
         return ChatResponse.builder()
                 .answer(result.getAnswer())
                 .sources(sourceExtractor.parseSourceList(sourcesJson))
@@ -168,6 +166,11 @@ public class ChatServiceImpl implements IChatService {
 
         ChatMessage assistantMsg = chatMessageService.saveAssistantMessage(
                 userId, sessionId, userMsg.getId(), cached.getAnswer(), cached.getSources());//持久化缓存中的助手消息
+
+        chatMessageCacheService.appendMessages(sessionId, List.of(
+                chatMessageService.toMessageVO(userMsg),
+                chatMessageService.toMessageVO(assistantMsg)
+        ));
 
         recordActivityLog(userId, cachedSourceDetails.size());
 

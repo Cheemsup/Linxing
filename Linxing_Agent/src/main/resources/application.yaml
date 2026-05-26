@@ -85,6 +85,9 @@ rag:
       quota-per-user: ${RAG_SEMANTIC_CACHE_QUOTA:100}
       quantization: ${RAG_SEMANTIC_CACHE_QUANT:NOQUANT}
 
+cors:
+  allowed-origins: http://localhost:3000
+
 jwt:
   secret-key: ${JWT_SECRET_KEY}
   ttl: ${JWT_TTL}

@@ -4,7 +4,7 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
@@ -118,7 +118,7 @@ public class ChatServiceImpl implements IChatService {
 
         AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);
 
-        OpenAiChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
+        OpenAiStreamingChatModel chatModel = llmManager.getStreamingModel(LlmType.CHAT_MODEL);
 
         AgentResult result = agentExecutor.execute(context, chatModel, listener);
 

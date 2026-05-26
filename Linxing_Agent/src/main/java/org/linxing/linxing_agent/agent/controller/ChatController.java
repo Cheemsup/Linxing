@@ -1,8 +1,11 @@
 package org.linxing.linxing_agent.agent.controller;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.agent.core.AgentStepEvent;
+import org.linxing.linxing_agent.agent.core.AgentStepListener;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.common.result.PageResult;
@@ -25,6 +28,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/agent")
 @RequiredArgsConstructor
+@Slf4j
 public class ChatController {
 
     private final IChatService chatService;
@@ -36,11 +40,22 @@ public class ChatController {
     public SseEmitter agentChat(
             @RequestParam String query,
             @RequestParam(required = false) Integer sessionId,
-            @RequestParam(required = false) Integer parentMessageId) {
+            @RequestParam(required = false) Integer parentMessageId,
+            HttpServletResponse httpResponse) {
+
+        // 禁用Tomcat输出缓冲，确保SSE事件实时推送到客户端
+        httpResponse.setBufferSize(0);
+        httpResponse.setHeader("Cache-Control", "no-cache");
+        httpResponse.setHeader("X-Accel-Buffering", "no");
+
         SseEmitter emitter = new SseEmitter(300_000L);
 
         Long userId = BaseContext.getCurrentId();
         Integer resolvedUserId = userId != null ? userId.intValue() : null;
+
+        // 流式token计数器（用于日志）
+        int[] streamTokenCount = {0};
+        int[] streamAccLen = {0};
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -55,36 +70,67 @@ public class ChatController {
                         .userId(resolvedUserId)
                         .build();
 
-                ChatResponse response = chatService.chat(request, event -> {
-                    try {
-                        Map<String, Object> stepData = new LinkedHashMap<>();
-                        stepData.put("type", "step");
-                        stepData.put("eventType", event.getEventType());
-                        stepData.put("stepNumber", event.getStepNumber());
-                        if (event.getToolName() != null) {
-                            stepData.put("toolName", event.getToolName());
-                        }
-                        if (event.getToolArguments() != null) {
-                            stepData.put("toolArguments", event.getToolArguments());
-                        }
-                        if (event.getToolResult() != null) {
-                            stepData.put("toolResult", event.getToolResult());
-                        }
-                        if (event.getAnswer() != null) {
-                            stepData.put("answer", event.getAnswer());
-                        }
-                        if (event.getError() != null) {
-                            stepData.put("error", event.getError());
-                        }
-                        stepData.put("finalStep", event.isFinalStep());
+                ChatResponse response = chatService.chat(request, new AgentStepListener() {
+                    @Override
+                    public void onStep(AgentStepEvent event) {
+                        try {
+                            Map<String, Object> stepData = new LinkedHashMap<>();
+                            stepData.put("type", "step");
+                            stepData.put("eventType", event.getEventType());
+                            stepData.put("stepNumber", event.getStepNumber());
+                            if (event.getToolName() != null) {
+                                stepData.put("toolName", event.getToolName());
+                            }
+                            if (event.getToolArguments() != null) {
+                                stepData.put("toolArguments", event.getToolArguments());
+                            }
+                            if (event.getToolResult() != null) {
+                                stepData.put("toolResult", event.getToolResult());
+                            }
+                            if (event.getAnswer() != null) {
+                                stepData.put("answer", event.getAnswer());
+                            }
+                            if (event.getError() != null) {
+                                stepData.put("error", event.getError());
+                            }
+                            stepData.put("finalStep", event.isFinalStep());
 
-                        synchronized (emitter) {
-                            emitter.send(SseEmitter.event()
-                                    .name("message")
-                                    .data(stepData));
+                            // log.info("[SSE] 发送step事件: eventType={}, step={}, final={}",
+                            //         event.getEventType(), event.getStepNumber(), event.isFinalStep());
+
+                            synchronized (emitter) {
+                                emitter.send(SseEmitter.event()
+                                        .name("message")
+                                        .data(stepData));
+                            }
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                    }
+
+                    @Override
+                    public void onStream(String token) {
+                        try {
+                            streamTokenCount[0]++;
+                            Map<String, Object> streamData = new LinkedHashMap<>();
+                            streamData.put("type", "llm_stream");
+                            streamData.put("token", token);
+
+                            synchronized (emitter) {
+                                emitter.send(SseEmitter.event()
+                                        .name("message")
+                                        .data(streamData));
+                            }
+
+                            // 实时输出接收到的token进度（调试用，取消注释可查看）
+                            // if (streamTokenCount[0] % 50 == 1) {
+                            //     log.info("[SSE] 流式发送进度: 第{}个token, 累计长度={}",
+                            //             streamTokenCount[0], streamAccLen[0]);
+                            // }
+                            streamAccLen[0] += token.length();
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
                 });
 
@@ -95,12 +141,19 @@ public class ChatController {
                 resultData.put("sourceDetails", response.getSourceDetails());
                 resultData.put("sessionId", response.getSessionId());
                 resultData.put("messageId", response.getMessageId());
+
+                // log.info("[SSE] 发送result事件: answer长度={}",
+                //         response.getAnswer() != null ? response.getAnswer().length() : 0);
+
                 emitter.send(SseEmitter.event()
                         .name("message")
                         .data(resultData));
 
                 Map<String, Object> doneData = new LinkedHashMap<>();
                 doneData.put("type", "done");
+
+                // log.info("[SSE] 发送done事件, SSE流结束");
+
                 emitter.send(SseEmitter.event()
                         .name("message")
                         .data(doneData));

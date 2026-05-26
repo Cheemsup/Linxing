@@ -42,23 +42,63 @@
                 </div>
                 <div v-else class="bot-message">
                   <strong>助手:</strong>
-                  <div class="answer" v-html="formatAnswer(item.content)"></div>
-                  <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
-                    <span class="source-label">来源:</span>
-                    <span
-                      v-for="(source, si) in item.sourceDetails"
-                      :key="si"
-                      class="source-tag clickable"
-                      @click="openChunkContext(source)"
-                      :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
-                    >
-                      {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
-                    </span>
-                  </div>
-                  <div v-else-if="item.sources && item.sources.length" class="sources">
-                    <span class="source-label">来源:</span>
-                    <span v-for="source in item.sources" :key="source" class="source-tag">{{ source }}</span>
-                  </div>
+                  <template v-if="item.stepEvents && item.stepEvents.length">
+                    <div class="collapsible-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'step') }">
+                      <div class="panel-header" @click="togglePanel(item.id, 'step')">
+                        <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'step') ? '▶' : '▼' }}</span>
+                        <span class="panel-title">推理过程</span>
+                        <span class="panel-badge">{{ item.stepEvents.length }}步</span>
+                      </div>
+                      <div v-show="!isPanelCollapsed(item.id, 'step')" class="panel-body">
+                        <div v-for="(step, idx) in item.stepEvents" :key="idx" :class="['step-item', getStepClass(step)]">
+                          <span class="step-icon">{{ getStepIcon(step) }}</span>
+                          <span class="step-text">{{ formatStepText(step) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="collapsible-panel answer-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'answer') }">
+                      <div class="panel-header" @click="togglePanel(item.id, 'answer')">
+                        <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'answer') ? '▶' : '▼' }}</span>
+                        <span class="panel-title">回答详情</span>
+                        <span class="panel-badge">已生成</span>
+                      </div>
+                      <div v-show="!isPanelCollapsed(item.id, 'answer')" class="panel-body">
+                        <div v-if="item.thinkingText" class="thinking-content">{{ item.thinkingText }}</div>
+                        <div class="answer" v-html="formatAnswer(item.content)"></div>
+                        <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
+                          <span class="source-label">来源:</span>
+                          <span
+                            v-for="(source, si) in item.sourceDetails"
+                            :key="si"
+                            class="source-tag clickable"
+                            @click="openChunkContext(source)"
+                            :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
+                          >
+                            {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="answer" v-html="formatAnswer(item.content)"></div>
+                    <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
+                      <span class="source-label">来源:</span>
+                      <span
+                        v-for="(source, si) in item.sourceDetails"
+                        :key="si"
+                        class="source-tag clickable"
+                        @click="openChunkContext(source)"
+                        :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
+                      >
+                        {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
+                      </span>
+                    </div>
+                    <div v-else-if="item.sources && item.sources.length" class="sources">
+                      <span class="source-label">来源:</span>
+                      <span v-for="source in item.sources" :key="source" class="source-tag">{{ source }}</span>
+                    </div>
+                  </template>
                 </div>
               </div>
               <div v-if="item.role === 'user'" class="message-actions">
@@ -84,12 +124,53 @@
         <div v-if="loading" class="message-row">
           <div class="message assistant">
             <div class="message-content">
-              <div class="bot-message">
-                <strong>助手:</strong> <span class="loading">思考中...</span>
+              <div class="bot-message agent-output">
+
+                <div class="collapsible-panel" :class="{ collapsed: stepCollapsed }">
+                  <div class="panel-header" @click="stepCollapsed = !stepCollapsed">
+                    <span class="panel-toggle">{{ stepCollapsed ? '▶' : '▼' }}</span>
+                    <span class="panel-title">推理过程</span>
+                    <span class="panel-badge" v-if="stepEvents.length">{{ stepEvents.length }}步</span>
+                  </div>
+                  <div v-show="!stepCollapsed" class="panel-body">
+                    <div v-if="!stepEvents.length && !isStreaming" class="step-placeholder">
+                      等待推理开始...
+                    </div>
+                    <div v-else-if="!stepEvents.length && isStreaming" class="step-item step-thinking">
+                      <span class="step-icon">💭</span>
+                      <span>正在思考...</span>
+                    </div>
+                    <div v-for="(step, idx) in stepEvents" :key="idx" :class="['step-item', getStepClass(step)]">
+                      <span class="step-icon">{{ getStepIcon(step) }}</span>
+                      <span class="step-text">{{ formatStepText(step) }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="collapsible-panel answer-panel" :class="{ collapsed: answerCollapsed }">
+                  <div class="panel-header" @click="answerCollapsed = !answerCollapsed">
+                    <span class="panel-toggle">{{ answerCollapsed ? '▶' : '▼' }}</span>
+                    <span class="panel-title">回答详情</span>
+                    <span class="panel-badge" v-if="streamingText || isStreaming">
+                      {{ isStreaming ? '生成中' : '已生成' }}
+                    </span>
+                  </div>
+                  <div v-show="!answerCollapsed" class="panel-body">
+                    <div v-if="thinkingText" class="thinking-content">{{ thinkingText }}</div>
+                    <div v-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
+                    <div v-else-if="streamingText" class="answer" v-html="formatAnswer(streamingText)"></div>
+                    <div v-else class="step-placeholder">
+                      等待回答...
+                    </div>
+                    <span v-if="isStreaming" class="streaming-cursor">|</span>
+                  </div>
+                </div>
+
               </div>
             </div>
           </div>
         </div>
+
       </div>
 
       <div class="chat-input">
@@ -152,7 +233,16 @@ export default {
       activeSessionId: null,
       tempUserMsg: null,
       showContextPanel: false,
-      showTreeModal: false
+      showTreeModal: false,
+      streamingText: '',
+      isStreaming: false,
+      stepEvents: [],
+      stepCollapsed: false,
+      answerCollapsed: false,
+      thinkingText: '',
+      tokenBuffer: '',
+      flushTimer: null,
+      messagePanelState: {}
     }
   },
   computed: {
@@ -293,6 +383,7 @@ export default {
       chatTreeStore.clearBranch()
       chatTreeStore.setActiveLeaf(null)
       this.question = ''
+      this.messagePanelState = {}
       await this.loadMessages()
     },
     async loadMessages(activeLeafId = null) {
@@ -319,12 +410,28 @@ export default {
       }
       this.$nextTick(() => this.scrollToBottom())
     },
+
+    resetStreamState() {
+      this.streamingText = ''
+      this.isStreaming = false
+      this.stepEvents = []
+      this.stepCollapsed = false
+      this.answerCollapsed = false
+      this.thinkingText = ''
+      this.tokenBuffer = ''
+      if (this.flushTimer) {
+        clearTimeout(this.flushTimer)
+        this.flushTimer = null
+      }
+    },
+
     async sendQuestion() {
       if (!this.question.trim() || this.loading) return
 
       const q = this.question.trim()
       this.question = ''
       this.loading = true
+      this.resetStreamState()
 
       this.tempUserMsg = { content: q }
       this.$nextTick(() => this.scrollToBottom())
@@ -347,6 +454,12 @@ export default {
           if (data.type === 'error') {
             vm.tempUserMsg = null
             vm.loading = false
+            vm.resetStreamState()
+            vm.stepEvents.push({
+              eventType: 'error',
+              error: data.message || '未知错误',
+              finalStep: true
+            })
             chatTreeStore.state.messages.push({
               id: -Date.now(),
               role: 'assistant',
@@ -357,7 +470,59 @@ export default {
             vm.$nextTick(() => vm.scrollToBottom())
             return
           }
+
+          if (data.type === 'step') {
+            const stepData = {
+              eventType: data.eventType,
+              stepNumber: data.stepNumber,
+              toolName: data.toolName,
+              toolArguments: data.toolArguments,
+              toolResult: data.toolResult,
+              answer: data.answer,
+              error: data.error,
+              finalStep: data.finalStep
+            }
+            vm.stepEvents.push(stepData)
+            // 7.2.2: thinking 事件携带 answer 内容时，追加到第二层思考文本
+            if (data.eventType === 'thinking' && data.answer) {
+              vm.thinkingText += (vm.thinkingText ? '\n' : '') + data.answer
+            }
+            requestAnimationFrame(() => {
+              vm.$nextTick(() => vm.scrollToBottom())
+            })
+            return
+          }
+
+          // 7.2.2: 支持 thinking_stream 事件类型（LLM思考推理流式token）
+          if (data.type === 'thinking_stream') {
+            vm.thinkingText += data.token || ''
+            requestAnimationFrame(() => {
+              vm.$nextTick(() => vm.scrollToBottom())
+            })
+            return
+          }
+
+          if (data.type === 'llm_stream') {
+            if (!vm.isStreaming) {
+              vm.isStreaming = true
+            }
+            // 7.2.3: token batching — 30ms 批量 flush
+            vm.tokenBuffer += data.token
+            if (!vm.flushTimer) {
+              vm.flushTimer = setTimeout(() => vm.flushTokenBuffer(), 30)
+            }
+            return
+          }
+
           if (data.type === 'result') {
+            // 先 flush 剩余 token
+            vm.flushTokenBuffer()
+
+            vm.isStreaming = false
+            vm.stepCollapsed = true
+            vm.answerCollapsed = false
+            // 不清空 streamingText，保留完整回答用于过渡显示
+
             if (data.sessionId && !vm.activeSessionId) {
               vm.activeSessionId = data.sessionId
               vm.fetchSessions()
@@ -383,16 +548,28 @@ export default {
               role: 'assistant',
               content: data.answer,
               sources: JSON.stringify(data.sourceDetails || []),
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
+              // 7.1.2: 将 stepEvents 和 thinkingText 存入消息，使折叠面板持久化
+              stepEvents: [...vm.stepEvents],
+              thinkingText: vm.thinkingText
             }
+
+            // 初始化历史消息面板状态为折叠
+            vm.messagePanelState[assistantMsg.id] = { step: true, answer: true }
 
             chatTreeStore.state.messages.push(userMsg, assistantMsg)
             chatTreeStore.setActiveLeaf(assistantMsg.id)
+
+            setTimeout(() => {
+              vm.answerCollapsed = true
+              vm.$nextTick(() => vm.scrollToBottom())
+            }, 1500)
           }
         },
         onError(err) {
           vm.tempUserMsg = null
           vm.loading = false
+          vm.resetStreamState()
           chatTreeStore.state.messages.push({
             id: -Date.now(),
             role: 'assistant',
@@ -402,13 +579,98 @@ export default {
           })
         },
         onDone() {
+          // flush 剩余 token
+          vm.flushTokenBuffer()
           vm.tempUserMsg = null
           vm.loading = false
+          vm.isStreaming = false
           vm.$nextTick(() => vm.scrollToBottom())
           vm.fetchSessions()
         }
       })
     },
+
+    getStepClass(step) {
+      switch (step.eventType) {
+        case 'tool_call': return 'step-tool'
+        case 'tool_result': return 'step-tool'
+        case 'thinking': return 'step-thinking'
+        case 'search': return 'step-search'
+        case 'error': return 'step-error'
+        case 'final': return 'step-final'
+        default: return ''
+      }
+    },
+
+    getStepIcon(step) {
+      switch (step.eventType) {
+        case 'tool_call': return '🔧'
+        case 'tool_result': return '📋'
+        case 'thinking': return '💭'
+        case 'search': return '🌐'
+        case 'error': return '❌'
+        case 'final': return '✅'
+        default: return '📌'
+      }
+    },
+
+    formatStepText(step) {
+      switch (step.eventType) {
+        case 'tool_call': {
+          let text = `工具调用: ${step.toolName || 'unknown'}`
+          if (step.toolArguments) {
+            const argsStr = typeof step.toolArguments === 'string'
+              ? step.toolArguments
+              : JSON.stringify(step.toolArguments)
+            text += ` (${argsStr.length > 50 ? argsStr.substring(0, 50) + '...' : argsStr})`
+          }
+          return text
+        }
+        case 'tool_result': {
+          let text = `工具结果: ${step.toolName || 'unknown'}`
+          if (step.toolResult !== undefined && step.toolResult !== null) {
+            const resultStr = String(step.toolResult)
+            text += ` → ${resultStr.length > 60 ? resultStr.substring(0, 60) + '...' : resultStr}`
+          }
+          return text
+        }
+        case 'thinking':
+          return step.answer ? `思考: ${step.answer}` : '思考推理中...'
+        case 'search':
+          return `搜索: ${step.toolName || '知识检索'}`
+        case 'error':
+          return `错误: ${step.error || '未知'}`
+        case 'final':
+          return '推理完成'
+        default:
+          return `${step.eventType}: ${JSON.stringify(step).substring(0, 80)}`
+      }
+    },
+
+    flushTokenBuffer() {
+      if (this.tokenBuffer) {
+        this.streamingText += this.tokenBuffer
+        this.tokenBuffer = ''
+        requestAnimationFrame(() => {
+          this.$nextTick(() => this.scrollToBottom())
+        })
+      }
+      this.flushTimer = null
+    },
+
+    isPanelCollapsed(messageId, panelType) {
+      const state = this.messagePanelState[messageId]
+      if (!state) return true
+      return state[panelType]
+    },
+
+    togglePanel(messageId, panelType) {
+      if (!this.messagePanelState[messageId]) {
+        this.messagePanelState[messageId] = { step: true, answer: true }
+      }
+      this.messagePanelState[messageId][panelType] = !this.messagePanelState[messageId][panelType]
+    },
+
     async newChat() {
       const title = prompt('请输入新对话的标题:')
       if (!title || !title.trim()) return
@@ -526,6 +788,23 @@ export default {
 </script>
 
 <style scoped>
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  animation: blink 0.8s infinite;
+  color: #1a73e8;
+  font-weight: bold;
+  margin-left: 1px;
+}
+
+.streaming-answer {
+  display: inline;
+}
+
 .chat-panel-wrapper {
   display: flex;
   height: 100%;
@@ -721,6 +1000,10 @@ export default {
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
+.agent-output {
+  max-width: 600px;
+}
+
 .answer {
   margin-top: 4px;
   line-height: 1.6;
@@ -804,6 +1087,142 @@ export default {
   background: #fff3e0;
   color: #e65100;
   border-color: #e65100;
+}
+
+.collapsible-panel {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: white;
+  transition: all 0.25s ease;
+}
+
+.collapsible-panel.collapsed {
+  background: #fafbfc;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  transition: background 0.15s;
+}
+
+.collapsed > .panel-header {
+  border-bottom: none;
+}
+
+.panel-header:hover {
+  background: #eef1f5;
+}
+
+.panel-toggle {
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+}
+
+.panel-badge {
+  font-size: 11px;
+  color: #1a73e8;
+  background: #e8f0fe;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: auto;
+}
+
+.panel-body {
+  padding: 10px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.answer-panel .panel-body {
+  max-height: 400px;
+  line-height: 1.6;
+}
+
+.step-placeholder {
+  color: #aaa;
+  font-style: italic;
+  font-size: 13px;
+  text-align: center;
+  padding: 12px 0;
+}
+
+.step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.step-item:last-child {
+  border-bottom: none;
+}
+
+.step-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  margin-top: 1px;
+}
+
+.step-text {
+  word-break: break-word;
+  color: #444;
+}
+
+.step-tool .step-text {
+  color: #1565c0;
+}
+
+.step-thinking .step-text {
+  color: #666;
+  font-style: italic;
+}
+
+.step-search .step-text {
+  color: #2e7d32;
+}
+
+.step-error .step-text {
+  color: #c62828;
+  font-weight: 500;
+}
+
+.step-final .step-text {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.thinking-content {
+  white-space: pre-wrap;
+  color: #666;
+  font-style: italic;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.streaming-plain {
+  white-space: pre-wrap;
 }
 
 .chat-input {

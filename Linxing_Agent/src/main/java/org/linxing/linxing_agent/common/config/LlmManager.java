@@ -114,6 +114,8 @@ public class LlmManager {
                 .maxTokens(llm.getMaxTokens())
                 .logRequests(true)
                 .logResponses(true)
+                .sendThinking(config.getSendThinking())
+                .returnThinking(config.getReturnThinking())
                 .build();
         streamingModels.put(provider, model);
         log.info("Streaming LLM provider [{}] 初始化完成: model={}", provider, config.getModel());

@@ -56,6 +56,7 @@ public class RagProperties {
         private String groupId;
         private String model;
         private Boolean returnThinking;
+        private Boolean sendThinking;
     }
 
     @Data

@@ -18,7 +18,12 @@ import java.util.stream.Collectors;
 
 /**
  * 统一目录工具，聚合 ToolRegistry 和 SkillRegistry 的目录信息
+ *
+ * @deprecated 目录信息已在 {@code AgentExecutor.buildSystemPrompt()} 中注入 System Prompt，
+ * LLM 第一轮即可直接阅读目录内容，无需通过工具调用获取。
+ * 保留此类仅作为兜底（如 LLM 误调用时返回提示），后续版本将移除。
  */
+@Deprecated
 @Slf4j
 @Component
 @RequiredArgsConstructor

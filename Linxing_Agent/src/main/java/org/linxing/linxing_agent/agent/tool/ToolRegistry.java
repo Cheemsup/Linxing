@@ -7,6 +7,7 @@ import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -19,8 +20,13 @@ import java.util.stream.Collectors;
 public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>, CatalogProvider {
 
     private final Map<String, ToolSpec> tools = new LinkedHashMap<>();
+    private final ObjectMapper objectMapper;
 
     private volatile boolean initialized = false;
+
+    public ToolRegistry(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * 容器启动完成后自动发现所有 Tool 实现并注册
@@ -72,6 +78,28 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>,
     }
 
     /**
+     * 按名获取单个工具的 ToolSpecification，用于渐进披露模式动态注入
+     * @param name
+     * @return
+     */
+    public ToolSpecification getToolSpecification(String name) {
+        ToolSpec spec = tools.get(name);
+        return spec != null ? spec.toLangChain4jSpec() : null;
+    }
+
+    /**
+     * 批量获取指定工具的 ToolSpecification，用于渐进披露模式动态注入
+     * @param names
+     * @return
+     */
+    public List<ToolSpecification> getToolSpecifications(List<String> names) {
+        return names.stream()
+                .map(this::getToolSpecification)
+                .filter(spec -> spec != null)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 根据名称获取工具规格
      * @param name
      * @return
@@ -116,14 +144,36 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>,
     @Override
     public String resolve(List<String> names) {
         List<ToolSpec> specs = resolveSpecs(names);
-        String resultText = specs.stream()
-                .map(spec -> "## 工具: " + spec.getName() + "\n\n"
-                        + spec.getDescription() + "\n\n"
-                        + "参数:\n```json\n" + spec.getParameters() + "\n```")
-                .collect(Collectors.joining("\n\n---\n\n"));
-        return resultText.isBlank()
-                ? "未找到指定的工具，请先调用 catalog 查看可用列表。"
-                : resultText;
+        if (specs.isEmpty()) {
+            return "未找到指定的工具，请先调用 catalog 查看可用列表。";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < specs.size(); i++) {
+            if (i > 0) {
+                sb.append("\n");
+            }
+            sb.append(toFunctionCallJson(specs.get(i)));
+        }
+        return sb.toString();
+    }
+
+    private String toFunctionCallJson(ToolSpec spec) {
+        try {
+            ToolSpecification langChain4jSpec = spec.toLangChain4jSpec();
+            Map<String, Object> functionProps = new LinkedHashMap<>();
+            functionProps.put("name", langChain4jSpec.name());
+            functionProps.put("description", langChain4jSpec.description());
+            functionProps.put("parameters", langChain4jSpec.parameters());
+
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("type", "function");
+            root.put("function", functionProps);
+
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            log.error("[ToolRegistry] 序列化工具 Schema 失败: {}", spec.getName(), e);
+            return "{}";
+        }
     }
 
     /**

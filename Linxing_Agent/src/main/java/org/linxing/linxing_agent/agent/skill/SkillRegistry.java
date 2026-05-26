@@ -153,4 +153,11 @@ public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>
     public int size() {
         return metadataIndex.size();
     }
+
+    /**
+     * 获取所有已注册技能的名称列表，用于全量注入模式
+     */
+    public List<String> getAllNames() {
+        return new ArrayList<>(metadataIndex.keySet());
+    }
 }

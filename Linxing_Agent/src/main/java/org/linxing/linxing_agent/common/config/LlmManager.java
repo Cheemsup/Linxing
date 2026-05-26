@@ -55,6 +55,10 @@ public class LlmManager {
                 modelBuilder.returnThinking(config.getReturnThinking());
             }
 
+            if (config.getSendThinking() != null) {
+                modelBuilder.sendThinking(config.getSendThinking());
+            }
+
             OpenAiChatModel model = modelBuilder.build();
 
             models.put(name, model);

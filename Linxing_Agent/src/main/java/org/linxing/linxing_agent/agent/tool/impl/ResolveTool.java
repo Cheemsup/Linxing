@@ -81,7 +81,7 @@ public class ResolveTool implements Tool {
 
         StringBuilder resultText = new StringBuilder();
         for (CatalogProvider provider : providers) {
-            String resolved = provider.resolve(args.getNames());
+            String resolved = provider.resolve(args.getNames());//最终使用的是ToolRegistry或者SkillRegistry的resolve方法
             if (resolved != null && !resolved.isBlank()
                     && !resolved.startsWith("未找到")) {
                 if (resultText.length() > 0) {

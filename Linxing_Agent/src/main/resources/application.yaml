@@ -62,6 +62,7 @@ rag:
         api-key: ${DEEPSEEK_API_KEY}
         base-url: ${DEEPSEEK_BASE_URL}
         return-thinking: true
+        send-thinking: ${DEEPSEEK_SEND_THINKING:true}
       glm:
         model: ${GLM_MODEL}
         api-key: ${GLM_API_KEY}
@@ -92,6 +93,8 @@ jwt:
 agent:
   skills:
     path: ${AGENT_SKILLS_PATH:}
+  disclosure:
+    threshold: 5
 
 logging:
   level:

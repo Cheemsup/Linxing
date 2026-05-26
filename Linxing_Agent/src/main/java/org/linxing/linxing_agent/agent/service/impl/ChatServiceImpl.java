@@ -10,7 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.core.AgentExecutor;
 import org.linxing.linxing_agent.agent.core.AgentResult;
-import org.linxing.linxing_agent.agent.memory.WindowMemory;
+import org.linxing.linxing_agent.agent.core.AgentStepListener;
+import org.linxing.linxing_agent.agent.memory.AgentMemory;
+import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
 import org.linxing.linxing_agent.rag.constant.OperationType;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.common.constant.LlmType;
@@ -31,7 +33,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
-    private static final int MAX_HISTORY_ROUNDS = 10;
 
     private final EmbeddingModel embeddingModel;
     private final LlmManager llmManager;
@@ -41,47 +42,46 @@ public class ChatServiceImpl implements IChatService {
     private final SemanticCacheService semanticCacheService;
     private final SourceExtractor sourceExtractor;
     private final AgentExecutor agentExecutor;
+    private final AgentMemoryFactory memoryFactory;
 
     @Override
-    public ChatResponse chat(ChatRequest request) {
-        Integer userId = resolveUserId(request);//获取用户ID
+    public ChatResponse chat(ChatRequest request, AgentStepListener listener) {
+        Integer userId = resolveUserId(request);
         log.info("收到来自 [用户{}] 的问题: {}", userId, truncate(request.getQuestion(), 80));
 
         try {
             String originalQuery = request.getQuestion();
 
-            //TODO：分析由此而下的代码逻辑能否正确、优雅处理新建对话与继续对话的情况
-            Integer sessionId = chatMessageService.resolveSession(userId, request.getSessionId());//解析或创建会话
+            Integer sessionId = chatMessageService.resolveSession(userId, request.getSessionId());
 
             ChatMessage userMsg = chatMessageService.saveUserMessage(
-                    userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息
+                    userId, sessionId, request.getParentMessageId(), originalQuery);
 
-            List<ChatMessage> history = chatMessageService.backtrackHistory(userMsg.getId());//沿parentId链路回溯对话历史
+            List<ChatMessage> history = chatMessageService.backtrackHistory(userMsg.getId());
             if (history.isEmpty() && request.getParentMessageId() != null && sessionId != null) {
                 history = chatMessageService.loadRecentMessages(sessionId);
             }
 
-            //向量化query，用于语义缓存匹配
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();
 
             SemanticCacheService.CacheResult cacheResult =
-                    semanticCacheService.lookup(userId, queryEmbedding.vector());//查询语义缓存
+                    semanticCacheService.lookup(userId, queryEmbedding.vector());
 
-            if (cacheResult.isHit()) {//语义缓存命中，直接返回不经由LLM
+            if (cacheResult.isHit()) {
                 return buildCachedResponse(userId, sessionId, userMsg, cacheResult);
             }
 
-            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery);//ReAct Agent循环
+            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery, listener);
 
             semanticCacheService.store(userId, queryEmbedding.vector(), originalQuery,
                     agentResponse.getAnswer(),
                     sourceExtractor.toSourcesJson(agentResponse.getSourceDetails()));
 
-            chatMessageService.touchSession(sessionId);//更新会话的最近更新时间
+            chatMessageService.touchSession(sessionId);
 
             int sourceCount = agentResponse.getSourceDetails() != null
                     ? agentResponse.getSourceDetails().size() : 0;
-            recordActivityLog(userId, sourceCount);//记录活动日志
+            recordActivityLog(userId, sourceCount);
 
             return agentResponse;
 
@@ -103,10 +103,9 @@ public class ChatServiceImpl implements IChatService {
      */
     private ChatResponse runAgentLoop(Integer userId, Integer sessionId,
                                        ChatMessage userMsg, List<ChatMessage> history,
-                                       String originalQuery) {
-        WindowMemory memory = new WindowMemory(MAX_HISTORY_ROUNDS * 2 + 20);
+                                       String originalQuery, AgentStepListener listener) {
+        AgentMemory memory = memoryFactory.create();
 
-        //将历史消息转为LangChain4j消息格式注入记忆
         for (ChatMessage msg : history) {
             if ("user".equals(msg.getRole())) {
                 memory.add(UserMessage.from(msg.getContent()));
@@ -115,18 +114,18 @@ public class ChatServiceImpl implements IChatService {
             }
         }
 
-        memory.add(UserMessage.from(originalQuery));//注入当前用户问题
+        memory.add(UserMessage.from(originalQuery));
 
-        AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);//构建Agent上下文
+        AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);
 
-        OpenAiChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);//获取chat类型的LLM对象
+        OpenAiChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
 
-        AgentResult result = agentExecutor.execute(context, chatModel);//执行Agent循环
+        AgentResult result = agentExecutor.execute(context, chatModel, listener);
 
-        String sourcesJson = sourceExtractor.extractSourcesFromSteps(result.getSteps());//从Agent执行步骤中提取来源信息
+        String sourcesJson = sourceExtractor.extractSourcesFromSteps(result.getSteps());
 
         ChatMessage assistantMsg = chatMessageService.saveAssistantMessage(
-                userId, sessionId, userMsg.getId(), result.getAnswer(), sourcesJson);//持久化助手消息
+                userId, sessionId, userMsg.getId(), result.getAnswer(), sourcesJson);
 
         chatMessageCacheService.appendMessages(sessionId, List.of(
                 chatMessageService.toMessageVO(userMsg),

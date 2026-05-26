@@ -11,6 +11,7 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.WindowMemory;
+import org.linxing.linxing_agent.agent.memory.SummaryMemory;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.catalog.Catalog;
@@ -75,7 +76,7 @@ public class AgentExecutor {
         this.objectMapper = objectMapper;
     }
 
-    public AgentResult execute(AgentContext context, OpenAiChatModel chatModel) {
+    public AgentResult execute(AgentContext context, OpenAiChatModel chatModel, AgentStepListener listener) {
         List<AgentStepVO> recordedSteps = new ArrayList<>();
 
         int totalCount = toolRegistry.size() + skillRegistry.size();
@@ -103,7 +104,11 @@ public class AgentExecutor {
             log.info("[AgentExecutor] 步骤 {}/{} — 用户{} 会话{}",
                     stepNumber, MAX_STEPS, context.getUserId(), context.getSessionId());
 
-            // 构建本轮 toolSpecifications：初始规格 + 渐进披露模式下已动态激活的工具
+            listener.onStep(AgentStepEvent.builder()
+                    .eventType("thinking")
+                    .stepNumber(stepNumber)
+                    .build());
+
             List<ToolSpecification> roundSpecs = buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);
 
             List<ChatMessage> currentMessages = context.getMemory().messages();
@@ -117,6 +122,12 @@ public class AgentExecutor {
                 response = chatModel.chat(chatRequest);
             } catch (Exception e) {
                 log.error("[AgentExecutor] LLM调用失败: {}", e.getMessage(), e);
+                listener.onStep(AgentStepEvent.builder()
+                        .eventType("error")
+                        .stepNumber(stepNumber)
+                        .error(e.getMessage())
+                        .finalStep(true)
+                        .build());
                 AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
                         "error", "LLM调用失败: " + e.getMessage(), null);
                 agentStepMapper.insert(step);
@@ -144,6 +155,13 @@ public class AgentExecutor {
                 for (ToolExecutionRequest toolReq : toolRequests) {
                     log.info("[AgentExecutor] 执行工具: {} args={}",
                             toolReq.name(), toolReq.arguments());
+
+                    listener.onStep(AgentStepEvent.builder()
+                            .eventType("tool_call")
+                            .stepNumber(stepNumber)
+                            .toolName(toolReq.name())
+                            .toolArguments(toolReq.arguments())
+                            .build());
 
                     ToolCallRequest toolCallRequest = ToolCallRequest.builder()
                             .toolCallId(toolReq.id())
@@ -180,6 +198,14 @@ public class AgentExecutor {
                     String resultText = toolResult.isSuccess()
                             ? toolResult.getResult()
                             : "Error: " + toolResult.getError();
+
+                    listener.onStep(AgentStepEvent.builder()
+                            .eventType("tool_result")
+                            .stepNumber(stepNumber)
+                            .toolName(toolReq.name())
+                            .toolResult(resultText)
+                            .build());
+
                     ToolExecutionResultMessage resultMsg = ToolExecutionResultMessage.from(execReq, resultText);
                     toolResults.add(resultMsg);
                     context.getMemory().add(resultMsg);
@@ -201,6 +227,10 @@ public class AgentExecutor {
                     agentStepMapper.insert(obsStep);
                     recordedSteps.add(toStepVO(obsStep));
                 }
+
+                if (context.getMemory() instanceof SummaryMemory sm) {
+                    sm.summarizeIfNeeded();
+                }
             } else {
                 // ===== 5. 无工具调用 → LLM 直接返回文本回答，循环结束 =====
                 String answer = aiMessage.text();
@@ -212,6 +242,13 @@ public class AgentExecutor {
                         stepNumber, answer.length());
 
                 lastAiMessage = aiMessage;
+
+                listener.onStep(AgentStepEvent.builder()
+                        .eventType("final")
+                        .stepNumber(stepNumber)
+                        .answer(answer)
+                        .finalStep(true)
+                        .build());
 
                 AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
                         "final", truncate(answer, 2000), null);
@@ -229,6 +266,12 @@ public class AgentExecutor {
 
         // ===== 6. 超过最大步骤数，兜底返回 =====
         log.warn("[AgentExecutor] 超过最大步骤数 {}!", MAX_STEPS);
+        listener.onStep(AgentStepEvent.builder()
+                .eventType("error")
+                .stepNumber(stepNumber)
+                .error("超过最大步骤数 " + MAX_STEPS)
+                .finalStep(true)
+                .build());
         AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
                 "error", "超过最大步骤数 " + MAX_STEPS, null);
         agentStepMapper.insert(step);

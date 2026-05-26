@@ -2,6 +2,7 @@ package org.linxing.linxing_agent.agent.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
+import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.common.result.PageResult;
@@ -54,7 +55,38 @@ public class ChatController {
                         .userId(resolvedUserId)
                         .build();
 
-                ChatResponse response = chatService.chat(request);
+                ChatResponse response = chatService.chat(request, event -> {
+                    try {
+                        Map<String, Object> stepData = new LinkedHashMap<>();
+                        stepData.put("type", "step");
+                        stepData.put("eventType", event.getEventType());
+                        stepData.put("stepNumber", event.getStepNumber());
+                        if (event.getToolName() != null) {
+                            stepData.put("toolName", event.getToolName());
+                        }
+                        if (event.getToolArguments() != null) {
+                            stepData.put("toolArguments", event.getToolArguments());
+                        }
+                        if (event.getToolResult() != null) {
+                            stepData.put("toolResult", event.getToolResult());
+                        }
+                        if (event.getAnswer() != null) {
+                            stepData.put("answer", event.getAnswer());
+                        }
+                        if (event.getError() != null) {
+                            stepData.put("error", event.getError());
+                        }
+                        stepData.put("finalStep", event.isFinalStep());
+
+                        synchronized (emitter) {
+                            emitter.send(SseEmitter.event()
+                                    .name("message")
+                                    .data(stepData));
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
 
                 Map<String, Object> resultData = new LinkedHashMap<>();
                 resultData.put("type", "result");

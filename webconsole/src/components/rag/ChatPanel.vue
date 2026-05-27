@@ -50,10 +50,23 @@
                         <span class="panel-badge">{{ item.stepEvents.length }}步</span>
                       </div>
                       <div v-show="!isPanelCollapsed(item.id, 'step')" class="panel-body">
-                        <div v-for="(step, idx) in item.stepEvents" :key="idx" :class="['step-item', getStepClass(step)]">
-                          <span class="step-icon">{{ getStepIcon(step) }}</span>
-                          <span class="step-text">{{ formatStepText(step) }}</span>
-                        </div>
+                        <template v-for="(step, idx) in item.stepEvents" :key="idx">
+                          <div v-if="step.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'thinking_' + idx) }">
+                            <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + idx)">
+                              <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'thinking_' + idx) ? '▶' : '▼' }}</span>
+                              <span class="step-icon">💭</span>
+                              <span class="panel-title">{{ step.thinkingContent ? '思考推理中...' : '正在思考...' }}</span>
+                            </div>
+                            <div v-show="!isPanelCollapsed(item.id, 'thinking_' + idx)" class="panel-body">
+                              <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
+                              <div v-else class="step-placeholder">等待推理内容...</div>
+                            </div>
+                          </div>
+                          <div v-else :class="['step-item', getStepClass(step)]">
+                            <span class="step-icon">{{ getStepIcon(step) }}</span>
+                            <span class="step-text">{{ formatStepText(step) }}</span>
+                          </div>
+                        </template>
                       </div>
                     </div>
                     <div class="collapsible-panel answer-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'answer') }">
@@ -63,7 +76,6 @@
                         <span class="panel-badge">已生成</span>
                       </div>
                       <div v-show="!isPanelCollapsed(item.id, 'answer')" class="panel-body">
-                        <div v-if="item.thinkingText" class="thinking-content">{{ item.thinkingText }}</div>
                         <div class="answer" v-html="formatAnswer(item.content)"></div>
                         <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
                           <span class="source-label">来源:</span>
@@ -136,13 +148,26 @@
                     <div v-if="!stepEvents.length && !isStreaming" class="step-placeholder">
                       等待推理开始...
                     </div>
-                    <div v-else-if="!stepEvents.length && isStreaming" class="step-item step-thinking">
+                    <template v-for="(step, idx) in stepEvents" :key="idx">
+                      <div v-if="step.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: step.thinkingCollapsed }">
+                        <div class="panel-header" @click="step.thinkingCollapsed = !step.thinkingCollapsed">
+                          <span class="panel-toggle">{{ step.thinkingCollapsed ? '▶' : '▼' }}</span>
+                          <span class="step-icon">💭</span>
+                          <span class="panel-title">{{ step.thinkingContent ? '思考推理中...' : '正在思考...' }}</span>
+                        </div>
+                        <div v-show="!step.thinkingCollapsed" class="panel-body">
+                          <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
+                          <div v-else class="step-placeholder">等待推理内容...</div>
+                        </div>
+                      </div>
+                      <div v-else :class="['step-item', getStepClass(step)]">
+                        <span class="step-icon">{{ getStepIcon(step) }}</span>
+                        <span class="step-text">{{ formatStepText(step) }}</span>
+                      </div>
+                    </template>
+                    <div v-if="isStreaming && !stepEvents.some(s => s.eventType === 'thinking' && !s.thinkingContent)" class="step-item step-thinking">
                       <span class="step-icon">💭</span>
                       <span>正在思考...</span>
-                    </div>
-                    <div v-for="(step, idx) in stepEvents" :key="idx" :class="['step-item', getStepClass(step)]">
-                      <span class="step-icon">{{ getStepIcon(step) }}</span>
-                      <span class="step-text">{{ formatStepText(step) }}</span>
                     </div>
                   </div>
                 </div>
@@ -156,7 +181,6 @@
                     </span>
                   </div>
                   <div v-show="!answerCollapsed" class="panel-body">
-                    <div v-if="thinkingText" class="thinking-content">{{ thinkingText }}</div>
                     <div v-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
                     <div v-else-if="streamingText" class="answer" v-html="formatAnswer(streamingText)"></div>
                     <div v-else class="step-placeholder">
@@ -239,7 +263,6 @@ export default {
       stepEvents: [],
       stepCollapsed: false,
       answerCollapsed: false,
-      thinkingText: '',
       tokenBuffer: '',
       flushTimer: null,
       messagePanelState: {}
@@ -417,7 +440,6 @@ export default {
       this.stepEvents = []
       this.stepCollapsed = false
       this.answerCollapsed = false
-      this.thinkingText = ''
       this.tokenBuffer = ''
       if (this.flushTimer) {
         clearTimeout(this.flushTimer)
@@ -472,6 +494,15 @@ export default {
           }
 
           if (data.type === 'step') {
+            // 任何新 step 到来时，将之前 LLM 流式输出的推理文本归入最近的 thinking step
+            if (vm.streamingText) {
+              const lastThinking = vm.findLastThinkingStep()
+              if (lastThinking) {
+                lastThinking.thinkingContent += (lastThinking.thinkingContent ? '\n' : '') + vm.streamingText
+              }
+              vm.streamingText = ''
+            }
+
             const stepData = {
               eventType: data.eventType,
               stepNumber: data.stepNumber,
@@ -480,13 +511,15 @@ export default {
               toolResult: data.toolResult,
               answer: data.answer,
               error: data.error,
-              finalStep: data.finalStep
+              finalStep: data.finalStep,
+              thinkingContent: '',
+              thinkingCollapsed: false
+            }
+            // thinking 事件携带 answer 内容时，直接作为本步骤的思考内容
+            if (data.eventType === 'thinking' && data.answer) {
+              stepData.thinkingContent = data.answer
             }
             vm.stepEvents.push(stepData)
-            // 7.2.2: thinking 事件携带 answer 内容时，追加到第二层思考文本
-            if (data.eventType === 'thinking' && data.answer) {
-              vm.thinkingText += (vm.thinkingText ? '\n' : '') + data.answer
-            }
             requestAnimationFrame(() => {
               vm.$nextTick(() => vm.scrollToBottom())
             })
@@ -495,7 +528,10 @@ export default {
 
           // 7.2.2: 支持 thinking_stream 事件类型（LLM思考推理流式token）
           if (data.type === 'thinking_stream') {
-            vm.thinkingText += data.token || ''
+            const lastThinking = vm.findLastThinkingStep()
+            if (lastThinking) {
+              lastThinking.thinkingContent += data.token || ''
+            }
             requestAnimationFrame(() => {
               vm.$nextTick(() => vm.scrollToBottom())
             })
@@ -518,10 +554,18 @@ export default {
             // 先 flush 剩余 token
             vm.flushTokenBuffer()
 
+            // 将剩余的 streamingText 归入最近的 thinking step（最后一轮推理后直接出 result 的情况）
+            if (vm.streamingText) {
+              const lastThinking = vm.findLastThinkingStep()
+              if (lastThinking) {
+                lastThinking.thinkingContent += (lastThinking.thinkingContent ? '\n' : '') + vm.streamingText
+              }
+              vm.streamingText = ''
+            }
+
             vm.isStreaming = false
             vm.stepCollapsed = true
             vm.answerCollapsed = false
-            // 不清空 streamingText，保留完整回答用于过渡显示
 
             if (data.sessionId && !vm.activeSessionId) {
               vm.activeSessionId = data.sessionId
@@ -549,21 +593,17 @@ export default {
               content: data.answer,
               sources: JSON.stringify(data.sourceDetails || []),
               createdAt: new Date().toISOString(),
-              // 7.1.2: 将 stepEvents 和 thinkingText 存入消息，使折叠面板持久化
-              stepEvents: [...vm.stepEvents],
-              thinkingText: vm.thinkingText
+              // 7.1.2: 将 stepEvents 存入消息，使折叠面板持久化
+              stepEvents: [...vm.stepEvents]
             }
 
-            // 初始化历史消息面板状态为折叠
-            vm.messagePanelState[assistantMsg.id] = { step: true, answer: true }
+            // 初始化历史消息面板状态：推理过程折叠，回答详情展开
+            vm.messagePanelState[assistantMsg.id] = { step: true, answer: false }
 
             chatTreeStore.state.messages.push(userMsg, assistantMsg)
             chatTreeStore.setActiveLeaf(assistantMsg.id)
 
-            setTimeout(() => {
-              vm.answerCollapsed = true
-              vm.$nextTick(() => vm.scrollToBottom())
-            }, 1500)
+            vm.$nextTick(() => vm.scrollToBottom())
           }
         },
         onError(err) {
@@ -666,9 +706,18 @@ export default {
 
     togglePanel(messageId, panelType) {
       if (!this.messagePanelState[messageId]) {
-        this.messagePanelState[messageId] = { step: true, answer: true }
+        this.messagePanelState[messageId] = { step: true, answer: false }
       }
       this.messagePanelState[messageId][panelType] = !this.messagePanelState[messageId][panelType]
+    },
+
+    findLastThinkingStep() {
+      for (let i = this.stepEvents.length - 1; i >= 0; i--) {
+        if (this.stepEvents[i].eventType === 'thinking') {
+          return this.stepEvents[i]
+        }
+      }
+      return null
     },
 
     async newChat() {
@@ -994,14 +1043,20 @@ export default {
   padding: 10px 14px;
 }
 
+.message.assistant .message-content {
+  display: block;
+  width: 100%;
+}
+
 .bot-message {
   background: white;
   color: #333;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  width: 100%;
 }
 
 .agent-output {
-  max-width: 600px;
+  width: 100%;
 }
 
 .answer {
@@ -1223,6 +1278,28 @@ export default {
 
 .streaming-plain {
   white-space: pre-wrap;
+}
+
+.sub-panel {
+  margin-top: 6px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.sub-panel .panel-header {
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.sub-panel .panel-body {
+  padding: 6px 8px;
+}
+
+.sub-panel .thinking-content {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
 }
 
 .chat-input {

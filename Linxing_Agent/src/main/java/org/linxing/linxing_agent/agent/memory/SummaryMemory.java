@@ -3,6 +3,7 @@ package org.linxing.linxing_agent.agent.memory;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.Getter;
@@ -66,10 +67,13 @@ public class SummaryMemory extends WindowMemory {
             String summary = summaryModel.chat(summaryPrompt);
             if (summary != null && !summary.isBlank()) {
                 conversationSummary = summary;
+                SystemMessage savedSystemMsg = getSystemMessage();//clear()前保存系统提示词引用，否则clear后丢失
                 super.clear();
-                if (getSystemMessage() != null) {
-                    add(getSystemMessage());
+                if (savedSystemMsg != null) {
+                    setSystemMessage(savedSystemMsg);//恢复系统提示词
                 }
+                //将摘要注入记忆，使LLM后续轮次能看到压缩后的历史上下文
+                add(SystemMessage.from("【对话历史摘要】\n" + summary));
             }
         } catch (Exception e) {
             log.warn("[SummaryMemory] 摘要生成失败: {}", e.getMessage());
@@ -97,6 +101,9 @@ public class SummaryMemory extends WindowMemory {
         if (msg instanceof SystemMessage) {
             return ((SystemMessage) msg).text();
         }
+        if (msg instanceof ToolExecutionResultMessage) {
+            return ((ToolExecutionResultMessage) msg).text();
+        }
         return null;
     }
 
@@ -110,6 +117,8 @@ public class SummaryMemory extends WindowMemory {
                     prefix = "用户：";
                 } else if (msg instanceof AiMessage) {
                     prefix = "助手：";
+                } else if (msg instanceof ToolExecutionResultMessage) {
+                    prefix = "工具结果：";
                 }
                 sb.append(prefix).append(text).append("\n");
             }

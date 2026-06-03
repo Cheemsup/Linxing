@@ -8,7 +8,6 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.WindowMemory;
@@ -18,6 +17,7 @@ import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.catalog.Catalog;
 import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
+import org.linxing.linxing_agent.agent.skill.SkillMetadata;
 import org.linxing.linxing_agent.agent.skill.SkillRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
@@ -33,9 +33,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -53,12 +51,23 @@ public class AgentExecutor {
     @Value("${agent.disclosure.threshold:5}")
     private int disclosureThreshold;
 
-    private static final String SYSTEM_PROMPT_TEMPLATE =
+    private static final String SYSTEM_PROMPT_TEMPLATE_FULL =
+            "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。\n\n"
+            + "工作流程：\n"
+            + "1. 先思考用户的问题需要哪些信息\n"
+            + "2. 查看下方【可用能力】目录和完整定义，选择匹配的工具或技能\n"
+            + "3. 直接调用选定的工具或技能，无需再获取定义\n"
+            + "4. 基于获取的信息给出准确、完整的回答\n"
+            + "5. 仅依据获取的信息回答，不要编造信息\n\n"
+            + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
+            + "%s";
+
+    private static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE =
             "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。\n\n"
             + "工作流程：\n"
             + "1. 先思考用户的问题需要哪些信息\n"
             + "2. 查看下方【可用能力】目录，确认是否有匹配的工具或技能\n"
-            + "3. 如需了解工具或技能的详细用法，使用 resolve 获取完整定义\n"
+            + "3. 如需使用某个工具或技能，调用 resolve 获取其完整定义\n"
             + "4. 基于获取的信息给出准确、完整的回答\n"
             + "5. 仅依据获取的信息回答，不要编造信息\n\n"
             + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
@@ -80,40 +89,44 @@ public class AgentExecutor {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * ReAct Agent核心执行循环：LLM推理→工具调用→结果注入→下一轮，直到获得最终回答或超过最大步数
+     * @param context
+     * @param chatModel
+     * @param listener
+     * @return
+     */
     public AgentResult execute(AgentContext context, OpenAiStreamingChatModel chatModel, AgentStepListener listener) {
         List<AgentStepVO> recordedSteps = new ArrayList<>();
 
+        //根据工具+技能总数决定是否启用渐进披露模式
         int totalCount = toolRegistry.size() + skillRegistry.size();
         boolean progressiveMode = totalCount > disclosureThreshold;
-        // log.info("[AgentExecutor] 模式={} (tool={}, skill={}, threshold={})",
-        //         progressiveMode ? "渐进披露" : "全量注入",
-        //         toolRegistry.size(), skillRegistry.size(), disclosureThreshold);
 
+        //构建系统提示词并注入Agent记忆
         SystemMessage systemMessage = SystemMessage.from(buildSystemPrompt(progressiveMode));
         if (context.getMemory() instanceof WindowMemory wm) {
-            wm.setSystemMessage(systemMessage);
+            wm.setSystemMessage(systemMessage);//WindowMemory及其子类统一使用setSystemMessage，确保系统提示词独立存储且在摘要后可恢复
         } else {
             context.getMemory().add(systemMessage);
         }
 
-        List<ToolSpecification> initialSpecs = buildInitialToolSpecs(progressiveMode);//通过progressiveMode影响初始提供的工具内容
-        Set<String> activatedToolNames = new HashSet<>();
+        List<ToolSpecification> initialSpecs = buildInitialToolSpecs(progressiveMode);
+        Set<String> activatedToolNames = new HashSet<>();//渐进模式下已动态激活的工具名集合
 
         int stepNumber = 0;
-        AiMessage lastAiMessage = null;
 
-        // 主循环：LLM 对话 → 工具调用 → 结果注入 → 下一轮
+        //主循环：LLM推理 → 工具调用 → 结果注入 → 下一轮
         while (stepNumber < MAX_STEPS) {
             stepNumber++;
-            // log.info("[AgentExecutor] 步骤 {}/{} — 用户{} 会话{}",
-            //         stepNumber, MAX_STEPS, context.getUserId(), context.getSessionId());
 
             listener.onStep(AgentStepEvent.builder()
                     .eventType("thinking")
                     .stepNumber(stepNumber)
+                    .phase("reasoning")
                     .build());
 
-            List<ToolSpecification> roundSpecs = buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);
+            List<ToolSpecification> roundSpecs = buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
 
             List<ChatMessage> currentMessages = context.getMemory().messages();
             ChatRequest chatRequest = ChatRequest.builder()
@@ -121,69 +134,18 @@ public class AgentExecutor {
                     .toolSpecifications(roundSpecs)
                     .build();
 
+            //调用流式LLM并等待完整响应
             ChatResponse response;
             try {
-                long llmStart = System.currentTimeMillis();
-                // log.info("[AgentExecutor] 步骤{} 开始调用LLM (流式模式)",
-                //         stepNumber);
-
-                CountDownLatch latch = new CountDownLatch(1);
-                AtomicReference<ChatResponse> responseHolder = new AtomicReference<>();
-                AtomicReference<Throwable> errorHolder = new AtomicReference<>();
-                StringBuilder streamBuffer = new StringBuilder();
-                int[] tokenCount = {0};
-
-                chatModel.chat(chatRequest, new StreamingChatResponseHandler() {
-                    @Override
-                    public void onPartialResponse(String partialResponse) {
-                        streamBuffer.append(partialResponse);
-                        tokenCount[0]++;
-                        listener.onStream(partialResponse);
-                        // 实时输出接收到的token进度（调试用，取消注释可查看）
-                        // if (tokenCount[0] % 50 == 1) {
-                        //     log.info("[AgentExecutor] 流式进度: 第{}个token, 累计长度={}",
-                        //             tokenCount[0], streamBuffer.length());
-                        // }
-                    }
-
-                    @Override
-                    public void onCompleteResponse(ChatResponse completeResponse) {
-                        // log.info("[AgentExecutor] 流式完成: 共{}个token, 累计长度={}, 耗时={}ms",
-                        //         tokenCount[0], streamBuffer.length(),
-                        //         System.currentTimeMillis() - llmStart);
-                        responseHolder.set(completeResponse);
-                        latch.countDown();
-                    }
-
-                    @Override
-                    public void onError(Throwable error) {
-                        log.error("[AgentExecutor] 流式错误: 已收到{}个token, error={}",
-                                tokenCount[0], error.getMessage());
-                        errorHolder.set(error);
-                        latch.countDown();
-                    }
-                });
-
-                boolean completed = latch.await(120, TimeUnit.SECONDS);
-                long llmEnd = System.currentTimeMillis();
-
-                if (!completed) {
-                    throw new RuntimeException("LLM调用超时 (120秒)");
-                }
-                if (errorHolder.get() != null) {
-                    throw new RuntimeException("LLM流式调用失败: " + errorHolder.get().getMessage(), errorHolder.get());
-                }
-
-                response = responseHolder.get();
-                // log.info("[AgentExecutor] 步骤{} LLM流式调用完成, 耗时={}ms, 流式token总长={}, 响应文本长度={}",
-                //         stepNumber, llmEnd - llmStart, streamBuffer.length(),
-                //         response.aiMessage() != null && response.aiMessage().text() != null
-                //                 ? response.aiMessage().text().length() : 0);
+                StreamingResponseFuture future = new StreamingResponseFuture(listener, stepNumber);
+                chatModel.chat(chatRequest, future);
+                response = future.await(600, TimeUnit.SECONDS);
             } catch (Exception e) {
                 log.error("[AgentExecutor] LLM调用失败: {}", e.getMessage(), e);
                 listener.onStep(AgentStepEvent.builder()
                         .eventType("error")
                         .stepNumber(stepNumber)
+                        .phase("reasoning")
                         .error(e.getMessage())
                         .finalStep(true)
                         .build());
@@ -202,22 +164,17 @@ public class AgentExecutor {
 
             AiMessage aiMessage = response.aiMessage();
 
-            // ===== 4. 工具调用处理 =====
             if (aiMessage.hasToolExecutionRequests()) {
                 List<ToolExecutionRequest> toolRequests = aiMessage.toolExecutionRequests();
-                // log.info("[AgentExecutor] LLM请求调用 {} 个工具", toolRequests.size());
 
-                // 将 LLM 的工具调用消息加入记忆，供后续轮次参考
-                context.getMemory().add(aiMessage);
+                context.getMemory().add(aiMessage);//将LLM的工具调用消息加入记忆，供后续轮次参考
 
-                List<ToolExecutionResultMessage> toolResults = new ArrayList<>();
                 for (ToolExecutionRequest toolReq : toolRequests) {
-                    // log.info("[AgentExecutor] 执行工具: {} args={}",
-                    //         toolReq.name(), toolReq.arguments());
 
                     listener.onStep(AgentStepEvent.builder()
                             .eventType("tool_call")
                             .stepNumber(stepNumber)
+                            .phase("reasoning")
                             .toolName(toolReq.name())
                             .toolArguments(toolReq.arguments())
                             .build());
@@ -228,6 +185,7 @@ public class AgentExecutor {
                             .arguments(toolReq.arguments())
                             .build();
 
+                    //查找并执行工具，未知工具返回失败
                     ToolSpec toolSpec = toolRegistry.getTool(toolReq.name());
                     ToolCallResult toolResult;
                     if (toolSpec == null) {
@@ -237,23 +195,26 @@ public class AgentExecutor {
                         toolResult = toolSpec.execute(toolCallRequest, context);
                     }
 
-                    // 渐进披露模式：拦截 resolve 调用，提取被解析的工具名并动态激活
+                    //渐进披露模式：resolve成功后提取被解析的工具名并动态激活
                     if (progressiveMode && "resolve".equals(toolReq.name()) && toolResult.isSuccess()) {
                         List<String> resolvedNames = parseResolvedNames(toolReq.arguments());
                         for (String name : resolvedNames) {
                             if (toolRegistry.getTool(name) != null) {
                                 activatedToolNames.add(name);
-                                // log.info("[AgentExecutor] 渐进披露激活工具: {}", name);
+                            }
+                            //技能被解析时，将其关联的工具也动态激活
+                            SkillMetadata skillMeta = skillRegistry.getMetadata(name);
+                            if (skillMeta != null && skillMeta.getToolNames() != null) {
+                                for (String toolName : skillMeta.getToolNames()) {
+                                    if (toolRegistry.getTool(toolName) != null) {
+                                        activatedToolNames.add(toolName);
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 工具执行结果注入记忆，供 LLM 参考
-                    ToolExecutionRequest execReq = ToolExecutionRequest.builder()
-                            .id(toolReq.id())
-                            .name(toolReq.name())
-                            .arguments(toolReq.arguments())
-                            .build();
+                    //构建工具执行结果文本
                     String resultText = toolResult.isSuccess()
                             ? toolResult.getResult()
                             : "Error: " + toolResult.getError();
@@ -261,15 +222,16 @@ public class AgentExecutor {
                     listener.onStep(AgentStepEvent.builder()
                             .eventType("tool_result")
                             .stepNumber(stepNumber)
+                            .phase("reasoning")
                             .toolName(toolReq.name())
                             .toolResult(resultText)
                             .build());
 
-                    ToolExecutionResultMessage resultMsg = ToolExecutionResultMessage.from(execReq, resultText);
-                    toolResults.add(resultMsg);
+                    //工具执行结果注入记忆，供LLM下一轮参考
+                    ToolExecutionResultMessage resultMsg = ToolExecutionResultMessage.from(toolReq, resultText);
                     context.getMemory().add(resultMsg);
 
-                    // 记录工具调用步骤到数据库
+                    //记录工具调用步骤到数据库
                     String stepContent = toolResult.isSuccess()
                             ? toolReq.arguments()
                             : "Error: " + toolResult.getError();
@@ -278,7 +240,7 @@ public class AgentExecutor {
                     agentStepMapper.insert(step);
                     recordedSteps.add(toStepVO(step));
 
-                    // 记录工具返回结果步骤
+                    //记录工具返回结果步骤
                     AgentStep obsStep = buildStep(context.getSessionId(), null, stepNumber,
                             "tool_result",
                             toolResult.isSuccess() ? toolResult.getResult() : toolResult.getError(),
@@ -287,24 +249,21 @@ public class AgentExecutor {
                     recordedSteps.add(toStepVO(obsStep));
                 }
 
+                //SummaryMemory在工具调用后尝试摘要压缩，避免上下文过长
                 if (context.getMemory() instanceof SummaryMemory sm) {
                     sm.summarizeIfNeeded();
                 }
             } else {
-                // ===== 5. 无工具调用 → LLM 直接返回文本回答，循环结束 =====
+                //无工具调用 → LLM直接返回文本回答，循环结束
                 String answer = aiMessage.text();
                 if (answer == null || answer.isBlank()) {
                     answer = "抱歉，无法生成回答。";
                 }
 
-                // log.info("[AgentExecutor] 完成，共{}步，答案长度: {}字符",
-                //         stepNumber, answer.length());
-
-                lastAiMessage = aiMessage;
-
                 listener.onStep(AgentStepEvent.builder()
                         .eventType("final")
                         .stepNumber(stepNumber)
+                        .phase("answer")
                         .answer(answer)
                         .finalStep(true)
                         .build());
@@ -323,11 +282,12 @@ public class AgentExecutor {
             }
         }
 
-        // ===== 6. 超过最大步骤数，兜底返回 =====
+        //超过最大步骤数，兜底返回
         log.warn("[AgentExecutor] 超过最大步骤数 {}!", MAX_STEPS);
         listener.onStep(AgentStepEvent.builder()
                 .eventType("error")
                 .stepNumber(stepNumber)
+                .phase("reasoning")
                 .error("超过最大步骤数 " + MAX_STEPS)
                 .finalStep(true)
                 .build());
@@ -374,15 +334,14 @@ public class AgentExecutor {
                     dynamicSection.append("【可用技能完整说明】\n").append(resolved).append("\n\n");
                 }
             }
-            if (!filtered.isEmpty()) {
-                dynamicSection.append("你可以先查看目录了解可用能力，再决定使用哪些工具或技能。");
-            }
+            dynamicSection.append("所有工具和技能的完整定义已在上方提供，请直接使用。");
         } else {
             dynamicSection.append("由于可用工具和技能较多，请先查看上方目录了解可用能力。"
                     + "如需使用某个工具或技能，请调用 resolve 获取其完整定义。");
         }
 
-        return String.format(SYSTEM_PROMPT_TEMPLATE, dynamicSection.toString());
+        String template = progressiveMode ? SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE : SYSTEM_PROMPT_TEMPLATE_FULL;
+        return String.format(template, dynamicSection.toString());
     }
 
     /**
@@ -391,10 +350,10 @@ public class AgentExecutor {
      */
     private List<ToolSpecification> buildInitialToolSpecs(boolean progressiveMode) {
         if (!progressiveMode) {
-            return toolRegistry.getToolSpecifications();
+            return toolRegistry.getToolSpecifications();//全量注入
         }
         List<ToolSpecification> specs = new ArrayList<>();
-        ToolSpecification resolveSpec = toolRegistry.getToolSpecification("resolve");
+        ToolSpecification resolveSpec = toolRegistry.getToolSpecification("resolve");//渐进披露模式，这一步的初始化只传入“工具之工具”——可用于获取其他工具定义的工具
         if (resolveSpec != null) {
             specs.add(resolveSpec);
         }
@@ -459,7 +418,6 @@ public class AgentExecutor {
                 .build();
     }
 
-    //TODO：考虑是否需要保留这样的截断设计
     private String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";

@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
+//TODO：在agent的memory部分使用到了“summaryModel”但此工厂未提供本类型，配置为application.yaml中的deepseek模型
 @Slf4j
 @Component
 public class LlmManager {

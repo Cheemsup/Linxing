@@ -68,12 +68,14 @@ public class WindowMemory implements AgentMemory {
     }
 
     private void evictOrphanToolResults() {
+        //驱逐所有紧跟的ToolExecutionResultMessage，处理并行工具调用时一条AiMessage可能对应多条ToolResult
         Iterator<ChatMessage> it = messages.iterator();
         while (it.hasNext()) {
             ChatMessage msg = it.next();
             if (msg instanceof ToolExecutionResultMessage) {
                 it.remove();
-                break;
+            } else {
+                break;//遇到非ToolExecutionResultMessage说明这一组工具结果已清理完毕
             }
         }
     }

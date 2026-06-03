@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 public class ChatRequest {
 
     @NotBlank(message = "问题不能为空")
-    @Size(max = 2000, message = "问题长度不能超过2000个字符")
+    @Size(max = 5000, message = "问题长度不能超过5000个字符")
     private String question;
 
     private Integer sessionId;

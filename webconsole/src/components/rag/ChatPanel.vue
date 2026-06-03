@@ -265,6 +265,8 @@ export default {
       answerCollapsed: false,
       tokenBuffer: '',
       flushTimer: null,
+      tokenGroups: {},
+      currentStreamStepNumber: 0,
       messagePanelState: {}
     }
   },
@@ -441,6 +443,8 @@ export default {
       this.stepCollapsed = false
       this.answerCollapsed = false
       this.tokenBuffer = ''
+      this.tokenGroups = {}
+      this.currentStreamStepNumber = 0
       if (this.flushTimer) {
         clearTimeout(this.flushTimer)
         this.flushTimer = null
@@ -472,155 +476,120 @@ export default {
         question: q,
         sessionId: this.activeSessionId,
         parentMessageId: parentMessageId,
-        onMessage(data) {
-          if (data.type === 'error') {
-            vm.tempUserMsg = null
-            vm.loading = false
-            vm.resetStreamState()
-            vm.stepEvents.push({
-              eventType: 'error',
-              error: data.message || '未知错误',
-              finalStep: true
-            })
-            chatTreeStore.state.messages.push({
-              id: -Date.now(),
-              role: 'assistant',
-              content: '抱歉，发生了错误: ' + (data.message || '未知错误'),
-              sources: '[]',
-              parentId: null
-            })
-            vm.$nextTick(() => vm.scrollToBottom())
-            return
+        onStep(data) {
+          const stepNumber = data.stepNumber || 0
+
+          // 先 flush 剩余 token，确保 tokenGroups 中有最新内容
+          vm.flushTokenBuffer()
+
+          // 将该 stepNumber 累积的 token 归入对应 step
+          const groupText = vm.tokenGroups[stepNumber] || ''
+          delete vm.tokenGroups[stepNumber]
+
+          const stepData = {
+            eventType: data.eventType,
+            stepNumber: stepNumber,
+            phase: data.phase,
+            toolName: data.toolName,
+            toolArguments: data.toolArguments,
+            toolResult: data.toolResult,
+            answer: data.answer,
+            error: data.error,
+            finalStep: data.finalStep,
+            thinkingContent: '',
+            thinkingCollapsed: false
           }
 
-          if (data.type === 'step') {
-            // 任何新 step 到来时，将之前 LLM 流式输出的推理文本归入最近的 thinking step
-            if (vm.streamingText) {
-              const lastThinking = vm.findLastThinkingStep()
-              if (lastThinking) {
-                lastThinking.thinkingContent += (lastThinking.thinkingContent ? '\n' : '') + vm.streamingText
-              }
-              vm.streamingText = ''
+          if (data.phase === 'answer') {
+            // 最终回答：token 迁移到 streamingText（回答详情区域）
+            if (groupText) {
+              vm.streamingText += groupText
             }
-
-            const stepData = {
-              eventType: data.eventType,
-              stepNumber: data.stepNumber,
-              toolName: data.toolName,
-              toolArguments: data.toolArguments,
-              toolResult: data.toolResult,
-              answer: data.answer,
-              error: data.error,
-              finalStep: data.finalStep,
-              thinkingContent: '',
-              thinkingCollapsed: false
-            }
-            // thinking 事件携带 answer 内容时，直接作为本步骤的思考内容
+          } else if (data.phase === 'cache') {
+            // 缓存命中：直接使用 answer，无需 token 归并
+          } else {
+            // 推理阶段：token 归入 thinking step
             if (data.eventType === 'thinking' && data.answer) {
               stepData.thinkingContent = data.answer
+            } else if (groupText) {
+              stepData.thinkingContent = groupText
             }
-            vm.stepEvents.push(stepData)
-            requestAnimationFrame(() => {
-              vm.$nextTick(() => vm.scrollToBottom())
-            })
-            return
           }
 
-          // 7.2.2: 支持 thinking_stream 事件类型（LLM思考推理流式token）
-          if (data.type === 'thinking_stream') {
-            const lastThinking = vm.findLastThinkingStep()
-            if (lastThinking) {
-              lastThinking.thinkingContent += data.token || ''
-            }
-            requestAnimationFrame(() => {
-              vm.$nextTick(() => vm.scrollToBottom())
-            })
-            return
+          vm.stepEvents.push(stepData)
+          vm.$nextTick(() => vm.scrollToBottom())
+        },
+        onStream(data) {
+          if (!vm.isStreaming) {
+            vm.isStreaming = true
           }
-
-          if (data.type === 'llm_stream') {
-            if (!vm.isStreaming) {
-              vm.isStreaming = true
-            }
-            // 7.2.3: token batching — 30ms 批量 flush
-            vm.tokenBuffer += data.token
-            if (!vm.flushTimer) {
-              vm.flushTimer = setTimeout(() => vm.flushTokenBuffer(), 30)
-            }
-            return
-          }
-
-          if (data.type === 'result') {
-            // 先 flush 剩余 token
-            vm.flushTokenBuffer()
-
-            // 将剩余的 streamingText 归入最近的 thinking step（最后一轮推理后直接出 result 的情况）
-            if (vm.streamingText) {
-              const lastThinking = vm.findLastThinkingStep()
-              if (lastThinking) {
-                lastThinking.thinkingContent += (lastThinking.thinkingContent ? '\n' : '') + vm.streamingText
-              }
-              vm.streamingText = ''
-            }
-
-            vm.isStreaming = false
-            vm.stepCollapsed = true
-            vm.answerCollapsed = false
-
-            if (data.sessionId && !vm.activeSessionId) {
-              vm.activeSessionId = data.sessionId
-              vm.fetchSessions()
-            }
-            chatTreeStore.clearBranch()
-
-            const userMsg = {
-              id: -Date.now(),
-              userId: null,
-              sessionId: data.sessionId,
-              parentId: parentMessageId,
-              role: 'user',
-              content: q,
-              sources: '[]',
-              createdAt: new Date().toISOString()
-            }
-
-            const assistantMsg = {
-              id: data.messageId || -Date.now() + 1,
-              userId: null,
-              sessionId: data.sessionId,
-              parentId: userMsg.id,
-              role: 'assistant',
-              content: data.answer,
-              sources: JSON.stringify(data.sourceDetails || []),
-              createdAt: new Date().toISOString(),
-              // 7.1.2: 将 stepEvents 存入消息，使折叠面板持久化
-              stepEvents: [...vm.stepEvents]
-            }
-
-            // 初始化历史消息面板状态：推理过程折叠，回答详情展开
-            vm.messagePanelState[assistantMsg.id] = { step: true, answer: false }
-
-            chatTreeStore.state.messages.push(userMsg, assistantMsg)
-            chatTreeStore.setActiveLeaf(assistantMsg.id)
-
-            vm.$nextTick(() => vm.scrollToBottom())
+          vm.currentStreamStepNumber = data.stepNumber || 0
+          // token batching — 30ms 批量 flush
+          vm.tokenBuffer += data.token
+          if (!vm.flushTimer) {
+            vm.flushTimer = setTimeout(() => vm.flushTokenBuffer(), 30)
           }
         },
-        onError(err) {
+        onResult(data) {
+          vm.isStreaming = false
+          vm.stepCollapsed = true
+          vm.answerCollapsed = false
+
+          if (data.sessionId && !vm.activeSessionId) {
+            vm.activeSessionId = data.sessionId
+            vm.fetchSessions()
+          }
+          chatTreeStore.clearBranch()
+
+          const userMsg = {
+            id: -Date.now(),
+            userId: null,
+            sessionId: data.sessionId,
+            parentId: parentMessageId,
+            role: 'user',
+            content: q,
+            sources: '[]',
+            createdAt: new Date().toISOString()
+          }
+
+          const assistantMsg = {
+            id: data.messageId || -Date.now() + 1,
+            userId: null,
+            sessionId: data.sessionId,
+            parentId: userMsg.id,
+            role: 'assistant',
+            content: data.answer,
+            sources: JSON.stringify(data.sourceDetails || []),
+            createdAt: new Date().toISOString(),
+            stepEvents: [...vm.stepEvents]
+          }
+
+          vm.messagePanelState[assistantMsg.id] = { step: true, answer: false }
+
+          chatTreeStore.state.messages.push(userMsg, assistantMsg)
+          chatTreeStore.setActiveLeaf(assistantMsg.id)
+
+          vm.$nextTick(() => vm.scrollToBottom())
+        },
+        onError(data) {
           vm.tempUserMsg = null
           vm.loading = false
           vm.resetStreamState()
+          vm.stepEvents.push({
+            eventType: 'error',
+            error: data.message || '未知错误',
+            finalStep: true
+          })
           chatTreeStore.state.messages.push({
             id: -Date.now(),
             role: 'assistant',
-            content: '抱歉，发生了错误: ' + (err.message || '连接失败'),
+            content: '抱歉，发生了错误: ' + (data.message || '未知错误'),
             sources: '[]',
             parentId: null
           })
+          vm.$nextTick(() => vm.scrollToBottom())
         },
         onDone() {
-          // flush 剩余 token
-          vm.flushTokenBuffer()
           vm.tempUserMsg = null
           vm.loading = false
           vm.isStreaming = false
@@ -635,9 +604,9 @@ export default {
         case 'tool_call': return 'step-tool'
         case 'tool_result': return 'step-tool'
         case 'thinking': return 'step-thinking'
-        case 'search': return 'step-search'
         case 'error': return 'step-error'
         case 'final': return 'step-final'
+        case 'cache_hit': return 'step-cache'
         default: return ''
       }
     },
@@ -647,9 +616,9 @@ export default {
         case 'tool_call': return '🔧'
         case 'tool_result': return '📋'
         case 'thinking': return '💭'
-        case 'search': return '🌐'
         case 'error': return '❌'
         case 'final': return '✅'
+        case 'cache_hit': return '⚡'
         default: return '📌'
       }
     },
@@ -676,12 +645,12 @@ export default {
         }
         case 'thinking':
           return step.answer ? `思考: ${step.answer}` : '思考推理中...'
-        case 'search':
-          return `搜索: ${step.toolName || '知识检索'}`
         case 'error':
           return `错误: ${step.error || '未知'}`
         case 'final':
           return '推理完成'
+        case 'cache_hit':
+          return '缓存命中'
         default:
           return `${step.eventType}: ${JSON.stringify(step).substring(0, 80)}`
       }
@@ -689,11 +658,14 @@ export default {
 
     flushTokenBuffer() {
       if (this.tokenBuffer) {
+        const sn = this.currentStreamStepNumber
+        if (!this.tokenGroups[sn]) {
+          this.tokenGroups[sn] = ''
+        }
+        this.tokenGroups[sn] += this.tokenBuffer
         this.streamingText += this.tokenBuffer
         this.tokenBuffer = ''
-        requestAnimationFrame(() => {
-          this.$nextTick(() => this.scrollToBottom())
-        })
+        this.$nextTick(() => this.scrollToBottom())
       }
       this.flushTimer = null
     },
@@ -709,15 +681,6 @@ export default {
         this.messagePanelState[messageId] = { step: true, answer: false }
       }
       this.messagePanelState[messageId][panelType] = !this.messagePanelState[messageId][panelType]
-    },
-
-    findLastThinkingStep() {
-      for (let i = this.stepEvents.length - 1; i >= 0; i--) {
-        if (this.stepEvents[i].eventType === 'thinking') {
-          return this.stepEvents[i]
-        }
-      }
-      return null
     },
 
     async newChat() {
@@ -1249,10 +1212,6 @@ export default {
 .step-thinking .step-text {
   color: #666;
   font-style: italic;
-}
-
-.step-search .step-text {
-  color: #2e7d32;
 }
 
 .step-error .step-text {

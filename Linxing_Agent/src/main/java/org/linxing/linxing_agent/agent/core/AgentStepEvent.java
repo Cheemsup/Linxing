@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+//TODO：目前只有tool相关的记录字段，缺少skill的字段，后续读取skill.md也需要记录
 @Data
 @Builder
 @NoArgsConstructor
@@ -13,6 +14,7 @@ public class AgentStepEvent {
 
     private String eventType;
     private int stepNumber;
+    private String phase;
     private String toolName;
     private String toolArguments;
     private String toolResult;

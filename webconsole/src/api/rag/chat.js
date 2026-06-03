@@ -1,6 +1,11 @@
 import api from '@/api'
 import { authStore } from '@/stores/authStore'
 
+// SSE 流式请求直连后端，绕过 Vue DevServer 代理的缓冲问题
+// 开发环境通过 .env.development 配置 VUE_APP_SSE_BASE_URL=http://localhost:8080
+// 生产环境留空，走 Nginx 反代（已配置 X-Accel-Buffering: no）
+const SSE_BASE = process.env.VUE_APP_SSE_BASE_URL || ''
+
 /**
  * SSE 流式聊天接口
  *
@@ -18,7 +23,7 @@ export const ragApi = {
     if (sessionId) body.sessionId = sessionId
     if (parentMessageId) body.parentMessageId = parentMessageId
 
-    fetch('/api/agent/chat', {
+    fetch(`${SSE_BASE}/agent/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -123,5 +128,8 @@ export const chatSessionApi = {
   },
   deleteSubtree(messageId) {
     return api.delete(`/agent/messages/${messageId}/subtree`)
+  },
+  getMessageSteps(messageId) {
+    return api.get(`/agent/messages/${messageId}/steps`)
   }
 }

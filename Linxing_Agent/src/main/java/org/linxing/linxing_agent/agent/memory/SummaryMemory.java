@@ -40,16 +40,20 @@ public class SummaryMemory extends WindowMemory {
             return;
         }
 
-        List<ChatMessage> toSummarize = new ArrayList<>();
+        // 计算需要切割的字符数
         int charsToCut = (estimatedTokens - maxTokens / SUMMARY_TRIGGER_RATIO) * 2;
-        int accumulated = 0;
 
-        for (ChatMessage msg : allMessages) {
+        // 找到分界点：以"工具调用组"为原子单位，确保不拆散 AiMessage+ToolResult 对
+        int cutIndex = findCutIndex(allMessages, charsToCut);
+        if (cutIndex <= 0) {
+            return;
+        }
+
+        // 收集待摘要的消息（0 ~ cutIndex-1），跳过 SystemMessage
+        List<ChatMessage> toSummarize = new ArrayList<>();
+        for (int i = 0; i < cutIndex; i++) {
+            ChatMessage msg = allMessages.get(i);
             if (msg instanceof SystemMessage) continue;
-            if (msg instanceof AiMessage ai && ai.hasToolExecutionRequests()) continue;
-            String text = extractText(msg);
-            accumulated += text != null ? text.length() : 0;
-            if (accumulated > charsToCut) break;
             toSummarize.add(msg);
         }
 
@@ -67,17 +71,48 @@ public class SummaryMemory extends WindowMemory {
             String summary = summaryModel.chat(summaryPrompt);
             if (summary != null && !summary.isBlank()) {
                 conversationSummary = summary;
-                SystemMessage savedSystemMsg = getSystemMessage();//clear()前保存系统提示词引用，否则clear后丢失
+                SystemMessage savedSystemMsg = getSystemMessage();
                 super.clear();
                 if (savedSystemMsg != null) {
-                    setSystemMessage(savedSystemMsg);//恢复系统提示词
+                    setSystemMessage(savedSystemMsg);
                 }
-                //将摘要注入记忆，使LLM后续轮次能看到压缩后的历史上下文
                 add(SystemMessage.from("【对话历史摘要】\n" + summary));
             }
         } catch (Exception e) {
             log.warn("[SummaryMemory] 摘要生成失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 找到分界点索引，确保不在工具调用组中间切割。
+     * 工具调用组 = AiMessage(hasToolExecutionRequests) + 紧跟的所有 ToolExecutionResultMessage
+     * 分界点必须落在组的最后一条消息之后，保证被摘要和被保留的消息都是完整的组
+     */
+    private int findCutIndex(List<ChatMessage> allMessages, int charsToCut) {
+        int accumulated = 0;
+        int i = 0;
+        while (i < allMessages.size() && accumulated < charsToCut) {
+            ChatMessage msg = allMessages.get(i);
+            if (msg instanceof SystemMessage) {
+                i++;
+                continue;
+            }
+            String text = extractText(msg);
+            accumulated += text != null ? text.length() : 0;
+
+            // 如果当前消息是工具调用组的开始，将整个组一起跳过
+            if (msg instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                // 跳过紧跟的所有 ToolExecutionResultMessage
+                while (i + 1 < allMessages.size()
+                        && allMessages.get(i + 1) instanceof ToolExecutionResultMessage) {
+                    i++;
+                    text = extractText(allMessages.get(i));
+                    accumulated += text != null ? text.length() : 0;
+                }
+            }
+            i++;
+        }
+        return i;
     }
 
     private int estimateTotalTokens() {

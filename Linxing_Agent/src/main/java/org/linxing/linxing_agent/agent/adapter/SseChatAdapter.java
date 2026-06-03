@@ -77,9 +77,9 @@ public class SseChatAdapter {
                     data.put("eventType", event.getEventType());
                     data.put("stepNumber", event.getStepNumber());
                     data.put("phase", event.getPhase());
-                    if (event.getToolName() != null) data.put("toolName", event.getToolName());
-                    if (event.getToolArguments() != null) data.put("toolArguments", event.getToolArguments());
-                    if (event.getToolResult() != null) data.put("toolResult", event.getToolResult());
+                    if (event.getStepData() != null && !event.getStepData().isEmpty()) {
+                        data.put("stepData", event.getStepData());
+                    }
                     if (event.getAnswer() != null) data.put("answer", event.getAnswer());
                     if (event.getError() != null) data.put("error", event.getError());
                     data.put("finalStep", event.isFinalStep());

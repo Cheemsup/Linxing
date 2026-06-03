@@ -42,15 +42,15 @@
                 </div>
                 <div v-else class="bot-message">
                   <strong>助手:</strong>
-                  <template v-if="item.stepEvents && item.stepEvents.length">
+                  <template v-if="getStepsForMessage(item).length">
                     <div class="collapsible-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'step') }">
                       <div class="panel-header" @click="togglePanel(item.id, 'step')">
                         <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'step') ? '▶' : '▼' }}</span>
                         <span class="panel-title">推理过程</span>
-                        <span class="panel-badge">{{ item.stepEvents.length }}步</span>
+                        <span class="panel-badge">{{ getStepsForMessage(item).length }}步</span>
                       </div>
                       <div v-show="!isPanelCollapsed(item.id, 'step')" class="panel-body">
-                        <template v-for="(step, idx) in item.stepEvents" :key="idx">
+                        <template v-for="(step, idx) in getStepsForMessage(item)" :key="idx">
                           <div v-if="step.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'thinking_' + idx) }">
                             <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + idx)">
                               <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'thinking_' + idx) ? '▶' : '▼' }}</span>
@@ -110,6 +110,11 @@
                       <span class="source-label">来源:</span>
                       <span v-for="source in item.sources" :key="source" class="source-tag">{{ source }}</span>
                     </div>
+                    <button v-if="item.role === 'assistant' && !historyStepsCache[item.id] && !loadingSteps[item.id]"
+                            class="load-steps-btn" @click="loadHistorySteps(item.id)">
+                      查看推理过程
+                    </button>
+                    <span v-if="loadingSteps[item.id]" class="load-steps-btn loading">加载中...</span>
                   </template>
                 </div>
               </div>
@@ -165,7 +170,7 @@
                         <span class="step-text">{{ formatStepText(step) }}</span>
                       </div>
                     </template>
-                    <div v-if="isStreaming && !stepEvents.some(s => s.eventType === 'thinking' && !s.thinkingContent)" class="step-item step-thinking">
+                    <div v-if="isStreaming && !stepEvents.length" class="step-item step-thinking">
                       <span class="step-icon">💭</span>
                       <span>正在思考...</span>
                     </div>
@@ -267,7 +272,9 @@ export default {
       flushTimer: null,
       tokenGroups: {},
       currentStreamStepNumber: 0,
-      messagePanelState: {}
+      messagePanelState: {},
+      historyStepsCache: {},
+      loadingSteps: {}
     }
   },
   computed: {
@@ -409,6 +416,8 @@ export default {
       chatTreeStore.setActiveLeaf(null)
       this.question = ''
       this.messagePanelState = {}
+      this.historyStepsCache = {}
+      this.loadingSteps = {}
       await this.loadMessages()
     },
     async loadMessages(activeLeafId = null) {
@@ -479,44 +488,58 @@ export default {
         onStep(data) {
           const stepNumber = data.stepNumber || 0
 
-          // 先 flush 剩余 token，确保 tokenGroups 中有最新内容
+          // 先 flush 剩余 token，确保 thinkingContent 有最新内容
           vm.flushTokenBuffer()
 
-          // 将该 stepNumber 累积的 token 归入对应 step
-          const groupText = vm.tokenGroups[stepNumber] || ''
+          // 清理该 stepNumber 的 tokenGroups（已通过 flushTokenBuffer 回填到 thinkingContent）
           delete vm.tokenGroups[stepNumber]
 
-          const stepData = {
-            eventType: data.eventType,
-            stepNumber: stepNumber,
-            phase: data.phase,
-            toolName: data.toolName,
-            toolArguments: data.toolArguments,
-            toolResult: data.toolResult,
-            answer: data.answer,
-            error: data.error,
-            finalStep: data.finalStep,
-            thinkingContent: '',
-            thinkingCollapsed: false
-          }
-
-          if (data.phase === 'answer') {
-            // 最终回答：token 迁移到 streamingText（回答详情区域）
-            if (groupText) {
-              vm.streamingText += groupText
-            }
-          } else if (data.phase === 'cache') {
-            // 缓存命中：直接使用 answer，无需 token 归并
+          if (data.eventType === 'thinking') {
+            // thinking 事件：创建思考窗口，token 通过 flushTokenBuffer 实时回填
+            vm.stepEvents.push({
+              eventType: 'thinking',
+              stepNumber: stepNumber,
+              phase: data.phase,
+              thinkingContent: '',
+              thinkingCollapsed: false
+            })
+          } else if (data.eventType === 'cache_hit') {
+            // 缓存命中：直接使用 answer
+            vm.stepEvents.push({
+              eventType: 'cache_hit',
+              stepNumber: stepNumber,
+              phase: data.phase,
+              answer: data.answer,
+              thinkingContent: data.answer || '',
+              thinkingCollapsed: false
+            })
+          } else if (data.phase === 'answer') {
+            // 最终回答（final 事件）：thinking step 内容由 flushTokenBuffer 实时写入，
+            // streamingText 也同步更新，不做迁移——避免窗口消失和内容跳变
+            vm.stepEvents.push({
+              eventType: data.eventType,
+              stepNumber: stepNumber,
+              phase: data.phase,
+              stepData: data.stepData || {},
+              answer: data.answer,
+              error: data.error,
+              finalStep: data.finalStep,
+              thinkingCollapsed: false
+            })
           } else {
-            // 推理阶段：token 归入 thinking step
-            if (data.eventType === 'thinking' && data.answer) {
-              stepData.thinkingContent = data.answer
-            } else if (groupText) {
-              stepData.thinkingContent = groupText
-            }
+            // tool_call / tool_result / error 事件：token 已由 flushTokenBuffer 实时回填
+            vm.stepEvents.push({
+              eventType: data.eventType,
+              stepNumber: stepNumber,
+              phase: data.phase,
+              stepData: data.stepData || {},
+              answer: data.answer,
+              error: data.error,
+              finalStep: data.finalStep,
+              thinkingCollapsed: false
+            })
           }
 
-          vm.stepEvents.push(stepData)
           vm.$nextTick(() => vm.scrollToBottom())
         },
         onStream(data) {
@@ -623,23 +646,54 @@ export default {
       }
     },
 
+    getStepsForMessage(item) {
+      if (item.stepEvents && item.stepEvents.length) {
+        return item.stepEvents
+      }
+      const cached = this.historyStepsCache[item.id]
+      if (cached && cached.length) {
+        return cached
+      }
+      return []
+    },
+
+    async loadHistorySteps(messageId) {
+      this.$set(this.loadingSteps, messageId, true)
+      try {
+        const res = await chatSessionApi.getMessageSteps(messageId)
+        const steps = res.data.data || res.data || []
+        const mapped = steps.map(s => ({
+          eventType: s.stepType,
+          stepNumber: s.stepOrder,
+          stepData: s.stepData || {},
+          content: s.content,
+          thinkingContent: s.stepType === 'thinking' ? s.content : ''
+        }))
+        this.$set(this.historyStepsCache, messageId, mapped)
+      } catch (e) {
+        console.error('加载推理步骤失败:', e)
+      } finally {
+        this.$set(this.loadingSteps, messageId, false)
+      }
+    },
+
     formatStepText(step) {
+      const sd = step.stepData || {}
       switch (step.eventType) {
         case 'tool_call': {
-          let text = `工具调用: ${step.toolName || 'unknown'}`
-          if (step.toolArguments) {
-            const argsStr = typeof step.toolArguments === 'string'
-              ? step.toolArguments
-              : JSON.stringify(step.toolArguments)
+          let text = `工具调用: ${sd.tool_name || 'unknown'}`
+          if (sd.arguments) {
+            const argsStr = typeof sd.arguments === 'string'
+              ? sd.arguments
+              : JSON.stringify(sd.arguments)
             text += ` (${argsStr.length > 50 ? argsStr.substring(0, 50) + '...' : argsStr})`
           }
           return text
         }
         case 'tool_result': {
-          let text = `工具结果: ${step.toolName || 'unknown'}`
-          if (step.toolResult !== undefined && step.toolResult !== null) {
-            const resultStr = String(step.toolResult)
-            text += ` → ${resultStr.length > 60 ? resultStr.substring(0, 60) + '...' : resultStr}`
+          let text = `工具结果: ${sd.tool_name || 'unknown'}`
+          if (sd.is_success !== undefined) {
+            text += sd.is_success ? ' ✓' : ' ✗'
           }
           return text
         }
@@ -663,6 +717,13 @@ export default {
           this.tokenGroups[sn] = ''
         }
         this.tokenGroups[sn] += this.tokenBuffer
+        // 实时回填到同 stepNumber 的 thinking step，让推理内容实时可见
+        const thinkingStep = this.stepEvents.find(
+          s => s.stepNumber === sn && s.eventType === 'thinking'
+        )
+        if (thinkingStep) {
+          thinkingStep.thinkingContent += this.tokenBuffer
+        }
         this.streamingText += this.tokenBuffer
         this.tokenBuffer = ''
         this.$nextTick(() => this.scrollToBottom())
@@ -1178,6 +1239,28 @@ export default {
   font-size: 13px;
   text-align: center;
   padding: 12px 0;
+}
+
+.load-steps-btn {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #6366f1;
+  background: #f0f0ff;
+  border: 1px solid #c7c7f7;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.load-steps-btn:hover {
+  background: #e0e0ff;
+}
+.load-steps-btn.loading {
+  color: #999;
+  cursor: default;
+  background: #f5f5f5;
+  border-color: #ddd;
 }
 
 .step-item {

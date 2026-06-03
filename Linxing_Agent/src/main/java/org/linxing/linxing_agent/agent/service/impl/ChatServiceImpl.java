@@ -12,6 +12,7 @@ import org.linxing.linxing_agent.agent.core.AgentExecutor;
 import org.linxing.linxing_agent.agent.core.AgentResult;
 import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepListener;
+import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
 import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
 import org.linxing.linxing_agent.rag.constant.OperationType;
@@ -162,9 +163,9 @@ public class ChatServiceImpl implements IChatService {
                                               SemanticCacheService.CacheResult cacheResult,
                                               AgentStepListener listener) {
         listener.onStep(AgentStepEvent.builder()
-                .eventType("cache_hit")
+                .eventType(AgentStepTypes.CACHE_HIT)
                 .stepNumber(0)
-                .phase("cache")
+                .phase(AgentStepTypes.PHASE_CACHE)
                 .answer(cacheResult.getEntry().getAnswer())
                 .finalStep(true)
                 .build());//向前端发送缓存命中事件

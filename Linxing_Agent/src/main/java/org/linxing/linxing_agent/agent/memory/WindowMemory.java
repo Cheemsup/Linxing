@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.memory;
 
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
@@ -7,7 +8,6 @@ import lombok.Getter;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 
 public class WindowMemory implements AgentMemory {
@@ -58,25 +58,39 @@ public class WindowMemory implements AgentMemory {
         return (systemMessage != null ? 1 : 0) + messages.size();
     }
 
+    /**
+     * 驱逐超出窗口大小的消息，以"工具调用组"为原子单位。
+     * 工具调用组 = AiMessage(hasToolExecutionRequests) + 紧跟的所有 ToolExecutionResultMessage
+     * 驱逐时必须整组移除，不能拆散 AiMessage 和其对应的 ToolResult
+     */
     private void evict() {
-        while (messages.size() > maxMessages) {
-            ChatMessage evicted = messages.remove(0);
-            if (evicted.type() == dev.langchain4j.data.message.ChatMessageType.AI) {
-                evictOrphanToolResults();
+        while (messages.size() > maxMessages && !messages.isEmpty()) {
+            int groupEnd = findToolCallGroupEnd(0);
+            // 移除从0到groupEnd（含）的所有消息，即一个完整的工具调用组或单条消息
+            for (int i = 0; i <= groupEnd; i++) {
+                messages.remove(0);
             }
         }
     }
 
-    private void evictOrphanToolResults() {
-        //驱逐所有紧跟的ToolExecutionResultMessage，处理并行工具调用时一条AiMessage可能对应多条ToolResult
-        Iterator<ChatMessage> it = messages.iterator();
-        while (it.hasNext()) {
-            ChatMessage msg = it.next();
-            if (msg instanceof ToolExecutionResultMessage) {
-                it.remove();
-            } else {
-                break;//遇到非ToolExecutionResultMessage说明这一组工具结果已清理完毕
+    /**
+     * 从指定位置开始，找到一个"工具调用组"的结束索引。
+     * 如果起始位置是 AiMessage(hasToolExecutionRequests)，则组包含它和紧跟的所有 ToolExecutionResultMessage；
+     * 否则组只包含起始位置这一条消息。
+     * @return 组内最后一条消息的相对索引（相对于start）
+     */
+    private int findToolCallGroupEnd(int start) {
+        ChatMessage first = messages.get(start);
+        if (first instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+            // AiMessage + 紧跟的所有 ToolExecutionResultMessage 构成一组
+            int end = start;
+            while (end + 1 < messages.size()
+                    && messages.get(end + 1) instanceof ToolExecutionResultMessage) {
+                end++;
             }
+            return end - start;
         }
+        // 非工具调用的消息，自成一组
+        return 0;
     }
 }

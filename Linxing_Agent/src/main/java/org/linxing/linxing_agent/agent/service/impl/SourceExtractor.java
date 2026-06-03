@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.agent.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.rag.dto.SearchResult;
 import org.springframework.stereotype.Component;
@@ -28,7 +29,7 @@ public class SourceExtractor {
         for (int i = steps.size() - 1; i >= 0; i--) {
             var step = steps.get(i);
             if (step instanceof org.linxing.linxing_agent.agent.vo.AgentStepVO stepVO
-                    && "tool_result".equals(stepVO.getStepType()) && stepVO.getContent() != null) {
+                    && AgentStepTypes.TOOL_RESULT.equals(stepVO.getStepType()) && stepVO.getContent() != null) {
                 try {
                     List<SearchResult> searchResults = objectMapper.readValue(
                             stepVO.getContent(),

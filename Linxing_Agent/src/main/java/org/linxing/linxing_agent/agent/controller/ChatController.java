@@ -10,7 +10,9 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.agent.service.IChatSessionService;
+import org.linxing.linxing_agent.agent.service.impl.AgentStepService;
 import org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheService;
+import org.linxing.linxing_agent.agent.vo.AgentStepVO;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +32,7 @@ public class ChatController {
     private final IChatSessionService chatSessionService;
     private final ChatMessageMapper chatMessageMapper;
     private final ChatMessageCacheService chatMessageCacheService;
+    private final AgentStepService agentStepService;
 
     /**
      * SSE流式对话
@@ -114,6 +117,14 @@ public class ChatController {
 
         chatMessageCacheService.putMessages(sessionId, vos);//回源后写入缓存
         return Result.success(vos);
+    }
+
+    /**
+     * 按消息ID懒加载该消息的agent推理步骤
+     */
+    @GetMapping("/messages/{messageId}/steps")
+    public Result<List<AgentStepVO>> getMessageSteps(@PathVariable Integer messageId) {
+        return Result.success(agentStepService.getStepsByMessageId(messageId));
     }
 
     /**

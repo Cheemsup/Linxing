@@ -223,22 +223,27 @@ CREATE TABLE IF NOT EXISTS agent_steps (
     chat_message_id INT,
     session_id      INT NOT NULL,
     step_order      INT NOT NULL DEFAULT 0,
-    step_type       VARCHAR(20) NOT NULL CHECK (step_type IN ('thought', 'tool_call', 'tool_result', 'final', 'error')),
+    step_type       VARCHAR(30) NOT NULL,
     content         TEXT,
-    tool_name       VARCHAR(100),
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    step_data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT agent_steps_session_id_fkey
+        FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT agent_steps_chat_message_id_fkey
+        FOREIGN KEY(chat_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
 );
 
 COMMENT ON TABLE agent_steps IS 'Agent执行步骤记录表，记录ReAct循环中的每一步（思考/工具调用/工具结果/最终答案）';
 COMMENT ON COLUMN agent_steps.id IS '步骤唯一ID';
-COMMENT ON COLUMN agent_steps.chat_message_id IS '关联的助手消息ID，NULL表示步骤尚未绑定消息';
-COMMENT ON COLUMN agent_steps.session_id IS '所属会话ID';
+COMMENT ON COLUMN agent_steps.chat_message_id IS '关联的助手消息ID，NULL表示步骤尚未绑定消息；消息删除时CASCADE';
+COMMENT ON COLUMN agent_steps.session_id IS '所属会话ID；会话删除时CASCADE';
 COMMENT ON COLUMN agent_steps.step_order IS '步骤顺序，从1开始';
-COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thought=思考, tool_call=工具调用, tool_result=工具结果, final=最终答案, error=错误';
-COMMENT ON COLUMN agent_steps.content IS '步骤内容：思考文本、工具调用参数、工具返回结果或最终答案';
-COMMENT ON COLUMN agent_steps.tool_name IS '工具名称，仅tool_call/tool_result类型有值';
-COMMENT ON COLUMN agent_steps.created_at IS '步骤创建时间';
+COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thinking/tool_call/tool_result/final/error/cache_hit/mcp……/skill……等，应用层校验';
+COMMENT ON COLUMN agent_steps.content IS '主文本内容：思考文本、工具调用参数、工具返回结果或最终答案';
+COMMENT ON COLUMN agent_steps.step_data IS '类型特有结构化数据（JSONB），如tool_name/tool_call_id/arguments/is_success/error_code等';
+COMMENT ON COLUMN agent_steps.created_at IS '创建时间';
 
 CREATE INDEX idx_agent_steps_session_id ON agent_steps(session_id);
 CREATE INDEX idx_agent_steps_chat_message_id ON agent_steps(chat_message_id);
 CREATE INDEX idx_agent_steps_session_step ON agent_steps(session_id, step_order);
+CREATE INDEX idx_agent_steps_step_data_gin ON agent_steps USING GIN (step_data);

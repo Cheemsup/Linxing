@@ -40,6 +40,7 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
 
     @Override
     public void onCompleteResponse(ChatResponse completeResponse) {
+        log.info("[DEBUG] ChatResponse: {}", completeResponse);
         responseHolder.set(completeResponse);
         latch.countDown();
     }

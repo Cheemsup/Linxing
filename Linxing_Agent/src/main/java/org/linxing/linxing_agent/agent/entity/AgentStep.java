@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 @Data
 @Builder
@@ -19,6 +20,6 @@ public class AgentStep {
     private Integer stepOrder;
     private String stepType;
     private String content;
-    private String toolName;
+    private Map<String, Object> stepData;
     private OffsetDateTime createdAt;
 }

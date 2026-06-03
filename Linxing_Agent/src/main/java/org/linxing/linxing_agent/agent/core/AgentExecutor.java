@@ -32,6 +32,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -121,9 +122,9 @@ public class AgentExecutor {
             stepNumber++;
 
             listener.onStep(AgentStepEvent.builder()
-                    .eventType("thinking")
+                    .eventType(AgentStepTypes.THINKING)
                     .stepNumber(stepNumber)
-                    .phase("reasoning")
+                    .phase(AgentStepTypes.PHASE_THINKING)
                     .build());
 
             List<ToolSpecification> roundSpecs = buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
@@ -143,14 +144,16 @@ public class AgentExecutor {
             } catch (Exception e) {
                 log.error("[AgentExecutor] LLM调用失败: {}", e.getMessage(), e);
                 listener.onStep(AgentStepEvent.builder()
-                        .eventType("error")
+                        .eventType(AgentStepTypes.ERROR)
                         .stepNumber(stepNumber)
-                        .phase("reasoning")
+                        .phase(AgentStepTypes.PHASE_THINKING)
                         .error(e.getMessage())
+                        .stepData(Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_LLM_CALL_FAILED))
                         .finalStep(true)
                         .build());
                 AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                        "error", "LLM调用失败: " + e.getMessage(), null);
+                        AgentStepTypes.ERROR, "LLM调用失败: " + e.getMessage(),
+                        Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_LLM_CALL_FAILED));
                 agentStepMapper.insert(step);
                 recordedSteps.add(toStepVO(step));
 
@@ -164,6 +167,8 @@ public class AgentExecutor {
 
             AiMessage aiMessage = response.aiMessage();
 
+            log.info("[DEBUG] 步骤{} text={}, hasTool={}", stepNumber, aiMessage.text(), aiMessage.hasToolExecutionRequests());
+
             if (aiMessage.hasToolExecutionRequests()) {
                 List<ToolExecutionRequest> toolRequests = aiMessage.toolExecutionRequests();
 
@@ -172,11 +177,13 @@ public class AgentExecutor {
                 for (ToolExecutionRequest toolReq : toolRequests) {
 
                     listener.onStep(AgentStepEvent.builder()
-                            .eventType("tool_call")
+                            .eventType(AgentStepTypes.TOOL_CALL)
                             .stepNumber(stepNumber)
-                            .phase("reasoning")
-                            .toolName(toolReq.name())
-                            .toolArguments(toolReq.arguments())
+                            .phase(AgentStepTypes.PHASE_THINKING)
+                            .stepData(Map.of(
+                                    AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
+                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
+                                    "arguments", toolReq.arguments()))
                             .build());
 
                     ToolCallRequest toolCallRequest = ToolCallRequest.builder()
@@ -220,11 +227,13 @@ public class AgentExecutor {
                             : "Error: " + toolResult.getError();
 
                     listener.onStep(AgentStepEvent.builder()
-                            .eventType("tool_result")
+                            .eventType(AgentStepTypes.TOOL_RESULT)
                             .stepNumber(stepNumber)
-                            .phase("reasoning")
-                            .toolName(toolReq.name())
-                            .toolResult(resultText)
+                            .phase(AgentStepTypes.PHASE_THINKING)
+                            .stepData(Map.of(
+                                    AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
+                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
+                                    AgentStepTypes.KEY_IS_SUCCESS, toolResult.isSuccess()))
                             .build());
 
                     //工具执行结果注入记忆，供LLM下一轮参考
@@ -236,15 +245,19 @@ public class AgentExecutor {
                             ? toolReq.arguments()
                             : "Error: " + toolResult.getError();
                     AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                            "tool_call", stepContent, toolReq.name());
+                            AgentStepTypes.TOOL_CALL, stepContent,
+                            Map.of(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
+                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name()));
                     agentStepMapper.insert(step);
                     recordedSteps.add(toStepVO(step));
 
                     //记录工具返回结果步骤
                     AgentStep obsStep = buildStep(context.getSessionId(), null, stepNumber,
-                            "tool_result",
+                            AgentStepTypes.TOOL_RESULT,
                             toolResult.isSuccess() ? toolResult.getResult() : toolResult.getError(),
-                            toolReq.name());
+                            Map.of(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
+                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
+                                    AgentStepTypes.KEY_IS_SUCCESS, toolResult.isSuccess()));
                     agentStepMapper.insert(obsStep);
                     recordedSteps.add(toStepVO(obsStep));
                 }
@@ -261,15 +274,15 @@ public class AgentExecutor {
                 }
 
                 listener.onStep(AgentStepEvent.builder()
-                        .eventType("final")
+                        .eventType(AgentStepTypes.FINAL)
                         .stepNumber(stepNumber)
-                        .phase("answer")
+                        .phase(AgentStepTypes.PHASE_ANSWER)
                         .answer(answer)
                         .finalStep(true)
                         .build());
 
                 AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                        "final", truncate(answer, 2000), null);
+                        AgentStepTypes.FINAL, truncate(answer, 2000), null);
                 agentStepMapper.insert(step);
                 recordedSteps.add(toStepVO(step));
 
@@ -285,14 +298,18 @@ public class AgentExecutor {
         //超过最大步骤数，兜底返回
         log.warn("[AgentExecutor] 超过最大步骤数 {}!", MAX_STEPS);
         listener.onStep(AgentStepEvent.builder()
-                .eventType("error")
+                .eventType(AgentStepTypes.ERROR)
                 .stepNumber(stepNumber)
-                .phase("reasoning")
+                .phase(AgentStepTypes.PHASE_THINKING)
                 .error("超过最大步骤数 " + MAX_STEPS)
+                .stepData(Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_MAX_STEPS_EXCEEDED,
+                        AgentStepTypes.KEY_STEP_COUNT, MAX_STEPS))
                 .finalStep(true)
                 .build());
         AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                "error", "超过最大步骤数 " + MAX_STEPS, null);
+                AgentStepTypes.ERROR, "超过最大步骤数 " + MAX_STEPS,
+                Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_MAX_STEPS_EXCEEDED,
+                        AgentStepTypes.KEY_STEP_COUNT, MAX_STEPS));
         agentStepMapper.insert(step);
         recordedSteps.add(toStepVO(step));
 
@@ -396,14 +413,15 @@ public class AgentExecutor {
     }
 
     private AgentStep buildStep(Integer sessionId, Integer chatMessageId,
-                                 int stepOrder, String stepType, String content, String toolName) {
+                                 int stepOrder, String stepType, String content,
+                                 Map<String, Object> stepData) {
         return AgentStep.builder()
                 .chatMessageId(chatMessageId)
                 .sessionId(sessionId)
                 .stepOrder(stepOrder)
                 .stepType(stepType)
                 .content(content)
-                .toolName(toolName)
+                .stepData(stepData != null ? stepData : Map.of())
                 .build();
     }
 
@@ -413,7 +431,7 @@ public class AgentExecutor {
                 .stepOrder(step.getStepOrder())
                 .stepType(step.getStepType())
                 .content(step.getContent())
-                .toolName(step.getToolName())
+                .stepData(step.getStepData())
                 .createdAt(step.getCreatedAt())
                 .build();
     }

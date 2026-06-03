@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.agent.core;
 
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.PartialThinking;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,7 +36,12 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
 
     @Override
     public void onPartialResponse(String partialResponse) {
-        listener.onStream(partialResponse, stepNumber);
+        listener.onStream(partialResponse, "answer", stepNumber);
+    }
+
+    @Override
+    public void onPartialThinking(PartialThinking partialThinking) {
+        listener.onStream(partialThinking.text(), "thinking", stepNumber);
     }
 
     @Override

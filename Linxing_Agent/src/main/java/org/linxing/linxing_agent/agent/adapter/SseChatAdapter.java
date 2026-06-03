@@ -93,10 +93,11 @@ public class SseChatAdapter {
             }
 
             @Override
-            public void onStream(String token, int stepNumber) {
+            public void onStream(String token, String type, int stepNumber) {
                 try {
                     Map<String, Object> data = new LinkedHashMap<>();
                     data.put("token", token);
+                    data.put("type", type);
                     data.put("stepNumber", stepNumber);
 
                     synchronized (emitter) {

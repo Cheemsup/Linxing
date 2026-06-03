@@ -269,6 +269,7 @@ export default {
       stepCollapsed: false,
       answerCollapsed: false,
       tokenBuffer: '',
+      thinkingBuffer: '',
       flushTimer: null,
       tokenGroups: {},
       currentStreamStepNumber: 0,
@@ -452,6 +453,7 @@ export default {
       this.stepCollapsed = false
       this.answerCollapsed = false
       this.tokenBuffer = ''
+      this.thinkingBuffer = ''
       this.tokenGroups = {}
       this.currentStreamStepNumber = 0
       if (this.flushTimer) {
@@ -547,8 +549,13 @@ export default {
             vm.isStreaming = true
           }
           vm.currentStreamStepNumber = data.stepNumber || 0
-          // token batching — 30ms 批量 flush
-          vm.tokenBuffer += data.token
+          // token batching — 30ms 批量 flush，按 type 分流
+          const tokenType = data.type || 'answer'
+          if (tokenType === 'thinking') {
+            vm.thinkingBuffer += data.token
+          } else {
+            vm.tokenBuffer += data.token
+          }
           if (!vm.flushTimer) {
             vm.flushTimer = setTimeout(() => vm.flushTokenBuffer(), 30)
           }
@@ -711,21 +718,33 @@ export default {
     },
 
     flushTokenBuffer() {
-      if (this.tokenBuffer) {
+      if (this.thinkingBuffer || this.tokenBuffer) {
         const sn = this.currentStreamStepNumber
         if (!this.tokenGroups[sn]) {
           this.tokenGroups[sn] = ''
         }
-        this.tokenGroups[sn] += this.tokenBuffer
-        // 实时回填到同 stepNumber 的 thinking step，让推理内容实时可见
-        const thinkingStep = this.stepEvents.find(
-          s => s.stepNumber === sn && s.eventType === 'thinking'
-        )
-        if (thinkingStep) {
-          thinkingStep.thinkingContent += this.tokenBuffer
+        // 统一记录到 tokenGroups（向后兼容）
+        if (this.thinkingBuffer) {
+          this.tokenGroups[sn] += this.thinkingBuffer
         }
-        this.streamingText += this.tokenBuffer
-        this.tokenBuffer = ''
+        if (this.tokenBuffer) {
+          this.tokenGroups[sn] += this.tokenBuffer
+        }
+        // thinking token: 仅写入思考窗口，不污染回答面板
+        if (this.thinkingBuffer) {
+          const thinkingStep = this.stepEvents.find(
+            s => s.stepNumber === sn && s.eventType === 'thinking'
+          )
+          if (thinkingStep) {
+            thinkingStep.thinkingContent += this.thinkingBuffer
+          }
+          this.thinkingBuffer = ''
+        }
+        // answer token: 仅写入回答面板，不写入思考窗口（避免与推理内容重复）
+        if (this.tokenBuffer) {
+          this.streamingText += this.tokenBuffer
+          this.tokenBuffer = ''
+        }
         this.$nextTick(() => this.scrollToBottom())
       }
       this.flushTimer = null

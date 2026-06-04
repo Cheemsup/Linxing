@@ -16,4 +16,6 @@ public interface AgentStepMapper {
     List<AgentStep> selectBySessionId(@Param("sessionId") Integer sessionId);
 
     int deleteBySessionId(@Param("sessionId") Integer sessionId);
+
+    int updateChatMessageId(@Param("sessionId") Integer sessionId, @Param("chatMessageId") Integer chatMessageId);
 }

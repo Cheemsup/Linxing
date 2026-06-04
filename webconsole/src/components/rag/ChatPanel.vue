@@ -55,7 +55,7 @@
                             <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + idx)">
                               <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'thinking_' + idx) ? '▶' : '▼' }}</span>
                               <span class="step-icon">💭</span>
-                              <span class="panel-title">{{ step.thinkingContent ? '思考推理中...' : '正在思考...' }}</span>
+                              <span class="panel-title">{{ step.thinkingContent ? '推理详情' : '正在思考...' }}</span>
                             </div>
                             <div v-show="!isPanelCollapsed(item.id, 'thinking_' + idx)" class="panel-body">
                               <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
@@ -93,28 +93,67 @@
                     </div>
                   </template>
                   <template v-else>
-                    <div class="answer" v-html="formatAnswer(item.content)"></div>
-                    <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
-                      <span class="source-label">来源:</span>
-                      <span
-                        v-for="(source, si) in item.sourceDetails"
-                        :key="si"
-                        class="source-tag clickable"
-                        @click="openChunkContext(source)"
-                        :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
-                      >
-                        {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
-                      </span>
+                    <div class="collapsible-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'step') }">
+                      <div class="panel-header" @click="toggleHistoryStepsPanel(item)">
+                        <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'step') ? '▶' : '▼' }}</span>
+                        <span class="panel-title">推理过程</span>
+                        <span class="panel-badge" v-if="historyStepsCache[item.id]">{{ historyStepsCache[item.id].length }}步</span>
+                        <span class="panel-badge" v-else-if="loadingSteps[item.id]">加载中...</span>
+                      </div>
+                      <div v-show="!isPanelCollapsed(item.id, 'step')" class="panel-body">
+                        <template v-if="loadingSteps[item.id]">
+                          <div class="step-placeholder">加载中...</div>
+                        </template>
+                        <template v-else-if="historyStepsCache[item.id] && historyStepsCache[item.id].length">
+                          <template v-for="(step, idx) in historyStepsCache[item.id]" :key="idx">
+                            <div v-if="step.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'thinking_' + idx) }">
+                              <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + idx)">
+                                <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'thinking_' + idx) ? '▶' : '▼' }}</span>
+                                <span class="step-icon">💭</span>
+                                <span class="panel-title">{{ step.thinkingContent ? '推理详情' : '思考中...' }}</span>
+                              </div>
+                              <div v-show="!isPanelCollapsed(item.id, 'thinking_' + idx)" class="panel-body">
+                                <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
+                                <div v-else class="step-placeholder">无推理内容</div>
+                              </div>
+                            </div>
+                            <div v-else :class="['step-item', getStepClass(step)]">
+                              <span class="step-icon">{{ getStepIcon(step) }}</span>
+                              <span class="step-text">{{ formatStepText(step) }}</span>
+                            </div>
+                          </template>
+                        </template>
+                        <template v-else>
+                          <div class="step-placeholder">暂无推理步骤</div>
+                        </template>
+                      </div>
                     </div>
-                    <div v-else-if="item.sources && item.sources.length" class="sources">
-                      <span class="source-label">来源:</span>
-                      <span v-for="source in item.sources" :key="source" class="source-tag">{{ source }}</span>
+                    <div class="collapsible-panel answer-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'answer') }">
+                      <div class="panel-header" @click="togglePanel(item.id, 'answer')">
+                        <span class="panel-toggle">{{ isPanelCollapsed(item.id, 'answer') ? '▶' : '▼' }}</span>
+                        <span class="panel-title">回答详情</span>
+                        <span class="panel-badge">已生成</span>
+                      </div>
+                      <div v-show="!isPanelCollapsed(item.id, 'answer')" class="panel-body">
+                        <div class="answer" v-html="formatAnswer(item.content)"></div>
+                        <div v-if="item.sourceDetails && item.sourceDetails.length" class="sources">
+                          <span class="source-label">来源:</span>
+                          <span
+                            v-for="(source, si) in item.sourceDetails"
+                            :key="si"
+                            class="source-tag clickable"
+                            @click="openChunkContext(source)"
+                            :title="'点击查看上下文: ' + (source.titlePath || source.fileName)"
+                          >
+                            {{ source.fileName }}{{ source.titlePath ? ' > ' + source.titlePath : '' }}
+                          </span>
+                        </div>
+                        <div v-else-if="item.sources && item.sources.length" class="sources">
+                          <span class="source-label">来源:</span>
+                          <span v-for="source in item.sources" :key="source" class="source-tag">{{ source }}</span>
+                        </div>
+                      </div>
                     </div>
-                    <button v-if="item.role === 'assistant' && !historyStepsCache[item.id] && !loadingSteps[item.id]"
-                            class="load-steps-btn" @click="loadHistorySteps(item.id)">
-                      查看推理过程
-                    </button>
-                    <span v-if="loadingSteps[item.id]" class="load-steps-btn loading">加载中...</span>
                   </template>
                 </div>
               </div>
@@ -158,7 +197,7 @@
                         <div class="panel-header" @click="step.thinkingCollapsed = !step.thinkingCollapsed">
                           <span class="panel-toggle">{{ step.thinkingCollapsed ? '▶' : '▼' }}</span>
                           <span class="step-icon">💭</span>
-                          <span class="panel-title">{{ step.thinkingContent ? '思考推理中...' : '正在思考...' }}</span>
+                          <span class="panel-title">{{ step.thinkingContent ? '推理详情' : '正在思考...' }}</span>
                         </div>
                         <div v-show="!step.thinkingCollapsed" class="panel-body">
                           <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
@@ -665,7 +704,7 @@ export default {
     },
 
     async loadHistorySteps(messageId) {
-      this.$set(this.loadingSteps, messageId, true)
+      this.loadingSteps[messageId] = true
       try {
         const res = await chatSessionApi.getMessageSteps(messageId)
         const steps = res.data.data || res.data || []
@@ -676,11 +715,25 @@ export default {
           content: s.content,
           thinkingContent: s.stepType === 'thinking' ? s.content : ''
         }))
-        this.$set(this.historyStepsCache, messageId, mapped)
+        this.historyStepsCache[messageId] = mapped
       } catch (e) {
         console.error('加载推理步骤失败:', e)
       } finally {
-        this.$set(this.loadingSteps, messageId, false)
+        this.loadingSteps[messageId] = false
+      }
+    },
+
+    toggleHistoryStepsPanel(item) {
+      //先切换折叠状态
+      if (!this.messagePanelState[item.id]) {
+        this.messagePanelState[item.id] = { step: true, answer: false }
+      }
+      const wasCollapsed = this.messagePanelState[item.id].step
+      this.messagePanelState[item.id].step = !wasCollapsed
+
+      //展开时且尚未加载步骤数据，触发懒加载
+      if (wasCollapsed && !this.historyStepsCache[item.id] && !this.loadingSteps[item.id]) {
+        this.loadHistorySteps(item.id)
       }
     },
 
@@ -705,7 +758,7 @@ export default {
           return text
         }
         case 'thinking':
-          return step.answer ? `思考: ${step.answer}` : '思考推理中...'
+          return step.thinkingContent ? '推理详情' : '思考推理中...'
         case 'error':
           return `错误: ${step.error || '未知'}`
         case 'final':
@@ -752,7 +805,7 @@ export default {
 
     isPanelCollapsed(messageId, panelType) {
       const state = this.messagePanelState[messageId]
-      if (!state) return true
+      if (!state) return panelType !== 'answer' // answer默认展开，其余默认折叠
       return state[panelType]
     },
 

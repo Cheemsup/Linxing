@@ -39,4 +39,11 @@
         DELETE FROM agent_steps WHERE session_id = #{sessionId}
     </delete>
 
+    <update id="updateChatMessageId">
+        UPDATE agent_steps
+        SET chat_message_id = #{chatMessageId}
+        WHERE session_id = #{sessionId}
+          AND chat_message_id IS NULL
+    </update>
+
 </mapper>

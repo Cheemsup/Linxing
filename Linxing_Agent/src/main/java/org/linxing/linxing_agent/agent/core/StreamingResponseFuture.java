@@ -29,9 +29,27 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
     private final AgentStepListener listener;
     private final int stepNumber;
 
+    /** 收集该轮LLM调用的完整推理/思考文本 */
+    private final StringBuilder thinkingBuffer = new StringBuilder();
+
     public StreamingResponseFuture(AgentStepListener listener, int stepNumber) {
         this.listener = listener;
         this.stepNumber = stepNumber;
+    }
+
+    /**
+     * 获取该轮LLM调用收集到的完整推理/思考文本
+     * @return 推理文本，无推理内容时返回空字符串
+     */
+    public String getThinkingContent() {
+        return thinkingBuffer.toString();
+    }
+
+    /**
+     * 该轮LLM调用是否产生了推理/思考内容
+     */
+    public boolean hasThinkingContent() {
+        return thinkingBuffer.length() > 0;
     }
 
     @Override
@@ -41,6 +59,7 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
 
     @Override
     public void onPartialThinking(PartialThinking partialThinking) {
+        thinkingBuffer.append(partialThinking.text());
         listener.onStream(partialThinking.text(), "thinking", stepNumber);
     }
 

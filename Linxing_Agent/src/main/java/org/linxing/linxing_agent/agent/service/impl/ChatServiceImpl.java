@@ -24,6 +24,7 @@ import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.rag.entity.ActivityLog;
 import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
+import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.service.IChatService;
 import org.springframework.stereotype.Service;
 
@@ -45,6 +46,7 @@ public class ChatServiceImpl implements IChatService {
     private final SourceExtractor sourceExtractor;
     private final AgentExecutor agentExecutor;
     private final AgentMemoryFactory memoryFactory;
+    private final AgentStepMapper agentStepMapper;
 
     /**
      * 核心对话入口：解析会话→保存用户消息→溯源历史→语义缓存查找→Agent循环→写入缓存→记录日志
@@ -135,6 +137,9 @@ public class ChatServiceImpl implements IChatService {
 
         ChatMessage assistantMsg = chatMessageService.saveAssistantMessage(
                 userId, sessionId, userMsg.getId(), result.getAnswer(), sourcesJson);//持久化助手消息
+
+        //回填 agent_steps 的 chat_message_id
+        agentStepMapper.updateChatMessageId(sessionId, assistantMsg.getId());
 
         chatMessageCacheService.appendMessages(sessionId, List.of(
                 chatMessageService.toMessageVO(userMsg),

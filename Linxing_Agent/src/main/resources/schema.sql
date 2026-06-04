@@ -233,14 +233,14 @@ CREATE TABLE IF NOT EXISTS agent_steps (
         FOREIGN KEY(chat_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
 );
 
-COMMENT ON TABLE agent_steps IS 'Agent执行步骤记录表，记录ReAct循环中的每一步（思考/工具调用/工具结果/最终答案）';
+COMMENT ON TABLE agent_steps IS 'Agent执行步骤记录表，记录ReAct循环中的推理过程（思考内容/工具调用/工具结果/错误……）';
 COMMENT ON COLUMN agent_steps.id IS '步骤唯一ID';
 COMMENT ON COLUMN agent_steps.chat_message_id IS '关联的助手消息ID，NULL表示步骤尚未绑定消息；消息删除时CASCADE';
 COMMENT ON COLUMN agent_steps.session_id IS '所属会话ID；会话删除时CASCADE';
 COMMENT ON COLUMN agent_steps.step_order IS '步骤顺序，从1开始';
-COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thinking/tool_call/tool_result/final/error/cache_hit/mcp……/skill……等，应用层校验';
-COMMENT ON COLUMN agent_steps.content IS '主文本内容：思考文本、工具调用参数、工具返回结果或最终答案';
-COMMENT ON COLUMN agent_steps.step_data IS '类型特有结构化数据（JSONB），如tool_name/tool_call_id/arguments/is_success/error_code等';
+COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thinking（推理思考）/……_call/……_result/error/cache_hit等，应用层校验；注意：final类型不写DB，仅SSE推送';
+COMMENT ON COLUMN agent_steps.content IS '主文本内容：thinking时为完整推理文本，……_call时为调用参数，……_result时为返回结果';
+COMMENT ON COLUMN agent_steps.step_data IS '类型特有结构化数据（JSONB），如……_call_id/arguments/is_success/error_code/thinking_tokens等';
 COMMENT ON COLUMN agent_steps.created_at IS '创建时间';
 
 CREATE INDEX idx_agent_steps_session_id ON agent_steps(session_id);

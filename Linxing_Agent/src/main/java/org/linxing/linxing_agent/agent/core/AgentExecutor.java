@@ -137,8 +137,9 @@ public class AgentExecutor {
 
             //调用流式LLM并等待完整响应
             ChatResponse response;
+            StreamingResponseFuture future;
             try {
-                StreamingResponseFuture future = new StreamingResponseFuture(listener, stepNumber);
+                future = new StreamingResponseFuture(listener, stepNumber);
                 chatModel.chat(chatRequest, future);
                 response = future.await(600, TimeUnit.SECONDS);
             } catch (Exception e) {
@@ -168,6 +169,16 @@ public class AgentExecutor {
             AiMessage aiMessage = response.aiMessage();
 
             log.info("[DEBUG] 步骤{} text={}, hasTool={}", stepNumber, aiMessage.text(), aiMessage.hasToolExecutionRequests());
+
+            //持久化推理/思考内容到agent_steps（仅当LLM产生了thinking token时）
+            if (future.hasThinkingContent()) {
+                String thinkingText = future.getThinkingContent();
+                AgentStep thinkingStep = buildStep(context.getSessionId(), null, stepNumber,
+                        AgentStepTypes.THINKING, truncate(thinkingText, 8000),
+                        Map.of("thinking_tokens", thinkingText.length()));
+                agentStepMapper.insert(thinkingStep);
+                recordedSteps.add(toStepVO(thinkingStep));
+            }
 
             if (aiMessage.hasToolExecutionRequests()) {
                 List<ToolExecutionRequest> toolRequests = aiMessage.toolExecutionRequests();
@@ -281,10 +292,7 @@ public class AgentExecutor {
                         .finalStep(true)
                         .build());
 
-                AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                        AgentStepTypes.FINAL, truncate(answer, 2000), null);
-                agentStepMapper.insert(step);
-                recordedSteps.add(toStepVO(step));
+                //final步骤不写DB，最终回答唯一存储在chat_messages中
 
                 return AgentResult.builder()
                         .answer(answer)

@@ -247,3 +247,95 @@ CREATE INDEX idx_agent_steps_session_id ON agent_steps(session_id);
 CREATE INDEX idx_agent_steps_chat_message_id ON agent_steps(chat_message_id);
 CREATE INDEX idx_agent_steps_session_step ON agent_steps(session_id, step_order);
 CREATE INDEX idx_agent_steps_step_data_gin ON agent_steps USING GIN (step_data);
+
+-- =============================================
+-- 9、知识测验表 exams
+-- =============================================
+CREATE TABLE IF NOT EXISTS exams (
+    id              SERIAL PRIMARY KEY,
+    user_id         INT NOT NULL,
+    title           VARCHAR(200) NOT NULL,
+    description     TEXT,
+    status          VARCHAR(20) NOT NULL DEFAULT 'created'
+                    CHECK (status IN ('created', 'in_progress', 'completed')),
+    source_type     VARCHAR(20) NOT NULL CHECK (source_type IN ('notes', 'web_search', 'mixed')),
+    source_refs     JSONB DEFAULT '[]',
+    question_count  INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exams_user_id ON exams(user_id);
+CREATE INDEX IF NOT EXISTS idx_exams_user_created ON exams(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_exams_user_status ON exams(user_id, status);
+
+COMMENT ON TABLE exams IS '知识测验表，记录每次生成的测验元信息';
+COMMENT ON COLUMN exams.id IS '测验唯一ID';
+COMMENT ON COLUMN exams.user_id IS '所属用户ID';
+COMMENT ON COLUMN exams.title IS '测验标题，如"数据结构测验"';
+COMMENT ON COLUMN exams.description IS '测验描述或生成要求';
+COMMENT ON COLUMN exams.status IS '测验状态：created=已生成未作答，in_progress=作答中，completed=已完成';
+COMMENT ON COLUMN exams.source_type IS '素材来源类型：notes=用户笔记，web_search=联网搜索，mixed=混合';
+COMMENT ON COLUMN exams.source_refs IS '素材来源引用，JSON数组，如笔记chunk_ids或搜索URL';
+COMMENT ON COLUMN exams.question_count IS '题目总数';
+COMMENT ON COLUMN exams.created_at IS '创建时间';
+
+-- =============================================
+-- 10、测验试题上下文表 exam_context
+-- =============================================
+CREATE TABLE IF NOT EXISTS exam_context (
+    id              SERIAL PRIMARY KEY,
+    exam_id         INT NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    user_id         INT NOT NULL,
+    question_order  INT NOT NULL DEFAULT 0,
+    question_type   VARCHAR(20) NOT NULL CHECK (question_type IN
+                     ('single_choice', 'multi_choice', 'fill_blank', 'true_false', 'short_answer')),
+    stem            TEXT NOT NULL,
+    options         JSONB,
+    answer          TEXT NOT NULL,
+    explanation     TEXT,
+    difficulty      VARCHAR(10) DEFAULT 'medium',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exam_context_exam_id ON exam_context(exam_id);
+CREATE INDEX IF NOT EXISTS idx_exam_context_user_id ON exam_context(user_id);
+CREATE INDEX IF NOT EXISTS idx_exam_context_exam_order ON exam_context(exam_id, question_order);
+
+COMMENT ON TABLE exam_context IS '测验试题上下文表，存储每道题的完整上下文（题干、选项、答案、解析）';
+COMMENT ON COLUMN exam_context.id IS '试题唯一ID';
+COMMENT ON COLUMN exam_context.exam_id IS '所属测验ID，测验删除时级联删除';
+COMMENT ON COLUMN exam_context.user_id IS '所属用户ID，冗余以支持按用户快速查询';
+COMMENT ON COLUMN exam_context.question_order IS '题目在测验中的顺序，从1开始';
+COMMENT ON COLUMN exam_context.question_type IS '题型：single_choice/multi_choice/fill_blank/true_false/short_answer';
+COMMENT ON COLUMN exam_context.stem IS '题目内容';
+COMMENT ON COLUMN exam_context.options IS '选项列表，JSON数组格式，如["A.选项1","B.选项2"]；填空题和简答题为NULL';
+COMMENT ON COLUMN exam_context.answer IS '正确答案；单选/判断为单个值，多选为JSON数组，填空/简答为文本';
+COMMENT ON COLUMN exam_context.explanation IS '答案解析';
+COMMENT ON COLUMN exam_context.difficulty IS '难度：easy/medium/hard';
+COMMENT ON COLUMN exam_context.created_at IS '创建时间';
+
+-- =============================================
+-- 11、用户答题记录表 exam_answers
+-- =============================================
+CREATE TABLE IF NOT EXISTS exam_answers (
+    id              SERIAL PRIMARY KEY,
+    exam_id         INT NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+    user_id         INT NOT NULL,
+    answers         JSONB NOT NULL,
+    score           INT,
+    total           INT,
+    completed_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exam_answers_exam_id ON exam_answers(exam_id);
+CREATE INDEX IF NOT EXISTS idx_exam_answers_user_id ON exam_answers(user_id);
+CREATE INDEX IF NOT EXISTS idx_exam_answers_user_completed ON exam_answers(user_id, completed_at DESC);
+
+COMMENT ON TABLE exam_answers IS '用户答题记录表，记录每次测验的作答情况和得分';
+COMMENT ON COLUMN exam_answers.id IS '答题记录唯一ID';
+COMMENT ON COLUMN exam_answers.exam_id IS '所属测验ID，测验删除时级联删除';
+COMMENT ON COLUMN exam_answers.user_id IS '答题用户ID';
+COMMENT ON COLUMN exam_answers.answers IS '用户答案，JSON对象格式，如{"q1":"C","q2":["A","C"],"q3":"有序"}';
+COMMENT ON COLUMN exam_answers.score IS '得分/答对题数';
+COMMENT ON COLUMN exam_answers.total IS '总题数';
+COMMENT ON COLUMN exam_answers.completed_at IS '答题完成时间';

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.ExamMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.Exam">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="title" property="title"/>
+        <result column="description" property="description"/>
+        <result column="status" property="status"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="source_refs" property="sourceRefs"/>
+        <result column="question_count" property="questionCount"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO exams (user_id, title, description, status, source_type, source_refs, question_count)
+        VALUES (#{userId}, #{title}, #{description}, #{status}, #{sourceType},
+                #{sourceRefs}::jsonb, #{questionCount})
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, created_at
+        FROM exams
+        WHERE user_id = #{userId} AND id = #{examId}
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, created_at
+        FROM exams
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*) FROM exams
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE exams SET status = #{status} WHERE id = #{examId}
+    </update>
+
+</mapper>

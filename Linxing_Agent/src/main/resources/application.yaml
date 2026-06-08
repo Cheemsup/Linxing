@@ -102,6 +102,10 @@ agent:
     type: ${AGENT_MEMORY_TYPE:window}
     max-messages: ${AGENT_MEMORY_MAX_MESSAGES:40}
     max-tokens: ${AGENT_MEMORY_MAX_TOKENS:32000}
+  web-search:
+    tavily:
+      api-key: ${TAVILY_API_KEY}
+      max-results: ${TAVILY_MAX_RESULTS:5}
 
 logging:
   level:

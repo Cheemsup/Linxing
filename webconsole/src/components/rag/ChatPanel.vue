@@ -439,6 +439,12 @@ export default {
         this.switchSession(id)
       }
     }
+    window.__examLinkClick = (examId) => {
+      this.$router.push({ path: '/quiz', query: { examId } })
+    }
+  },
+  beforeUnmount() {
+    delete window.__examLinkClick
   },
   methods: {
     async fetchSessions() {
@@ -920,7 +926,12 @@ export default {
     },
     formatAnswer(text) {
       if (!text) return ''
-      return text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      let html = text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      html = html.replace(
+        /\[([^\]]+)\]\(\/quiz\/(\d+)\)/g,
+        '<span class="exam-link" data-exam-id="$2" onclick="window.__examLinkClick&&window.__examLinkClick($2)">$1</span>'
+      )
+      return html
     },
     scrollToBottom() {
       const container = this.$refs.messagesContainer
@@ -1158,6 +1169,23 @@ export default {
 .answer {
   margin-top: 4px;
   line-height: 1.6;
+}
+
+.exam-link {
+  display: inline-block;
+  margin: 4px 2px;
+  padding: 4px 12px;
+  background: #1a73e8;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.exam-link:hover {
+  background: #1557b0;
 }
 
 .sources {

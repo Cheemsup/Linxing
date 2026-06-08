@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.ExamContextMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.ExamContext">
+        <id column="id" property="id"/>
+        <result column="exam_id" property="examId"/>
+        <result column="user_id" property="userId"/>
+        <result column="question_order" property="questionOrder"/>
+        <result column="question_type" property="questionType"/>
+        <result column="stem" property="stem"/>
+        <result column="options" property="options"/>
+        <result column="answer" property="answer"/>
+        <result column="explanation" property="explanation"/>
+        <result column="difficulty" property="difficulty"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="batchInsert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO exam_context (exam_id, user_id, question_order, question_type, stem, options, answer, explanation, difficulty)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.examId}, #{item.userId}, #{item.questionOrder}, #{item.questionType},
+             #{item.stem}, #{item.options}::jsonb, #{item.answer}, #{item.explanation}, #{item.difficulty})
+        </foreach>
+    </insert>
+
+    <select id="selectByExamId" resultMap="BaseResultMap">
+        SELECT id, exam_id, user_id, question_order, question_type, stem, options, answer, explanation, difficulty, created_at
+        FROM exam_context
+        WHERE exam_id = #{examId}
+        ORDER BY question_order ASC
+    </select>
+
+</mapper>

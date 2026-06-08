@@ -41,7 +41,8 @@ export default {
       { path: '/search', name: '知识库搜索', icon: '🔍' },
       { path: '/chat', name: '智能问答', icon: '💬' },
       { path: '/ingest', name: '导入笔记', icon: '📥' },
-      { path: '/notes', name: '笔记管理', icon: '📚' }
+      { path: '/notes', name: '笔记管理', icon: '📚' },
+      { path: '/quiz', name: '知识测验', icon: '📝' }
     ]
 
     const isLoggedIn = computed(() => authStore.isAuthenticated())

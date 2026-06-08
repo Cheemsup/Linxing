@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.ExamAnswerMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.ExamAnswer">
+        <id column="id" property="id"/>
+        <result column="exam_id" property="examId"/>
+        <result column="user_id" property="userId"/>
+        <result column="answers" property="answers"/>
+        <result column="score" property="score"/>
+        <result column="total" property="total"/>
+        <result column="completed_at" property="completedAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO exam_answers (exam_id, user_id, answers, score, total)
+        VALUES (#{examId}, #{userId}, #{answers}::jsonb, #{score}, #{total})
+    </insert>
+
+    <select id="selectByExamIdAndUserId" resultMap="BaseResultMap">
+        SELECT id, exam_id, user_id, answers, score, total, completed_at
+        FROM exam_answers
+        WHERE exam_id = #{examId} AND user_id = #{userId}
+    </select>
+
+</mapper>

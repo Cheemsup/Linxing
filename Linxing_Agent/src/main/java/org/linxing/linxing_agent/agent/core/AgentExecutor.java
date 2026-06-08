@@ -52,27 +52,9 @@ public class AgentExecutor {
     @Value("${agent.disclosure.threshold:5}")
     private int disclosureThreshold;
 
-    private static final String SYSTEM_PROMPT_TEMPLATE_FULL =
-            "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。\n\n"
-            + "工作流程：\n"
-            + "1. 先思考用户的问题需要哪些信息\n"
-            + "2. 查看下方【可用能力】目录和完整定义，选择匹配的工具或技能\n"
-            + "3. 直接调用选定的工具或技能，无需再获取定义\n"
-            + "4. 基于获取的信息给出准确、完整的回答\n"
-            + "5. 仅依据获取的信息回答，不要编造信息\n\n"
-            + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
-            + "%s";
+    private static final String SYSTEM_PROMPT_TEMPLATE_FULL = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_FULL;
 
-    private static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE =
-            "你是一个智能知识库助手，可以搜索用户的个人笔记和文档来回答问题。\n\n"
-            + "工作流程：\n"
-            + "1. 先思考用户的问题需要哪些信息\n"
-            + "2. 查看下方【可用能力】目录，确认是否有匹配的工具或技能\n"
-            + "3. 如需使用某个工具或技能，调用 resolve 获取其完整定义\n"
-            + "4. 基于获取的信息给出准确、完整的回答\n"
-            + "5. 仅依据获取的信息回答，不要编造信息\n\n"
-            + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
-            + "%s";
+    private static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE;
 
     private final ToolRegistry toolRegistry;
     private final SkillRegistry skillRegistry;

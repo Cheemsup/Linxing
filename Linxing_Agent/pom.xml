@@ -100,6 +100,12 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>
         </dependency>
+        <!-- langchain4j Tavily（beta 模块，需指定 beta 版本号） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-web-search-engine-tavily</artifactId>
+            <version>1.13.0-beta23</version>
+        </dependency>
 
         <!-- ==================== 嵌入模型：BGE ==================== -->
         <dependency>

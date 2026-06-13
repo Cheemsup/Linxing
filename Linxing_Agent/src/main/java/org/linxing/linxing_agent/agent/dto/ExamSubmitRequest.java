@@ -6,5 +6,5 @@ import java.util.Map;
 
 @Data
 public class ExamSubmitRequest {
-    private Map<String, String> answers;
+    private Map<String, Object> answers;
 }

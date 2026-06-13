@@ -8,4 +8,8 @@ import org.linxing.linxing_agent.agent.entity.ExamAnswer;
 public interface ExamAnswerMapper {
     int insert(ExamAnswer examAnswer);
     ExamAnswer selectByExamIdAndUserId(@Param("examId") Integer examId, @Param("userId") Integer userId);
+    int updateToSubmitted(@Param("examId") Integer examId, @Param("userId") Integer userId,
+                          @Param("answers") String answers, @Param("score") int score, @Param("total") int total);
+    int updateDraft(@Param("examId") Integer examId, @Param("userId") Integer userId,
+                    @Param("answers") String answers);
 }

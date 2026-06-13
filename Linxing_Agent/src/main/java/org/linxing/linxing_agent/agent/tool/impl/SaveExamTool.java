@@ -53,13 +53,35 @@ public class SaveExamTool implements Tool {
 
     @Override
     public JsonObjectSchema spec() {
+        // 题目对象的 Schema 定义
+        JsonObjectSchema questionItemSchema = JsonObjectSchema.builder()
+                .addProperty("type", JsonStringSchema.builder()
+                        .description("题型，仅限: single_choice / multi_choice / fill_blank / true_false / short_answer").build())
+                .addProperty("stem", JsonStringSchema.builder()
+                        .description("题目内容").build())
+                .addProperty("options", JsonArraySchema.builder()
+                        .description("选项数组，选择题必填，如 [\"A.选项1\",\"B.选项2\",\"C.选项3\",\"D.选项4\"]；填空题/简答题/判断题不需要")
+                        .build())
+                .addProperty("answer", JsonStringSchema.builder()
+                        .description("正确答案。单选/判断/填空/简答为字符串如\"B\"；多选为JSON数组字符串如\"[\\\"A\\\",\\\"C\\\"]\"").build())
+                .addProperty("explanation", JsonStringSchema.builder()
+                        .description("答案解析，可选").build())
+                .addProperty("difficulty", JsonStringSchema.builder()
+                        .description("难度：easy/medium/hard，可选，默认medium").build())
+                .required("type", "stem", "answer")
+                .build();
+
         return JsonObjectSchema.builder()
                 .addProperty("title", JsonStringSchema.builder()
                         .description("测验标题").build())
                 .addProperty("source_type", JsonStringSchema.builder()
                         .description("素材来源：notes / web_search / mixed").build())
                 .addProperty("questions", JsonArraySchema.builder()
-                        .description("题目数组，每个元素包含 type/stem/options/answer/explanation/difficulty")
+                        .description("题目数组")
+                        .items(questionItemSchema)
+                        .build())
+                .addProperty("source_refs", JsonArraySchema.builder()
+                        .description("素材来源引用列表，如笔记文档名或搜索结果URL。例如: [\"RAG搭建笔记.md\", \"https://example.com/rag-guide\"]")
                         .build())
                 .required("title", "questions")
                 .build();
@@ -73,6 +95,7 @@ public class SaveExamTool implements Tool {
         }
 
         String arguments = request.getArguments();
+        log.debug("[SaveExamTool] 收到参数: {}", arguments);
         try {
             Integer examId = examService.parseAndSave(userId, arguments);
 

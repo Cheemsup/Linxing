@@ -324,6 +324,7 @@ CREATE TABLE IF NOT EXISTS exam_answers (
     answers         JSONB NOT NULL,
     score           INT,
     total           INT,
+    is_completed        BOOLEAN NOT NULL DEFAULT FALSE,
     completed_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -338,4 +339,5 @@ COMMENT ON COLUMN exam_answers.user_id IS '答题用户ID';
 COMMENT ON COLUMN exam_answers.answers IS '用户答案，JSON对象格式，如{"q1":"C","q2":["A","C"],"q3":"有序"}';
 COMMENT ON COLUMN exam_answers.score IS '得分/答对题数';
 COMMENT ON COLUMN exam_answers.total IS '总题数';
+COMMENT ON COLUMN exam_answers.is_completed IS '是否已完成，true表示已完成，false表示未完成';
 COMMENT ON COLUMN exam_answers.completed_at IS '答题完成时间';

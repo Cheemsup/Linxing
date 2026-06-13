@@ -12,6 +12,8 @@ import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/exam")
 @RequiredArgsConstructor
@@ -41,6 +43,21 @@ public class ExamController {
             @RequestBody ExamSubmitRequest body) {
         Integer userId = getCurrentUserId();
         return Result.success(examService.saveAttempt(userId, examId, body));
+    }
+
+    @PostMapping("/{examId}/draft")
+    public Result<Void> saveDraft(
+            @PathVariable Integer examId,
+            @RequestBody ExamSubmitRequest body) {
+        Integer userId = getCurrentUserId();
+        examService.saveDraft(userId, examId, body);
+        return Result.success(null);
+    }
+
+    @GetMapping("/{examId}/draft")
+    public Result<Map<String, Object>> getDraft(@PathVariable Integer examId) {
+        Integer userId = getCurrentUserId();
+        return Result.success(examService.getDraft(userId, examId));
     }
 
     private static Integer getCurrentUserId() {

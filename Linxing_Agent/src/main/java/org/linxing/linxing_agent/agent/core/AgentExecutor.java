@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 public class AgentExecutor {
 
     /**
-     * Agent 循环最大迭代次数，防止死循环
+     * 大模型最大调用轮次，注意并不等同于step
      */
     private static final int MAX_STEPS = 20;
 
@@ -150,7 +150,7 @@ public class AgentExecutor {
 
             AiMessage aiMessage = response.aiMessage();
 
-            log.info("[DEBUG] 步骤{} text={}, hasTool={}", stepNumber, aiMessage.text(), aiMessage.hasToolExecutionRequests());
+            log.debug("[DEBUG] 步骤{} hasTool={}", stepNumber, aiMessage.hasToolExecutionRequests());
 
             //持久化推理/思考内容到agent_steps（仅当LLM产生了thinking token时）
             if (future.hasThinkingContent()) {

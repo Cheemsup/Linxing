@@ -7,7 +7,9 @@
         <button class="btn btn-primary" @click="handleSubmit" :disabled="submitted">
           {{ submitted ? '已提交' : '提交答案' }}
         </button>
-        <button class="btn btn-secondary" @click="handleReset" v-if="submitted">重新作答</button>
+        <button class="btn btn-secondary" @click="handleSaveDraft" :disabled="submitted" v-if="!submitted">
+          保存进度
+        </button>
       </div>
     </div>
 
@@ -155,12 +157,21 @@ export default {
     submitResult: {
       type: Object,
       default: null
+    },
+    draftAnswers: {
+      type: Object,
+      default: null
     }
   },
   data() {
     return {
       answers: {},
       submitted: false
+    }
+  },
+  created() {
+    if (this.draftAnswers) {
+      this.answers = { ...this.draftAnswers }
     }
   },
   computed: {
@@ -235,10 +246,8 @@ export default {
       this.submitted = true
       this.$emit('submit', { answers: this.answers })
     },
-    handleReset() {
-      this.answers = {}
-      this.submitted = false
-      this.$emit('reset')
+    handleSaveDraft() {
+      this.$emit('saveDraft', { answers: this.answers })
     }
   }
 }

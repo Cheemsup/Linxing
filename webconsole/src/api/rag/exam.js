@@ -11,5 +11,13 @@ export const examApi = {
 
   submitAnswer(examId, data) {
     return api.post(`/exam/${examId}/submit`, data)
+  },
+
+  saveDraft(examId, data) {
+    return api.post(`/exam/${examId}/draft`, data)
+  },
+
+  getDraft(examId) {
+    return api.get(`/exam/${examId}/draft`)
   }
 }

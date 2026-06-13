@@ -144,15 +144,50 @@
 
 生成完整的测验 JSON 后，**必须**调用 `save_exam` 工具保存到数据库：
 
-- 传入参数：完整的测验 JSON（含 title、source_type、questions 数组）
+- 传入参数：完整的测验 JSON（含 title、source_type、questions 数组）+ source_refs（素材来源引用列表）
+- 必须传入 `source_refs`，记录素材来源引用（如笔记文档名、搜索结果URL），例如：`["RAG搭建笔记.md", "https://example.com/rag-guide"]`
 - 工具返回：`{"examId": 123}`
 - 在最终回答中引用 examId，告知用户测验已生成，格式如：
-  "已为您生成《xxx》测验，共 N 道题。[查看测验](/quiz/{examId})"
+  "已为您生成《xxx》测验，共 N 道题。[查看测验](/quiz?examId={examId})"
+
+**`save_exam` 调用示例**（必须严格参照此格式传参）：
+
+```json
+{
+  "title": "数据结构基础测验",
+  "source_type": "web_search",
+  "questions": [
+    {
+      "type": "single_choice",
+      "stem": "以下哪种数据结构最适合实现LRU缓存？",
+      "options": ["A. 数组", "B. 单向链表", "C. 哈希表+双向链表", "D. 栈"],
+      "answer": "C",
+      "explanation": "哈希表提供O(1)查找，双向链表提供O(1)插入删除。",
+      "difficulty": "medium"
+    },
+    {
+      "type": "true_false",
+      "stem": "二叉搜索树的中序遍历结果是有序序列",
+      "answer": "正确",
+      "explanation": "BST性质保证中序遍历按从小到大顺序访问。",
+      "difficulty": "easy"
+    }
+  ],
+  "source_refs": ["https://example.com/data-structures-guide"]
+}
+```
+
+**关键约束**：
+- `answer` 字段：单选/判断/填空/简答传字符串（如 `"C"` 或 `"正确"`）；多选传字符串数组（如 `["A","C"]`）
+- `options` 字段：仅选择题需要，填空/判断/简答不要传此字段
+- `stem` 和 `explanation` 中的文本不要包含未转义的双引号，如需引用请用单引号
+- 确保 JSON 语法正确：所有字符串用双引号包裹、属性间用逗号分隔、无尾逗号
 
 **重要**：
 - 必须调用 `save_exam`，不能仅返回 JSON 文本而不持久化
-- 如果 `save_exam` 返回失败，在回答中告知用户保存失败，并附上原始 JSON 供用户参考
+- 如果 `save_exam` 返回失败，检查参数中的 JSON 语法（引号闭合、逗号分隔、无尾逗号），修正后再调用，不要盲目重试相同参数
 - `source_type` 应根据实际使用的工具记录：仅笔记 → `notes`，仅网搜 → `web_search`，两者都用 → `mixed`
+- **不要在回答中重复输出试题内容和答案**，答案不应在聊天界面暴露。只需提供简短提示和测验链接即可。
 
 ## 数据持久化
 

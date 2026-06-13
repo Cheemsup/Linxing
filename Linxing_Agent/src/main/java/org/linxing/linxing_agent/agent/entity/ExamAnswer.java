@@ -18,5 +18,6 @@ public class ExamAnswer {
     private String answers;
     private Integer score;
     private Integer total;
+    private Boolean isCompleted;
     private OffsetDateTime completedAt;
 }

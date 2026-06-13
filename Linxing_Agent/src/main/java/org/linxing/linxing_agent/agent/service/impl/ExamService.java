@@ -94,11 +94,12 @@ public class ExamService {
             if (!q.has("stem") || q.get("stem").asText().isBlank()) {
                 throw new ExamParseException("第 " + (i + 1) + " 题缺少必填字段: stem");
             }
-            if (!q.has("answer") || q.get("answer").asText().isBlank()) {
+            if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
                 throw new ExamParseException("第 " + (i + 1) + " 题缺少必填字段: answer");
             }
 
             String options = q.has("options") ? q.get("options").toString() : null;
+            String answer = extractAnswer(q.get("answer"));
             String explanation = q.has("explanation") ? q.get("explanation").asText() : null;
             String difficulty = q.has("difficulty") ? q.get("difficulty").asText() : "medium";
 
@@ -109,7 +110,7 @@ public class ExamService {
                     .questionType(type)
                     .stem(q.get("stem").asText())
                     .options(options)
-                    .answer(q.get("answer").asText())
+                    .answer(answer)
                     .explanation(explanation)
                     .difficulty(difficulty)
                     .build();
@@ -173,10 +174,34 @@ public class ExamService {
             throw new ExamNotFoundException("测验不存在或无权访问: " + examId);
         }
 
+        // 一份 exam 只能提交一次
+        ExamAnswer existing = examAnswerMapper.selectByExamIdAndUserId(examId, userId);
+        if (existing != null && existing.getIsCompleted()) {
+            throw new ExamNotFoundException("该测验已提交，不能重复作答");
+        }
+
         List<ExamContext> contexts = examContextMapper.selectByExamId(examId);
-        Map<String, String> userAnswers = body.getAnswers();
-        if (userAnswers == null) {
-            userAnswers = Collections.emptyMap();
+        Map<String, Object> rawAnswers = body.getAnswers();
+        if (rawAnswers == null) {
+            rawAnswers = Collections.emptyMap();
+        }
+
+        // 将 Map<String, Object> 转为 Map<String, String>：
+        // 多选题的 List 值序列化为 JSON 字符串，其余直接 toString
+        Map<String, String> userAnswers = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : rawAnswers.entrySet()) {
+            Object val = entry.getValue();
+            if (val instanceof List<?> list) {
+                try {
+                    userAnswers.put(entry.getKey(), objectMapper.writeValueAsString(list));
+                } catch (Exception e) {
+                    userAnswers.put(entry.getKey(), list.toString());
+                }
+            } else if (val != null) {
+                userAnswers.put(entry.getKey(), val.toString());
+            } else {
+                userAnswers.put(entry.getKey(), "");
+            }
         }
 
         // 判分
@@ -213,14 +238,20 @@ public class ExamService {
             answersJson = "{}";
         }
 
-        ExamAnswer examAnswer = ExamAnswer.builder()
-                .examId(examId)
-                .userId(userId)
-                .answers(answersJson)
-                .score(correctCount)
-                .total(total)
-                .build();
-        examAnswerMapper.insert(examAnswer);
+        if (existing != null && !existing.getIsCompleted()) {
+            // 从草稿升级为正式提交
+            examAnswerMapper.updateToSubmitted(examId, userId, answersJson, correctCount, total);
+        } else {
+            ExamAnswer examAnswer = ExamAnswer.builder()
+                    .examId(examId)
+                    .userId(userId)
+                    .answers(answersJson)
+                    .score(correctCount)
+                    .total(total)
+                    .isCompleted(true)
+                    .build();
+            examAnswerMapper.insert(examAnswer);
+        }
 
         // 更新测验状态为 completed
         examMapper.updateStatus(examId, "completed");
@@ -234,6 +265,66 @@ public class ExamService {
                 .correctCount(correctCount)
                 .details(details)
                 .build();
+    }
+
+    /**
+     * 保存草稿答案，不判分，更新 exams.status 为 in_progress
+     */
+    @Transactional
+    public void saveDraft(Integer userId, Integer examId, ExamSubmitRequest body) {
+        Exam exam = examMapper.selectById(userId, examId);
+        if (exam == null) {
+            throw new ExamNotFoundException("测验不存在或无权访问: " + examId);
+        }
+
+        // 已正式提交的测验不能再保存草稿
+        ExamAnswer existing = examAnswerMapper.selectByExamIdAndUserId(examId, userId);
+        if (existing != null && existing.getIsCompleted()) {
+            throw new ExamNotFoundException("该测验已提交，不能修改");
+        }
+
+        Map<String, Object> rawAnswers = body.getAnswers();
+        String answersJson;
+        try {
+            answersJson = objectMapper.writeValueAsString(rawAnswers != null ? rawAnswers : Collections.emptyMap());
+        } catch (Exception e) {
+            answersJson = "{}";
+        }
+
+        if (existing != null && !existing.getIsCompleted()) {
+            // 更新已有草稿
+            examAnswerMapper.updateDraft(examId, userId, answersJson);
+        } else {
+            ExamAnswer examAnswer = ExamAnswer.builder()
+                    .examId(examId)
+                    .userId(userId)
+                    .answers(answersJson)
+                    .score(0)
+                    .total(0)
+                    .isCompleted(false)
+                    .build();
+            examAnswerMapper.insert(examAnswer);
+        }
+
+        // 更新测验状态为 in_progress
+        examMapper.updateStatus(examId, "in_progress");
+
+        log.info("用户 {} 保存测验 {} 草稿", userId, examId);
+    }
+
+    /**
+     * 获取草稿答案，用于前端恢复已填答案
+     */
+    public Map<String, Object> getDraft(Integer userId, Integer examId) {
+        ExamAnswer existing = examAnswerMapper.selectByExamIdAndUserId(examId, userId);
+        if (existing == null || existing.getIsCompleted()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(existing.getAnswers(), Map.class);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -258,6 +349,30 @@ public class ExamService {
                     false;
             default -> false;
         };
+    }
+
+    /**
+     * 判断 answer 节点是否为空。
+     * 数组节点：空数组视为空；非空数组视为非空。
+     * 文本节点：空白字符串视为空。
+     */
+    private boolean isAnswerBlank(JsonNode answerNode) {
+        if (answerNode.isArray()) {
+            return answerNode.isEmpty();
+        }
+        return answerNode.asText().isBlank();
+    }
+
+    /**
+     * 从 answer 节点提取答案字符串。
+     * 数组节点（multi_choice）：序列化为 JSON 字符串，如 ["A. xxx","C. xxx"]
+     * 文本节点（其他题型）：直接取文本值
+     */
+    private String extractAnswer(JsonNode answerNode) {
+        if (answerNode.isArray()) {
+            return answerNode.toString();
+        }
+        return answerNode.asText();
     }
 
     private Set<String> parseMultiAnswer(String answer) {

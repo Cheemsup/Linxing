@@ -10,18 +10,32 @@
         <result column="answers" property="answers"/>
         <result column="score" property="score"/>
         <result column="total" property="total"/>
+        <result column="is_completed" property="isCompleted"/>
         <result column="completed_at" property="completedAt"/>
     </resultMap>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO exam_answers (exam_id, user_id, answers, score, total)
-        VALUES (#{examId}, #{userId}, #{answers}::jsonb, #{score}, #{total})
+        INSERT INTO exam_answers (exam_id, user_id, answers, score, total, is_completed)
+        VALUES (#{examId}, #{userId}, #{answers}::jsonb, #{score}, #{total}, #{isCompleted})
     </insert>
 
     <select id="selectByExamIdAndUserId" resultMap="BaseResultMap">
-        SELECT id, exam_id, user_id, answers, score, total, completed_at
+        SELECT id, exam_id, user_id, answers, score, total, is_completed, completed_at
         FROM exam_answers
         WHERE exam_id = #{examId} AND user_id = #{userId}
     </select>
+
+    <update id="updateToSubmitted">
+        UPDATE exam_answers
+        SET answers = #{answers}::jsonb, score = #{score}, total = #{total},
+            is_completed = TRUE, completed_at = NOW()
+        WHERE exam_id = #{examId} AND user_id = #{userId} AND is_completed = FALSE
+    </update>
+
+    <update id="updateDraft">
+        UPDATE exam_answers
+        SET answers = #{answers}::jsonb
+        WHERE exam_id = #{examId} AND user_id = #{userId} AND is_completed = FALSE
+    </update>
 
 </mapper>

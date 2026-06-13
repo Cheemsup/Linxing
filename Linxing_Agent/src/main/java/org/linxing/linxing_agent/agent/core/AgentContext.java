@@ -3,6 +3,7 @@ package org.linxing.linxing_agent.agent.core;
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class AgentContext {
@@ -12,6 +13,7 @@ public class AgentContext {
     private final AgentMemory memory;
     private final String query;
     private final Map<String, Object> metadata;
+    private final Map<String, JsonContainer> containers;
     private int stepCount;
 
     public AgentContext(Integer userId, Integer sessionId, AgentMemory memory, String query) {
@@ -20,6 +22,7 @@ public class AgentContext {
         this.memory = memory;
         this.query = query;
         this.metadata = new HashMap<>();
+        this.containers = new LinkedHashMap<>();
         this.stepCount = 0;
     }
 
@@ -59,5 +62,13 @@ public class AgentContext {
 
     public int incrementStep() {
         return ++stepCount;
+    }
+
+    public JsonContainer getContainer(String containerId) {
+        return containers.get(containerId);
+    }
+
+    public void putContainer(String containerId, JsonContainer container) {
+        containers.put(containerId, container);
     }
 }

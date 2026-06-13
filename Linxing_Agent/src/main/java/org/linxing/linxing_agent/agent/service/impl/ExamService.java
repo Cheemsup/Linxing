@@ -3,6 +3,9 @@ package org.linxing.linxing_agent.agent.service.impl;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.dto.ExamSubmitRequest;
@@ -64,29 +67,9 @@ public class ExamService {
             throw new ExamParseException("questions 数组不能为空");
         }
 
-        String title = root.get("title").asText();
-        String sourceType = root.has("source_type") ? root.get("source_type").asText() : "mixed";
-        String description = root.has("description") ? root.get("description").asText() : null;
-        String sourceRefs = root.has("source_refs")
-                ? root.get("source_refs").toString() : "[]";
-
-        // 写入 exams 表
-        Exam exam = Exam.builder()
-                .userId(userId)
-                .title(title)
-                .description(description)
-                .status("created")
-                .sourceType(sourceType)
-                .sourceRefs(sourceRefs)
-                .questionCount(questions.size())
-                .build();
-        examMapper.insert(exam);
-
-        // 遍历 questions，校验并构建 ExamContext 列表
-        List<ExamContext> contextList = new ArrayList<>();
+        // 逐元素校验（遇到第一个错误即中断，保持原有行为）
         for (int i = 0; i < questions.size(); i++) {
             JsonNode q = questions.get(i);
-
             String type = q.has("type") ? q.get("type").asText() : null;
             if (type == null || !VALID_QUESTION_TYPES.contains(type)) {
                 throw new ExamParseException("第 " + (i + 1) + " 题缺少有效的 type 字段，当前值: " + type);
@@ -97,31 +80,9 @@ public class ExamService {
             if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
                 throw new ExamParseException("第 " + (i + 1) + " 题缺少必填字段: answer");
             }
-
-            String options = q.has("options") ? q.get("options").toString() : null;
-            String answer = extractAnswer(q.get("answer"));
-            String explanation = q.has("explanation") ? q.get("explanation").asText() : null;
-            String difficulty = q.has("difficulty") ? q.get("difficulty").asText() : "medium";
-
-            ExamContext ctx = ExamContext.builder()
-                    .examId(exam.getId())
-                    .userId(userId)
-                    .questionOrder(i + 1)
-                    .questionType(type)
-                    .stem(q.get("stem").asText())
-                    .options(options)
-                    .answer(answer)
-                    .explanation(explanation)
-                    .difficulty(difficulty)
-                    .build();
-            contextList.add(ctx);
         }
 
-        // 批量写入 exam_context 表
-        examContextMapper.batchInsert(contextList);
-
-        log.info("用户 {} 生成测验 {}，共 {} 题", userId, exam.getId(), questions.size());
-        return exam.getId();
+        return doSave(userId, root);
     }
 
     /**
@@ -430,6 +391,160 @@ public class ExamService {
     public static class ExamNotFoundException extends RuntimeException {
         public ExamNotFoundException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * 逐元素校验 questions 数组，返回所有错误（不中断）。
+     * 用于分批模式下 save 工具校验失败时返回索引级错误信息。
+     */
+    public List<QuestionError> validateQuestions(ObjectNode root) {
+        List<QuestionError> errors = new ArrayList<>();
+
+        // 校验 metadata 必填字段
+        if (!root.has("title") || root.get("title").asText().isBlank()) {
+            errors.add(new QuestionError(-1, "title", "缺少必填字段: title"));
+        }
+
+        if (!root.has("questions") || !root.get("questions").isArray()) {
+            errors.add(new QuestionError(-1, "questions", "缺少必填字段: questions（数组）"));
+            return errors;
+        }
+
+        ArrayNode questions = (ArrayNode) root.get("questions");
+        if (questions.isEmpty()) {
+            errors.add(new QuestionError(-1, "questions", "questions 数组不能为空"));
+            return errors;
+        }
+
+        for (int i = 0; i < questions.size(); i++) {
+            JsonNode q = questions.get(i);
+
+            String type = q.has("type") ? q.get("type").asText() : null;
+            if (type == null || !VALID_QUESTION_TYPES.contains(type)) {
+                errors.add(new QuestionError(i, "type",
+                        "非法题型: " + type + "，仅限 single_choice/multi_choice/fill_blank/true_false/short_answer"));
+            }
+
+            if (!q.has("stem") || q.get("stem").asText().isBlank()) {
+                errors.add(new QuestionError(i, "stem", "缺少必填字段: stem"));
+            }
+
+            if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
+                errors.add(new QuestionError(i, "answer", "缺少必填字段: answer"));
+            } else if ("multi_choice".equals(type) && !q.get("answer").isArray()) {
+                errors.add(new QuestionError(i, "answer",
+                        "multi_choice 的 answer 应为数组，如 [\"A\",\"C\"]"));
+            } else if ("fill_blank".equals(type) && q.get("answer").isArray()) {
+                // fill_blank 允许数组（多空填空），每个元素是一个空的答案
+                // 无需额外校验
+            } else if (!"multi_choice".equals(type) && !"fill_blank".equals(type) && q.get("answer").isArray()) {
+                errors.add(new QuestionError(i, "answer",
+                        "该题型的 answer 应为字符串，当前为数组"));
+            }
+
+            // 选择题必须有 options
+            if (("single_choice".equals(type) || "multi_choice".equals(type))
+                    && (!q.has("options") || !q.get("options").isArray() || q.get("options").isEmpty())) {
+                errors.add(new QuestionError(i, "options",
+                        "选择题必须有 options 数组"));
+            }
+        }
+
+        return errors;
+    }
+
+    /**
+     * 从容器拼装的 JSON 持久化测验。先逐元素校验，校验通过则写入数据库。
+     *
+     * @return 校验通过返回 examId；校验失败抛出 ExamValidationException
+     */
+    @Transactional
+    public Integer parseAndSaveFromContainer(Integer userId, ObjectNode root) {
+        List<QuestionError> errors = validateQuestions(root);
+        if (!errors.isEmpty()) {
+            throw new ExamValidationException(errors);
+        }
+
+        return doSave(userId, root);
+    }
+
+    /**
+     * 实际写入数据库的逻辑，从 parseAndSave 中提取
+     */
+    private Integer doSave(Integer userId, JsonNode root) {
+        String title = root.get("title").asText();
+        String sourceType = root.has("source_type") ? root.get("source_type").asText() : "mixed";
+        String description = root.has("description") ? root.get("description").asText() : null;
+        String sourceRefs = root.has("source_refs")
+                ? root.get("source_refs").toString() : "[]";
+        ArrayNode questions = (ArrayNode) root.get("questions");
+
+        Exam exam = Exam.builder()
+                .userId(userId)
+                .title(title)
+                .description(description)
+                .status("created")
+                .sourceType(sourceType)
+                .sourceRefs(sourceRefs)
+                .questionCount(questions.size())
+                .build();
+        examMapper.insert(exam);
+
+        List<ExamContext> contextList = new ArrayList<>();
+        for (int i = 0; i < questions.size(); i++) {
+            JsonNode q = questions.get(i);
+
+            String type = q.get("type").asText();
+            String options = q.has("options") ? q.get("options").toString() : null;
+            String answer = extractAnswer(q.get("answer"));
+            String explanation = q.has("explanation") ? q.get("explanation").asText() : null;
+            String difficulty = q.has("difficulty") ? q.get("difficulty").asText() : "medium";
+
+            ExamContext ctx = ExamContext.builder()
+                    .examId(exam.getId())
+                    .userId(userId)
+                    .questionOrder(i + 1)
+                    .questionType(type)
+                    .stem(q.get("stem").asText())
+                    .options(options)
+                    .answer(answer)
+                    .explanation(explanation)
+                    .difficulty(difficulty)
+                    .build();
+            contextList.add(ctx);
+        }
+
+        examContextMapper.batchInsert(contextList);
+
+        log.info("用户 {} 生成测验 {}，共 {} 题", userId, exam.getId(), questions.size());
+        return exam.getId();
+    }
+
+    /**
+     * 单个题目的校验错误
+     */
+    @Data
+    @AllArgsConstructor
+    public static class QuestionError {
+        private int index;   // -1 表示 metadata 级别错误
+        private String field;
+        private String message;
+    }
+
+    /**
+     * 校验异常，携带所有错误信息
+     */
+    public static class ExamValidationException extends RuntimeException {
+        private final List<QuestionError> errors;
+
+        public ExamValidationException(List<QuestionError> errors) {
+            super("测验校验失败");
+            this.errors = errors;
+        }
+
+        public List<QuestionError> getErrors() {
+            return errors;
         }
     }
 }

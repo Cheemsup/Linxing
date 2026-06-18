@@ -6,8 +6,7 @@ import tools.jackson.databind.JsonNode;
  * 容器工具公共参数校验器。
  * <p>
  * 所有 JSONContainer 工具在解析参数前都需要先调用这里的方法，把参数缺失或类型错误
- * 转换为大模型可读的文本错误，而不是让 Jackson 的 {@code asText()}/{@code asInt()}
- * 在 null 上抛出 NullPointerException。
+ * 转换为大模型可读的文本错误，避免NullPointerException。
  */
 public final class ContainerParamValidator {
 

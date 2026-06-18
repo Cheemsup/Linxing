@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.StudyPlanMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.StudyPlan">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="title" property="title"/>
+        <result column="description" property="description"/>
+        <result column="goal" property="goal"/>
+        <result column="duration" property="duration"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="source_refs" property="sourceRefs"/>
+        <result column="status" property="status"/>
+        <result column="phase_count" property="phaseCount"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO study_plans (user_id, title, description, goal, duration, source_type, source_refs, status, phase_count)
+        VALUES (#{userId}, #{title}, #{description}, #{goal}, #{duration}, #{sourceType},
+                #{sourceRefs}::jsonb, #{status}, #{phaseCount})
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT id, user_id, title, description, goal, duration, source_type, source_refs,
+               status, phase_count, created_at, updated_at
+        FROM study_plans
+        WHERE user_id = #{userId} AND id = #{planId}
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, title, description, goal, duration, source_type, source_refs,
+               status, phase_count, created_at, updated_at
+        FROM study_plans
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*) FROM study_plans
+        WHERE user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE study_plans SET status = #{status}, updated_at = NOW() WHERE id = #{planId}
+    </update>
+
+    <update id="updatePhaseCount">
+        UPDATE study_plans SET phase_count = #{phaseCount}, updated_at = NOW() WHERE id = #{planId}
+    </update>
+
+</mapper>

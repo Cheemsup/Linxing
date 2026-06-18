@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.StudyPlanPhaseMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.StudyPlanPhase">
+        <id column="id" property="id"/>
+        <result column="plan_id" property="planId"/>
+        <result column="user_id" property="userId"/>
+        <result column="phase_order" property="phaseOrder"/>
+        <result column="title" property="title"/>
+        <result column="duration" property="duration"/>
+        <result column="objective" property="objective"/>
+        <result column="key_topics" property="keyTopics"/>
+        <result column="resources" property="resources"/>
+        <result column="practice_tasks" property="practiceTasks"/>
+        <result column="milestones" property="milestones"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="batchInsert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO study_plan_phases (plan_id, user_id, phase_order, title, duration, objective,
+                                       key_topics, resources, practice_tasks, milestones)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.planId}, #{item.userId}, #{item.phaseOrder}, #{item.title}, #{item.duration},
+             #{item.objective}, #{item.keyTopics}::jsonb, #{item.resources}::jsonb,
+             #{item.practiceTasks}::jsonb, #{item.milestones}::jsonb)
+        </foreach>
+    </insert>
+
+    <select id="selectByPlanId" resultMap="BaseResultMap">
+        SELECT id, plan_id, user_id, phase_order, title, duration, objective,
+               key_topics, resources, practice_tasks, milestones, created_at
+        FROM study_plan_phases
+        WHERE plan_id = #{planId}
+        ORDER BY phase_order ASC
+    </select>
+
+</mapper>

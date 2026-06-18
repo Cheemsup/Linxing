@@ -341,3 +341,107 @@ COMMENT ON COLUMN exam_answers.score IS '得分/答对题数';
 COMMENT ON COLUMN exam_answers.total IS '总题数';
 COMMENT ON COLUMN exam_answers.is_completed IS '是否已完成，true表示已完成，false表示未完成';
 COMMENT ON COLUMN exam_answers.completed_at IS '答题完成时间';
+
+-- =============================================
+-- 12、学习计划主表 study_plans
+-- =============================================
+CREATE TABLE IF NOT EXISTS study_plans (
+    id              SERIAL PRIMARY KEY,
+    user_id         INT NOT NULL,
+    title           VARCHAR(200) NOT NULL,
+    description     TEXT,
+    goal            TEXT NOT NULL,
+    duration        VARCHAR(50),
+    source_type     VARCHAR(20) NOT NULL CHECK (source_type IN ('notes', 'web_search', 'mixed')),
+    source_refs     JSONB DEFAULT '[]',
+    status          VARCHAR(20) NOT NULL DEFAULT 'created'
+                    CHECK (status IN ('created', 'in_progress', 'completed', 'archived')),
+    phase_count     INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_plans_user_id ON study_plans(user_id);
+CREATE INDEX IF NOT EXISTS idx_study_plans_user_status ON study_plans(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_study_plans_user_created ON study_plans(user_id, created_at DESC);
+
+COMMENT ON TABLE study_plans IS '学习计划主表，记录用户生成的学习计划元信息';
+COMMENT ON COLUMN study_plans.id IS '学习计划唯一ID';
+COMMENT ON COLUMN study_plans.user_id IS '所属用户ID';
+COMMENT ON COLUMN study_plans.title IS '计划标题，如"Rust 3个月学习计划"';
+COMMENT ON COLUMN study_plans.description IS '计划描述或背景说明';
+COMMENT ON COLUMN study_plans.goal IS '学习目标，如"从零到能写项目"';
+COMMENT ON COLUMN study_plans.duration IS '计划总时长，如"3个月"';
+COMMENT ON COLUMN study_plans.source_type IS '素材来源类型：notes=用户笔记，web_search=联网搜索，mixed=混合';
+COMMENT ON COLUMN study_plans.source_refs IS '素材来源引用，JSON数组，如笔记chunk_ids或搜索URL';
+COMMENT ON COLUMN study_plans.status IS '计划状态：created=已生成，in_progress=进行中，completed=已完成，archived=已归档';
+COMMENT ON COLUMN study_plans.phase_count IS '阶段总数';
+COMMENT ON COLUMN study_plans.created_at IS '创建时间';
+COMMENT ON COLUMN study_plans.updated_at IS '最后更新时间';
+
+-- =============================================
+-- 13、学习阶段表 study_plan_phases
+-- =============================================
+CREATE TABLE IF NOT EXISTS study_plan_phases (
+    id              SERIAL PRIMARY KEY,
+    plan_id         INT NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+    user_id         INT NOT NULL,
+    phase_order     INT NOT NULL DEFAULT 0,
+    title           VARCHAR(200) NOT NULL,
+    duration        VARCHAR(50),
+    objective       TEXT,
+    key_topics      JSONB DEFAULT '[]',
+    resources       JSONB DEFAULT '[]',
+    practice_tasks  JSONB DEFAULT '[]',
+    milestones      JSONB DEFAULT '[]',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_plan_phases_plan_id ON study_plan_phases(plan_id);
+CREATE INDEX IF NOT EXISTS idx_study_plan_phases_user_id ON study_plan_phases(user_id);
+CREATE INDEX IF NOT EXISTS idx_study_plan_phases_plan_order ON study_plan_phases(plan_id, phase_order);
+
+COMMENT ON TABLE study_plan_phases IS '学习阶段表，存储每个学习计划的分阶段详情';
+COMMENT ON COLUMN study_plan_phases.id IS '阶段唯一ID';
+COMMENT ON COLUMN study_plan_phases.plan_id IS '所属计划ID，计划删除时级联删除';
+COMMENT ON COLUMN study_plan_phases.user_id IS '所属用户ID，冗余以支持按用户快速查询';
+COMMENT ON COLUMN study_plan_phases.phase_order IS '阶段顺序，从1开始';
+COMMENT ON COLUMN study_plan_phases.title IS '阶段标题，如"第1月：基础语法"';
+COMMENT ON COLUMN study_plan_phases.duration IS '阶段时长，如"4周"';
+COMMENT ON COLUMN study_plan_phases.objective IS '阶段学习目标';
+COMMENT ON COLUMN study_plan_phases.key_topics IS '关键知识点，JSON数组，如["变量与类型","所有权机制"]';
+COMMENT ON COLUMN study_plan_phases.resources IS '学习资源，JSON数组，如[{"name":"The Rust Book","url":"https://doc.rust-lang.org/book/"}]';
+COMMENT ON COLUMN study_plan_phases.practice_tasks IS '实践任务，JSON数组，如["实现一个CLI计算器","完成Exercism前10题"]';
+COMMENT ON COLUMN study_plan_phases.milestones IS '阶段里程碑，JSON数组，如["能独立写出Hello World","理解所有权规则"]';
+COMMENT ON COLUMN study_plan_phases.created_at IS '创建时间';
+
+-- =============================================
+-- 14、学习计划进度表 study_plan_progress
+-- =============================================
+CREATE TABLE IF NOT EXISTS study_plan_progress (
+    id              SERIAL PRIMARY KEY,
+    plan_id         INT NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+    phase_id        INT NOT NULL REFERENCES study_plan_phases(id) ON DELETE CASCADE,
+    user_id         INT NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'not_started'
+                    CHECK (status IN ('not_started', 'in_progress', 'completed')),
+    notes           TEXT,
+    completed_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(phase_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_study_plan_progress_plan_id ON study_plan_progress(plan_id);
+CREATE INDEX IF NOT EXISTS idx_study_plan_progress_user_id ON study_plan_progress(user_id);
+
+COMMENT ON TABLE study_plan_progress IS '学习计划进度追踪表，记录用户在每个阶段的完成情况';
+COMMENT ON COLUMN study_plan_progress.id IS '进度记录唯一ID';
+COMMENT ON COLUMN study_plan_progress.plan_id IS '所属计划ID，计划删除时级联删除';
+COMMENT ON COLUMN study_plan_progress.phase_id IS '所属阶段ID，阶段删除时级联删除；同一用户同一阶段唯一';
+COMMENT ON COLUMN study_plan_progress.user_id IS '所属用户ID';
+COMMENT ON COLUMN study_plan_progress.status IS '阶段状态：not_started=未开始，in_progress=进行中，completed=已完成';
+COMMENT ON COLUMN study_plan_progress.notes IS '用户学习笔记/心得';
+COMMENT ON COLUMN study_plan_progress.completed_at IS '阶段完成时间';
+COMMENT ON COLUMN study_plan_progress.created_at IS '创建时间';
+COMMENT ON COLUMN study_plan_progress.updated_at IS '最后更新时间';

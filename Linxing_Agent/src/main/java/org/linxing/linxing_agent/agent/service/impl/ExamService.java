@@ -473,6 +473,7 @@ public class ExamService implements IExamService {
 
     /**
      * 一次性生成试题：解析 JSON + 校验（fail-fast）+ 持久化
+     * TODO：分析是否还有存在的价值
      */
     @Transactional
     public Integer parseAndSave(Integer userId, String json) {
@@ -488,6 +489,7 @@ public class ExamService implements IExamService {
 
     /**
      * 解析 + 校验 + 持久化（JsonNode 重载），默认 fail-fast 策略
+     * TODO：分析是否还有存在的价值
      */
     @Transactional
     public Integer parseAndSave(Integer userId, JsonNode root) {

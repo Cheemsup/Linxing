@@ -442,9 +442,13 @@ export default {
     window.__examLinkClick = (examId) => {
       this.$router.push({ path: '/quiz', query: { examId } })
     }
+    window.__studyPlanLinkClick = (planId) => {
+      this.$router.push({ path: '/study-plan', query: { planId } })
+    }
   },
   beforeUnmount() {
     delete window.__examLinkClick
+    delete window.__studyPlanLinkClick
   },
   methods: {
     async fetchSessions() {
@@ -930,6 +934,10 @@ export default {
       html = html.replace(
         /\[([^\]]+)\]\(\/quiz\/(\d+)\)/g,
         '<span class="exam-link" data-exam-id="$2" onclick="window.__examLinkClick&&window.__examLinkClick($2)">$1</span>'
+      )
+      html = html.replace(
+        /\[([^\]]+)\]\(\/study-plan\?planId=(\d+)\)/g,
+        '<span class="exam-link" data-plan-id="$2" onclick="window.__studyPlanLinkClick&&window.__studyPlanLinkClick($2)">$1</span>'
       )
       return html
     },

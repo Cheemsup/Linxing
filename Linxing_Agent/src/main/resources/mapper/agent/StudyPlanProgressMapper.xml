@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.linxing.linxing_agent.agent.mapper.StudyPlanProgressMapper">
+
+    <resultMap id="BaseResultMap" type="org.linxing.linxing_agent.agent.entity.StudyPlanProgress">
+        <id column="id" property="id"/>
+        <result column="plan_id" property="planId"/>
+        <result column="phase_id" property="phaseId"/>
+        <result column="user_id" property="userId"/>
+        <result column="status" property="status"/>
+        <result column="notes" property="notes"/>
+        <result column="completed_at" property="completedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="batchInsert">
+        INSERT INTO study_plan_progress (plan_id, phase_id, user_id, status)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.planId}, #{item.phaseId}, #{item.userId}, #{item.status})
+        </foreach>
+    </insert>
+
+    <select id="selectByPlanId" resultMap="BaseResultMap">
+        SELECT id, plan_id, phase_id, user_id, status, notes, completed_at, created_at, updated_at
+        FROM study_plan_progress
+        WHERE plan_id = #{planId} AND user_id = #{userId}
+        ORDER BY phase_id ASC
+    </select>
+
+    <select id="selectByPhaseId" resultMap="BaseResultMap">
+        SELECT id, plan_id, phase_id, user_id, status, notes, completed_at, created_at, updated_at
+        FROM study_plan_progress
+        WHERE phase_id = #{phaseId} AND user_id = #{userId}
+    </select>
+
+    <update id="updateStatus">
+        UPDATE study_plan_progress
+        SET status = #{status},
+            notes = #{notes},
+            completed_at = CASE WHEN #{status} = 'completed' THEN NOW() ELSE completed_at END,
+            updated_at = NOW()
+        WHERE phase_id = #{phaseId} AND user_id = #{userId}
+    </update>
+
+    <select id="countByPlanIdAndStatus" resultType="int">
+        SELECT COUNT(*) FROM study_plan_progress
+        WHERE plan_id = #{planId} AND user_id = #{userId}
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+</mapper>

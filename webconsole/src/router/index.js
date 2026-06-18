@@ -6,6 +6,7 @@ import ChatView from '@/views/rag/ChatView.vue'
 import IngestView from '@/views/rag/IngestView.vue'
 import NotesView from '@/views/rag/NotesView.vue'
 import QuizView from '@/views/rag/QuizView.vue'
+import StudyPlanView from '@/views/rag/StudyPlanView.vue'
 
 const routes = [
   {
@@ -67,6 +68,15 @@ const routes = [
     component: QuizView,
     meta: {
       title: '知识测验',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/study-plan',
+    name: 'StudyPlan',
+    component: StudyPlanView,
+    meta: {
+      title: '学习计划',
       requiresAuth: true
     }
   }

@@ -192,7 +192,7 @@ public class AgentExecutor {
                         toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
                                 "未知工具: " + toolReq.name());
                     } else {
-                        toolResult = toolSpec.execute(toolCallRequest, context);
+                        toolResult = toolSpec.execute(toolCallRequest, context);//执行工具调用，获取结果
                     }
 
                     //渐进披露模式：resolve成功后提取被解析的工具名并动态激活

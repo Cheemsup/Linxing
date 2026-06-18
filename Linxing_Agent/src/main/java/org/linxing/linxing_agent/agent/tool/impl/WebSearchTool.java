@@ -4,7 +4,6 @@ import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import dev.langchain4j.web.search.WebSearchEngine;
-import dev.langchain4j.web.search.WebSearchOrganicResult;
 import dev.langchain4j.web.search.WebSearchRequest;
 import dev.langchain4j.web.search.WebSearchResults;
 import dev.langchain4j.web.search.tavily.TavilyWebSearchEngine;
@@ -126,7 +125,7 @@ public class WebSearchTool implements Tool {
                     .maxResults(resultCount)
                     .build();
 
-            WebSearchResults searchResult = searchEngine.search(searchRequest);
+            WebSearchResults searchResult = searchEngine.search(searchRequest);//使用langchain4j的搜索引擎发起搜索
 
             List<SearchHit> hits = searchResult.results().stream()
                     .map(hit -> new SearchHit(
@@ -145,6 +144,7 @@ public class WebSearchTool implements Tool {
         }
     }
 
+    //TODO:实体类移到另外的包下
     @lombok.Data
     @lombok.NoArgsConstructor
     public static class WebSearchArgs {
@@ -152,6 +152,7 @@ public class WebSearchTool implements Tool {
         private int maxResults;
     }
 
+    //TODO:实体类移到另外的包下
     @lombok.Data
     @lombok.NoArgsConstructor
     @lombok.AllArgsConstructor

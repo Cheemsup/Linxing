@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.tool.impl;
+package org.linxing.linxing_agent.agent.tool.impl.jsoncontainer;
 
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;

@@ -98,6 +98,7 @@ public class ResolveTool implements Tool {
         return ToolCallResult.success(request.getToolCallId(), NAME, resultText.toString());
     }
 
+    //TODO:实体类移到另外的包下
     @lombok.Data
     @lombok.NoArgsConstructor
     public static class ResolveArgs {

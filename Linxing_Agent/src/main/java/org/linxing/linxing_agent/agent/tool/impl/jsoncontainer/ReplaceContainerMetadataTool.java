@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.tool.impl;
+package org.linxing.linxing_agent.agent.tool.impl.jsoncontainer;
 
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
@@ -69,8 +69,14 @@ public class ReplaceContainerMetadataTool implements Tool {
         try {
             var root = objectMapper.readTree(arguments);
 
-            String containerId = root.get("container_id").asText();
             var updatesNode = root.get("metadata_updates");
+
+            String error = ContainerParamValidator.validateContainerId(root);
+            if (error != null) {
+                return ToolCallResult.failure(request.getToolCallId(), NAME, error);
+            }
+
+            String containerId = root.get("container_id").asText();
 
             JsonContainer container = context.getContainer(containerId);
             if (container == null) {

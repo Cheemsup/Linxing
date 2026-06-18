@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.tool.impl;
+package org.linxing.linxing_agent.agent.tool.impl.jsoncontainer;
 
 import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
@@ -20,12 +20,13 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ReplaceInContainerTool implements Tool {
+public class RemoveFromContainerTool implements Tool {
 
-    private static final String NAME = "replace_in_container";
-    private static final String DESCRIPTION = "替换容器中指定数组路径、指定索引的元素。用于 save 工具校验失败后精确修正错误元素。";
-    private static final String BRIEF = "替换容器中指定索引的元素";
-    private static final String WHEN_TO_USE = "save 工具校验失败返回索引级错误时，用此工具精确修正指定位置的元素";
+    private static final String NAME = "remove_from_container";
+    private static final String DESCRIPTION = "移除容器中指定数组路径、指定索引的元素。移除后后续元素索引前移。"
+            + "当某元素修正3次仍不通过时，可移除该元素作为兜底。";
+    private static final String BRIEF = "移除容器中指定索引的元素";
+    private static final String WHEN_TO_USE = "某元素反复修正仍不通过时，移除该元素作为兜底";
 
     private final ObjectMapper objectMapper;
 
@@ -57,25 +58,33 @@ public class ReplaceInContainerTool implements Tool {
                 .addProperty("array_path", JsonStringSchema.builder()
                         .description("数组路径，如 \"questions\"").build())
                 .addProperty("index", JsonIntegerSchema.builder()
-                        .description("要替换的元素索引，从0开始").build())
-                .addProperty("item", JsonObjectSchema.builder()
-                        .description("替换后的完整元素对象").build())
-                .required("container_id", "array_path", "index", "item")
+                        .description("要移除的元素索引，从0开始。移除后后续元素索引前移").build())
+                .required("container_id", "array_path", "index")
                 .build();
     }
 
     @Override
     public ToolCallResult execute(ToolCallRequest request, AgentContext context) {
         String arguments = request.getArguments();
-        log.debug("[ReplaceInContainerTool] 收到参数: {}", arguments);
+        log.debug("[RemoveFromContainerTool] 收到参数: {}", arguments);
 
         try {
             var root = objectMapper.readTree(arguments);
 
+            String error = ContainerParamValidator.validateContainerId(root);
+            if (error == null) {
+                error = ContainerParamValidator.validateArrayPath(root);
+            }
+            if (error == null) {
+                error = ContainerParamValidator.validateIndex(root);
+            }
+            if (error != null) {
+                return ToolCallResult.failure(request.getToolCallId(), NAME, error);
+            }
+
             String containerId = root.get("container_id").asText();
             String arrayPath = root.get("array_path").asText();
             int index = root.get("index").asInt();
-            var itemNode = root.get("item");
 
             JsonContainer container = context.getContainer(containerId);
             if (container == null) {
@@ -94,26 +103,22 @@ public class ReplaceInContainerTool implements Tool {
                         "索引越界: index=" + index + ", currentSize=" + array.size());
             }
 
-            if (itemNode == null || !itemNode.isObject()) {
-                return ToolCallResult.failure(request.getToolCallId(), NAME,
-                        "item 必须是对象");
-            }
-
-            array.set(index, itemNode.deepCopy());
+            array.remove(index);
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("containerId", containerId);
             result.put("arrayPath", arrayPath);
-            result.put("replacedIndex", index);
+            result.put("removedIndex", index);
+            result.put("currentCount", array.size());
             String resultJson = objectMapper.writeValueAsString(result);
 
-            log.debug("[ReplaceInContainerTool] 替换成功: containerId={}, path={}, index={}",
-                    containerId, arrayPath, index);
+            log.debug("[RemoveFromContainerTool] 移除成功: containerId={}, path={}, index={}, remaining={}",
+                    containerId, arrayPath, index, array.size());
             return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
         } catch (Exception e) {
-            log.error("[ReplaceInContainerTool] 替换失败: {}", e.getMessage(), e);
+            log.error("[RemoveFromContainerTool] 移除失败: {}", e.getMessage(), e);
             return ToolCallResult.failure(request.getToolCallId(), NAME,
-                    "替换失败: " + e.getMessage());
+                    "移除失败: " + e.getMessage());
         }
     }
 }

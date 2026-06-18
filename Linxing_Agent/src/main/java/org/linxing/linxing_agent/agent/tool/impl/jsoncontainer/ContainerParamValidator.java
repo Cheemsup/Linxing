@@ -1,0 +1,59 @@
+package org.linxing.linxing_agent.agent.tool.impl.jsoncontainer;
+
+import tools.jackson.databind.JsonNode;
+
+/**
+ * 容器工具公共参数校验器。
+ * <p>
+ * 所有 JSONContainer 工具在解析参数前都需要先调用这里的方法，把参数缺失或类型错误
+ * 转换为大模型可读的文本错误，而不是让 Jackson 的 {@code asText()}/{@code asInt()}
+ * 在 null 上抛出 NullPointerException。
+ */
+public final class ContainerParamValidator {
+
+    private ContainerParamValidator() {
+        // 工具类
+    }
+
+    /**
+     * 校验 container_id 是否为空或非法。
+     *
+     * @param root 工具入参 JSON
+     * @return 错误信息，合法时返回 null
+     */
+    public static String validateContainerId(JsonNode root) {
+        var node = root.get("container_id");
+        if (node == null || !node.isTextual() || node.asText().isBlank()) {
+            return "container_id 不能为空";
+        }
+        return null;
+    }
+
+    /**
+     * 校验 array_path 是否为空或非法。
+     *
+     * @param root 工具入参 JSON
+     * @return 错误信息，合法时返回 null
+     */
+    public static String validateArrayPath(JsonNode root) {
+        var node = root.get("array_path");
+        if (node == null || !node.isTextual() || node.asText().isBlank()) {
+            return "array_path 不能为空";
+        }
+        return null;
+    }
+
+    /**
+     * 校验 index 是否为整数。
+     *
+     * @param root 工具入参 JSON
+     * @return 错误信息，合法时返回 null
+     */
+    public static String validateIndex(JsonNode root) {
+        var node = root.get("index");
+        if (node == null || !node.isInt()) {
+            return "index 必须是整数";
+        }
+        return null;
+    }
+}

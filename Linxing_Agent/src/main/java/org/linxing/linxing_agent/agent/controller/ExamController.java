@@ -3,7 +3,7 @@ package org.linxing.linxing_agent.agent.controller;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.dto.ExamSubmitRequest;
-import org.linxing.linxing_agent.agent.service.impl.ExamService;
+import org.linxing.linxing_agent.agent.service.IExamService;
 import org.linxing.linxing_agent.agent.vo.ExamDetailVO;
 import org.linxing.linxing_agent.agent.vo.ExamSubmitVO;
 import org.linxing.linxing_agent.agent.vo.ExamVO;
@@ -20,7 +20,7 @@ import java.util.Map;
 @Slf4j
 public class ExamController {
 
-    private final ExamService examService;
+    private final IExamService examService;
 
     @GetMapping
     public Result<PageResult<ExamVO>> listExams(

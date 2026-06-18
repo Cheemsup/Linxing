@@ -108,6 +108,7 @@ public class RagSearchTool implements Tool {
         }
     }
 
+    //TODO:实体类移到另外的包下
     @lombok.Data
     @lombok.NoArgsConstructor
     public static class RagSearchArgs {

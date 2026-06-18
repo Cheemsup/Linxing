@@ -2,6 +2,9 @@ package org.linxing.linxing_agent.common.exception;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
+import org.linxing.linxing_agent.agent.exception.ExamNotFoundException;
+import org.linxing.linxing_agent.agent.exception.ExamParseException;
+import org.linxing.linxing_agent.agent.exception.ExamValidationException;
 import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.user.exception.AccountDisabledException;
 import org.linxing.linxing_agent.user.exception.AccountNotFoundException;
@@ -46,6 +49,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public Result<String> handleAuthentication(AuthenticationException ex) {
         log.warn("认证失败: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(ExamNotFoundException.class)
+    public Result<String> handleExamNotFound(ExamNotFoundException ex) {
+        log.warn("测验不存在: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(ExamParseException.class)
+    public Result<String> handleExamParse(ExamParseException ex) {
+        log.warn("测验解析失败: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
+    }
+
+    @ExceptionHandler(ExamValidationException.class)
+    public Result<Map<String, Object>> handleExamValidation(ExamValidationException ex) {
+        log.warn("测验校验失败: {}", ex.getMessage());
+        Map<String, Object> response = new HashMap<>();
+        response.put("errors", ex.getErrors());
         return Result.error(ex.getMessage());
     }
 

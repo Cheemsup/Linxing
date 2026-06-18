@@ -4,17 +4,20 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
-import lombok.AllArgsConstructor;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.dto.ExamSubmitRequest;
+import org.linxing.linxing_agent.agent.dto.QuestionError;
 import org.linxing.linxing_agent.agent.entity.Exam;
 import org.linxing.linxing_agent.agent.entity.ExamAnswer;
 import org.linxing.linxing_agent.agent.entity.ExamContext;
+import org.linxing.linxing_agent.agent.exception.ExamNotFoundException;
+import org.linxing.linxing_agent.agent.exception.ExamParseException;
+import org.linxing.linxing_agent.agent.exception.ExamValidationException;
 import org.linxing.linxing_agent.agent.mapper.ExamAnswerMapper;
 import org.linxing.linxing_agent.agent.mapper.ExamContextMapper;
 import org.linxing.linxing_agent.agent.mapper.ExamMapper;
+import org.linxing.linxing_agent.agent.service.IExamService;
 import org.linxing.linxing_agent.agent.vo.ExamContextVO;
 import org.linxing.linxing_agent.agent.vo.ExamDetailVO;
 import org.linxing.linxing_agent.agent.vo.ExamSubmitVO;
@@ -29,7 +32,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ExamService {
+public class ExamService implements IExamService {
 
     private final ExamMapper examMapper;
     private final ExamContextMapper examContextMapper;
@@ -41,60 +44,16 @@ public class ExamService {
     );
 
     /**
-     * 解析 LLM 生成的测验 JSON，写入 exams + exam_context 表。
-     * 做容错处理：schema drift 时尝试修复，修复失败则抛出异常。
-     *
-     * @return 新生成的 examId
-     */
-    @Transactional
-    public Integer parseAndSave(Integer userId, String json) {
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(json);
-        } catch (Exception e) {
-            throw new ExamParseException("JSON 解析失败: " + e.getMessage(), e);
-        }
-
-        // 校验顶层必填字段
-        if (!root.has("title") || root.get("title").asText().isBlank()) {
-            throw new ExamParseException("缺少必填字段: title");
-        }
-        if (!root.has("questions") || !root.get("questions").isArray()) {
-            throw new ExamParseException("缺少必填字段: questions（数组）");
-        }
-        ArrayNode questions = (ArrayNode) root.get("questions");
-        if (questions.isEmpty()) {
-            throw new ExamParseException("questions 数组不能为空");
-        }
-
-        // 逐元素校验（遇到第一个错误即中断，保持原有行为）
-        for (int i = 0; i < questions.size(); i++) {
-            JsonNode q = questions.get(i);
-            String type = q.has("type") ? q.get("type").asText() : null;
-            if (type == null || !VALID_QUESTION_TYPES.contains(type)) {
-                throw new ExamParseException("第 " + (i + 1) + " 题缺少有效的 type 字段，当前值: " + type);
-            }
-            if (!q.has("stem") || q.get("stem").asText().isBlank()) {
-                throw new ExamParseException("第 " + (i + 1) + " 题缺少必填字段: stem");
-            }
-            if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
-                throw new ExamParseException("第 " + (i + 1) + " 题缺少必填字段: answer");
-            }
-        }
-
-        return doSave(userId, root);
-    }
-
-    /**
      * 获取测验详情（含试题列表，不含答案）
      */
+    @Override
     public ExamDetailVO getExam(Integer userId, Integer examId) {
-        Exam exam = examMapper.selectById(userId, examId);
+        Exam exam = examMapper.selectById(userId, examId);//先通过userId+examId的组合获取exam的原信息
         if (exam == null) {
             throw new ExamNotFoundException("测验不存在或无权访问: " + examId);
         }
 
-        List<ExamContext> contexts = examContextMapper.selectByExamId(examId);
+        List<ExamContext> contexts = examContextMapper.selectByExamId(examId);//获取具体内容
         List<ExamContextVO> questionVOs = contexts.stream()
                 .map(this::toContextVO)
                 .collect(Collectors.toList());
@@ -115,9 +74,10 @@ public class ExamService {
      */
     public PageResult<ExamVO> listExams(Integer userId, String status, int page, int size) {
         int offset = (page - 1) * size;
-        List<Exam> exams = examMapper.selectByUserId(userId, status, offset, size);
+        List<Exam> exams = examMapper.selectByUserId(userId, status, offset, size);//根据id查找该用户的特定分页下的exam对象
         int total = examMapper.countByUserId(userId, status);
 
+        //转为VO返回
         List<ExamVO> vos = exams.stream()
                 .map(this::toExamVO)
                 .collect(Collectors.toList());
@@ -126,7 +86,7 @@ public class ExamService {
     }
 
     /**
-     * 保存答题记录，更新 exams.status 为 in_progress/completed
+     * 提交试卷，判分，更新 exams.status 为 completed
      */
     @Transactional
     public ExamSubmitVO saveAttempt(Integer userId, Integer examId, ExamSubmitRequest body) {
@@ -276,6 +236,7 @@ public class ExamService {
     /**
      * 获取草稿答案，用于前端恢复已填答案
      */
+    @Override
     public Map<String, Object> getDraft(Integer userId, Integer examId) {
         ExamAnswer existing = examAnswerMapper.selectByExamIdAndUserId(examId, userId);
         if (existing == null || existing.getIsCompleted()) {
@@ -377,77 +338,133 @@ public class ExamService {
                 .build();
     }
 
-    // ---- 自定义异常 ----
 
-    public static class ExamParseException extends RuntimeException {
-        public ExamParseException(String message) {
-            super(message);
-        }
-        public ExamParseException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    public static class ExamNotFoundException extends RuntimeException {
-        public ExamNotFoundException(String message) {
-            super(message);
-        }
+    /**
+     * 校验策略：控制校验失败时的行为
+     */
+    public enum ValidationStrategy {
+        /** 遇到第一个错误即抛 ExamParseException */
+        FAIL_FAST,
+        /** 收集所有错误后抛 ExamValidationException */
+        COLLECT_ALL
     }
 
     /**
-     * 逐元素校验 questions 数组，返回所有错误（不中断）。
-     * 用于分批模式下 save 工具校验失败时返回索引级错误信息。
+     * 统一校验入口：校验测验 JSON 的 metadata 和 questions 数组。
+     * 根据 strategy 决定错误处理方式：
+     * - FAIL_FAST：遇到第一个错误即抛 ExamParseException
+     * - COLLECT_ALL：收集所有错误后抛 ExamValidationException
+     *
+     * @return 校验通过返回空列表；FAIL_FAST 模式下不会返回错误（直接抛异常）
      */
-    public List<QuestionError> validateQuestions(ObjectNode root) {
+    public List<QuestionError> validateExamJson(JsonNode root, ValidationStrategy strategy) {
         List<QuestionError> errors = new ArrayList<>();
 
-        // 校验 metadata 必填字段
+        // --- metadata 校验 ---
         if (!root.has("title") || root.get("title").asText().isBlank()) {
             errors.add(new QuestionError(-1, "title", "缺少必填字段: title"));
+            if (strategy == ValidationStrategy.FAIL_FAST) {
+                throw new ExamParseException(errors.get(0).getMessage());
+            }
         }
 
         if (!root.has("questions") || !root.get("questions").isArray()) {
             errors.add(new QuestionError(-1, "questions", "缺少必填字段: questions（数组）"));
-            return errors;
+            if (strategy == ValidationStrategy.FAIL_FAST) {
+                throw new ExamParseException(errors.get(0).getMessage());
+            }
+            return errors; // 无 questions 则无法继续逐元素校验
         }
 
         ArrayNode questions = (ArrayNode) root.get("questions");
         if (questions.isEmpty()) {
             errors.add(new QuestionError(-1, "questions", "questions 数组不能为空"));
+            if (strategy == ValidationStrategy.FAIL_FAST) {
+                throw new ExamParseException(errors.get(0).getMessage());
+            }
             return errors;
         }
 
+        // --- 逐元素校验 ---
         for (int i = 0; i < questions.size(); i++) {
-            JsonNode q = questions.get(i);
-
-            String type = q.has("type") ? q.get("type").asText() : null;
-            if (type == null || !VALID_QUESTION_TYPES.contains(type)) {
-                errors.add(new QuestionError(i, "type",
-                        "非法题型: " + type + "，仅限 single_choice/multi_choice/fill_blank/true_false/short_answer"));
+            List<QuestionError> qErrors = validateSingleQuestion(i, questions.get(i));
+            errors.addAll(qErrors);
+            if (strategy == ValidationStrategy.FAIL_FAST && !qErrors.isEmpty()) {
+                throw new ExamParseException(
+                        String.format("第 %d 题校验失败: %s", i + 1, qErrors.get(0).getMessage()));
             }
+        }
 
-            if (!q.has("stem") || q.get("stem").asText().isBlank()) {
-                errors.add(new QuestionError(i, "stem", "缺少必填字段: stem"));
+        if (strategy == ValidationStrategy.COLLECT_ALL && !errors.isEmpty()) {
+            throw new ExamValidationException(errors);
+        }
+
+        return errors;
+    }
+
+    /**
+     * 单题校验：检查 type、stem、answer、options 等字段。
+     * 提取为独立方法，消除一次性模式与分批模式的重复校验逻辑。
+     */
+    private List<QuestionError> validateSingleQuestion(int index, JsonNode q) {
+        List<QuestionError> errors = new ArrayList<>();
+
+        String type = q.has("type") ? q.get("type").asText() : null;
+        if (type == null || !VALID_QUESTION_TYPES.contains(type)) {
+            errors.add(new QuestionError(index, "type",
+                    "非法题型: " + type + "，仅限 single_choice/multi_choice/fill_blank/true_false/short_answer"));
+        }
+
+        if (!q.has("stem") || q.get("stem").asText().isBlank()) {
+            errors.add(new QuestionError(index, "stem", "缺少必填字段: stem"));
+        }
+
+        if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
+            errors.add(new QuestionError(index, "answer", "缺少必填字段: answer"));
+        } else if ("multi_choice".equals(type) && !q.get("answer").isArray()) {
+            errors.add(new QuestionError(index, "answer",
+                    "multi_choice 的 answer 应为数组，如 [\"A. 冒泡排序\",\"C. 归并排序\"]"));
+        } else if ("fill_blank".equals(type) && q.get("answer").isArray()) {
+            // fill_blank 允许数组（多空填空），无需额外校验
+        } else if (!"multi_choice".equals(type) && !"fill_blank".equals(type) && q.get("answer").isArray()) {
+            errors.add(new QuestionError(index, "answer",
+                    "该题型的 answer 应为字符串，当前为数组"));
+        }
+
+        // 选择题必须有 options
+        if (("single_choice".equals(type) || "multi_choice".equals(type))
+                && (!q.has("options") || !q.get("options").isArray() || q.get("options").isEmpty())) {
+            errors.add(new QuestionError(index, "options",
+                    "选择题必须有 options 数组"));
+        }
+
+        // 校验 answer 与 options 一致性（单选/多选）以及判断题取值
+        if ("single_choice".equals(type) && q.has("answer") && q.get("answer").isTextual()
+                && q.has("options") && q.get("options").isArray()) {
+            Set<String> optionSet = new HashSet<>();
+            q.get("options").forEach(o -> optionSet.add(o.asText()));
+            if (!optionSet.contains(q.get("answer").asText())) {
+                errors.add(new QuestionError(index, "answer",
+                        "单选题 answer 必须与 options 中的某一项完全一致（含字母前缀和文本）"));
             }
-
-            if (!q.has("answer") || isAnswerBlank(q.get("answer"))) {
-                errors.add(new QuestionError(i, "answer", "缺少必填字段: answer"));
-            } else if ("multi_choice".equals(type) && !q.get("answer").isArray()) {
-                errors.add(new QuestionError(i, "answer",
-                        "multi_choice 的 answer 应为数组，如 [\"A\",\"C\"]"));
-            } else if ("fill_blank".equals(type) && q.get("answer").isArray()) {
-                // fill_blank 允许数组（多空填空），每个元素是一个空的答案
-                // 无需额外校验
-            } else if (!"multi_choice".equals(type) && !"fill_blank".equals(type) && q.get("answer").isArray()) {
-                errors.add(new QuestionError(i, "answer",
-                        "该题型的 answer 应为字符串，当前为数组"));
+        }
+        if ("multi_choice".equals(type) && q.has("answer") && q.get("answer").isArray()
+                && q.has("options") && q.get("options").isArray()) {
+            Set<String> optionSet = new HashSet<>();
+            q.get("options").forEach(o -> optionSet.add(o.asText()));
+            for (JsonNode ans : q.get("answer")) {
+                if (!optionSet.contains(ans.asText())) {
+                    errors.add(new QuestionError(index, "answer",
+                            "多选题 answer 的每个元素都必须与 options 中的某一项完全一致（含字母前缀和文本）"));
+                    break;
+                }
             }
-
-            // 选择题必须有 options
-            if (("single_choice".equals(type) || "multi_choice".equals(type))
-                    && (!q.has("options") || !q.get("options").isArray() || q.get("options").isEmpty())) {
-                errors.add(new QuestionError(i, "options",
-                        "选择题必须有 options 数组"));
+        }
+        if ("true_false".equals(type) && q.has("answer") && q.get("answer").isTextual()) {
+            String ans = q.get("answer").asText();
+            if (!"正确".equals(ans) && !"错误".equals(ans)) {
+                errors.add(new QuestionError(index, "answer",
+                        "判断题 answer 必须为 \"正确\" 或 \"错误\""));
             }
         }
 
@@ -455,17 +472,35 @@ public class ExamService {
     }
 
     /**
-     * 从容器拼装的 JSON 持久化测验。先逐元素校验，校验通过则写入数据库。
-     *
-     * @return 校验通过返回 examId；校验失败抛出 ExamValidationException
+     * 一次性生成试题：解析 JSON + 校验（fail-fast）+ 持久化
      */
     @Transactional
-    public Integer parseAndSaveFromContainer(Integer userId, ObjectNode root) {
-        List<QuestionError> errors = validateQuestions(root);
-        if (!errors.isEmpty()) {
-            throw new ExamValidationException(errors);
+    public Integer parseAndSave(Integer userId, String json) {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(json);
+        } catch (Exception e) {
+            throw new ExamParseException("JSON 解析失败: " + e.getMessage(), e);
         }
 
+        return parseAndSave(userId, root, ValidationStrategy.FAIL_FAST);
+    }
+
+    /**
+     * 解析 + 校验 + 持久化（JsonNode 重载），默认 fail-fast 策略
+     */
+    @Transactional
+    public Integer parseAndSave(Integer userId, JsonNode root) {
+        return parseAndSave(userId, root, ValidationStrategy.FAIL_FAST);
+    }
+
+    /**
+     * 解析 + 校验 + 持久化（指定校验策略）
+     * 一次性模式使用 FAIL_FAST，分批模式使用 COLLECT_ALL
+     */
+    @Transactional
+    public Integer parseAndSave(Integer userId, JsonNode root, ValidationStrategy strategy) {
+        validateExamJson(root, strategy);
         return doSave(userId, root);
     }
 
@@ -519,32 +554,5 @@ public class ExamService {
 
         log.info("用户 {} 生成测验 {}，共 {} 题", userId, exam.getId(), questions.size());
         return exam.getId();
-    }
-
-    /**
-     * 单个题目的校验错误
-     */
-    @Data
-    @AllArgsConstructor
-    public static class QuestionError {
-        private int index;   // -1 表示 metadata 级别错误
-        private String field;
-        private String message;
-    }
-
-    /**
-     * 校验异常，携带所有错误信息
-     */
-    public static class ExamValidationException extends RuntimeException {
-        private final List<QuestionError> errors;
-
-        public ExamValidationException(List<QuestionError> errors) {
-            super("测验校验失败");
-            this.errors = errors;
-        }
-
-        public List<QuestionError> getErrors() {
-            return errors;
-        }
     }
 }

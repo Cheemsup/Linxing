@@ -1,14 +1,18 @@
 package org.linxing.linxing_agent.agent.tool.impl;
 
+import dev.langchain4j.model.chat.request.json.JsonAnyOfSchema;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.core.JsonContainer;
+import org.linxing.linxing_agent.agent.dto.QuestionError;
+import org.linxing.linxing_agent.agent.exception.ExamParseException;
+import org.linxing.linxing_agent.agent.exception.ExamValidationException;
 import org.linxing.linxing_agent.agent.service.impl.ExamService;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
@@ -20,6 +24,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 保存exam的工具
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -27,11 +34,15 @@ public class SaveExamTool implements Tool {
 
     private static final String NAME = "save_exam";
     private static final String DESCRIPTION = "将生成的测验题目保存到数据库，返回测验ID。"
-            + "支持两种模式：1) 一次性传入完整参数（简单场景，5题以内）；"
-            + "2) 传入 container_id 从容器读取分批构建的数据（大批量场景，超过5题时推荐）。";
+            + "模式选择规则：题目数 ≤ 5 时使用一次性模式（直接传 title + questions）；"
+            + "题目数 > 5 时必须使用分批模式（先 create_container 再 append_to_container 最后传 container_id）。"
+            + "判断依据：用户明确要求超过5题，或你计划生成超过5题时，必须走分批模式。";
     private static final String BRIEF = "保存生成的测验题目到数据库";
     private static final String WHEN_TO_USE = "当已生成完整的测验题目JSON后，必须调用此工具保存；"
-            + "仅在生成测验时使用，普通问答不需要";
+            + "仅在生成测验时使用，普通问答不需要。"
+            + "重要：如果用户要求出超过5道题，必须先调用 create_container 创建容器，"
+            + "再分批调用 append_to_container 追加题目（每批1-3题），最后调用本工具传入 container_id 保存。"
+            + "不要尝试一次性生成超过5题的 JSON，极易导致格式错误。";
 
     private final ExamService examService;
     private final ObjectMapper objectMapper;
@@ -65,10 +76,15 @@ public class SaveExamTool implements Tool {
                 .addProperty("stem", JsonStringSchema.builder()
                         .description("题目内容").build())
                 .addProperty("options", JsonArraySchema.builder()
-                        .description("选项数组，选择题必填，如 [\"A.选项1\",\"B.选项2\",\"C.选项3\",\"D.选项4\"]；填空题/简答题/判断题不需要")
+                        .description("选项数组，single_choice / multi_choice 必填。每个元素必须含字母前缀和完整选项文本，如 [\"A. 数组\",\"B. 单向链表\",\"C. 哈希表+双向链表\",\"D. 栈\"]；填空题/简答题/判断题不需要")
                         .build())
-                .addProperty("answer", JsonArraySchema.builder()
-                        .description("正确答案。多选题传数组如[\"A\",\"C\"]；其余题型传单元素数组如[\"B\"]或直接传字符串\"B\"均可").build())
+                .addProperty("answer", JsonAnyOfSchema.builder()
+                        .description("正确答案。多选题必须传字符串数组，每个元素需与 options 中对应选项文本完全一致（含字母前缀），如 [\"A. 冒泡排序\",\"C. 归并排序\"]；单选题/判断题/简答题/填空题必须传字符串（单选题答案需与 options 中某项完全一致，如 \"C. 哈希表+双向链表\"；判断题为 \"正确\" 或 \"错误\"；填空题为单个答案字符串）")
+                        .anyOf(
+                                JsonStringSchema.builder().description("单选题/判断题/简答题/填空题的答案字符串").build(),
+                                JsonArraySchema.builder().description("多选题答案数组").build()
+                        )
+                        .build())
                 .addProperty("explanation", JsonStringSchema.builder()
                         .description("答案解析，可选").build())
                 .addProperty("difficulty", JsonStringSchema.builder()
@@ -107,18 +123,45 @@ public class SaveExamTool implements Tool {
         try {
             var root = objectMapper.readTree(arguments);
 
-            // 判断是否为分批模式
-            if (root.has("container_id") && !root.get("container_id").asText().isBlank()) {
-                return executeFromContainer(request, context, userId, root.get("container_id").asText());
+            // 解析数据来源：分批模式从容器读取，一次性模式直接使用 arguments
+            boolean isContainerMode = root.has("container_id") && !root.get("container_id").asText().isBlank();
+            JsonNode examRoot;
+            ExamService.ValidationStrategy strategy;
+
+            if (isContainerMode) {
+                // 分批模式：从容器解析，使用 COLLECT_ALL 策略
+                ToolCallResult containerError = validateContainer(request, context, root.get("container_id").asText());
+                if (containerError != null) {
+                    return containerError;
+                }
+                JsonContainer container = context.getContainer(root.get("container_id").asText());
+                examRoot = container.assemble(objectMapper);
+                strategy = ExamService.ValidationStrategy.COLLECT_ALL;
             } else {
-                return executeDirect(request, userId, arguments);
+                // 一次性模式：直接使用 arguments，使用 FAIL_FAST 策略
+                examRoot = root;
+                strategy = ExamService.ValidationStrategy.FAIL_FAST;
             }
-        } catch (ExamService.ExamParseException e) {
+
+            // 统一调用 ExamService（校验 + 持久化）
+            Integer examId = examService.parseAndSave(userId, examRoot, strategy);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("examId", examId);
+            if (examRoot.has("questions") && examRoot.get("questions").isArray()) {
+                result.put("questionCount", examRoot.get("questions").size());
+            }
+            String resultJson = objectMapper.writeValueAsString(result);
+
+            log.info("[SaveExamTool] 用户 {} 保存测验成功（{}），examId={}",
+                    userId, isContainerMode ? "分批模式" : "一次性模式", examId);
+            return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
+
+        } catch (ExamParseException e) {
             log.warn("[SaveExamTool] 测验JSON解析失败: {}", e.getMessage());
             return ToolCallResult.failure(request.getToolCallId(), NAME,
                     "测验保存失败: " + e.getMessage());
-        } catch (ExamService.ExamValidationException e) {
-            // 分批模式校验失败，返回索引级错误
+        } catch (ExamValidationException e) {
             return buildValidationErrorResponse(request, e);
         } catch (Exception e) {
             log.error("[SaveExamTool] 保存测验异常: {}", e.getMessage(), e);
@@ -128,58 +171,29 @@ public class SaveExamTool implements Tool {
     }
 
     /**
-     * 一次性调用模式：从 arguments 直接解析
+     * 校验容器是否存在且类型匹配。属于路由逻辑，保留在 Tool 层。
+     *
+     * @return null 表示校验通过；非 null 表示校验失败的 ToolCallResult
      */
-    private ToolCallResult executeDirect(ToolCallRequest request, Integer userId, String arguments) throws Exception {
-        Integer examId = examService.parseAndSave(userId, arguments);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("examId", examId);
-        String resultJson = objectMapper.writeValueAsString(result);
-
-        log.info("[SaveExamTool] 用户 {} 保存测验成功（直接模式），examId={}", userId, examId);
-        return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
-    }
-
-    /**
-     * 分批模式：从容器读取拼装的 JSON
-     */
-    private ToolCallResult executeFromContainer(ToolCallRequest request, AgentContext context,
-                                                 Integer userId, String containerId) throws Exception {
+    private ToolCallResult validateContainer(ToolCallRequest request, AgentContext context, String containerId) {
         JsonContainer container = context.getContainer(containerId);
         if (container == null) {
-            return ToolCallResult.failure(request.getToolCallId(), NAME,
-                    "容器不存在: " + containerId);
+            return ToolCallResult.failure(request.getToolCallId(), NAME, "容器不存在: " + containerId);
         }
-
         if (!"exam".equals(container.getContainerType())) {
             return ToolCallResult.failure(request.getToolCallId(), NAME,
                     "容器类型不匹配: 期望 exam，实际 " + container.getContainerType());
         }
-
-        // 拼装完整 JSON
-        ObjectNode fullJson = container.assemble(objectMapper);
-
-        // 校验并持久化
-        Integer examId = examService.parseAndSaveFromContainer(userId, fullJson);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("examId", examId);
-        result.put("questionCount", fullJson.get("questions").size());
-        String resultJson = objectMapper.writeValueAsString(result);
-
-        log.info("[SaveExamTool] 用户 {} 保存测验成功（分批模式），examId={}, 题数={}",
-                userId, examId, fullJson.get("questions").size());
-        return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
+        return null;
     }
 
     /**
      * 构建校验失败的索引级错误响应
      */
     private ToolCallResult buildValidationErrorResponse(ToolCallRequest request,
-                                                         ExamService.ExamValidationException e) {
+                                                         ExamValidationException e) {
         List<Map<String, Object>> errorList = new ArrayList<>();
-        for (ExamService.QuestionError err : e.getErrors()) {
+        for (QuestionError err : e.getErrors()) {
             Map<String, Object> errorItem = new LinkedHashMap<>();
             errorItem.put("index", err.getIndex());
             errorItem.put("field", err.getField());

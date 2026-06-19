@@ -12,23 +12,24 @@
         <result column="source_type" property="sourceType"/>
         <result column="source_refs" property="sourceRefs"/>
         <result column="question_count" property="questionCount"/>
+        <result column="linked_plan_id" property="linkedPlanId"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO exams (user_id, title, description, status, source_type, source_refs, question_count)
+        INSERT INTO exams (user_id, title, description, status, source_type, source_refs, question_count, linked_plan_id)
         VALUES (#{userId}, #{title}, #{description}, #{status}, #{sourceType},
-                #{sourceRefs}::jsonb, #{questionCount})
+                #{sourceRefs}::jsonb, #{questionCount}, #{linkedPlanId})
     </insert>
 
     <select id="selectById" resultMap="BaseResultMap">
-        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, created_at
+        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, linked_plan_id, created_at
         FROM exams
         WHERE user_id = #{userId} AND id = #{examId}
     </select>
 
     <select id="selectByUserId" resultMap="BaseResultMap">
-        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, created_at
+        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, linked_plan_id, created_at
         FROM exams
         WHERE user_id = #{userId}
         <if test="status != null and status != ''">
@@ -44,6 +45,13 @@
         <if test="status != null and status != ''">
             AND status = #{status}
         </if>
+    </select>
+
+    <select id="selectByPlanId" resultMap="BaseResultMap">
+        SELECT id, user_id, title, description, status, source_type, source_refs, question_count, linked_plan_id, created_at
+        FROM exams
+        WHERE user_id = #{userId} AND linked_plan_id = #{planId}
+        ORDER BY created_at DESC
     </select>
 
     <update id="updateStatus">

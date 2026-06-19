@@ -12,6 +12,7 @@ import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -58,6 +59,17 @@ public class ExamController {
     public Result<Map<String, Object>> getDraft(@PathVariable Integer examId) {
         Integer userId = getCurrentUserId();
         return Result.success(examService.getDraft(userId, examId));
+    }
+
+    /**
+     * 查询关联到指定学习计划的测验列表
+     * @param planId 学习计划 ID
+     * @return 测验列表
+     */
+    @GetMapping("/by-plan/{planId}")
+    public Result<List<ExamVO>> listByPlan(@PathVariable Integer planId) {
+        Integer userId = getCurrentUserId();
+        return Result.success(examService.listByPlanId(userId, planId));
     }
 
     private static Integer getCurrentUserId() {

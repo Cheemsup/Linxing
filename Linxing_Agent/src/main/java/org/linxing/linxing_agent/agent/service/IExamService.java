@@ -6,6 +6,7 @@ import org.linxing.linxing_agent.agent.vo.ExamSubmitVO;
 import org.linxing.linxing_agent.agent.vo.ExamVO;
 import org.linxing.linxing_agent.common.result.PageResult;
 
+import java.util.List;
 import java.util.Map;
 
 public interface IExamService {
@@ -19,4 +20,6 @@ public interface IExamService {
     void saveDraft(Integer userId, Integer examId, ExamSubmitRequest body);
 
     Map<String, Object> getDraft(Integer userId, Integer examId);
+
+    List<ExamVO> listByPlanId(Integer userId, Integer planId);
 }

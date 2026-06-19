@@ -128,6 +128,7 @@ public class ChatServiceImpl implements IChatService {
         memory.add(UserMessage.from(originalQuery));//加入当前用户问题
 
         AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);
+        context.setStepListener(listener);
 
         OpenAiStreamingChatModel chatModel = llmManager.getStreamingModel(LlmType.CHAT_MODEL);//获取流式LLM对象
 

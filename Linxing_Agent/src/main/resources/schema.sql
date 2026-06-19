@@ -261,12 +261,14 @@ CREATE TABLE IF NOT EXISTS exams (
     source_type     VARCHAR(20) NOT NULL CHECK (source_type IN ('notes', 'web_search', 'mixed')),
     source_refs     JSONB DEFAULT '[]',
     question_count  INT NOT NULL DEFAULT 0,
+    linked_plan_id  INT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_exams_user_id ON exams(user_id);
 CREATE INDEX IF NOT EXISTS idx_exams_user_created ON exams(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_exams_user_status ON exams(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_exams_linked_plan_id ON exams(linked_plan_id) WHERE linked_plan_id IS NOT NULL;
 
 COMMENT ON TABLE exams IS '知识测验表，记录每次生成的测验元信息';
 COMMENT ON COLUMN exams.id IS '测验唯一ID';
@@ -277,6 +279,7 @@ COMMENT ON COLUMN exams.status IS '测验状态：created=已生成未作答，i
 COMMENT ON COLUMN exams.source_type IS '素材来源类型：notes=用户笔记，web_search=联网搜索，mixed=混合';
 COMMENT ON COLUMN exams.source_refs IS '素材来源引用，JSON数组，如笔记chunk_ids或搜索URL';
 COMMENT ON COLUMN exams.question_count IS '题目总数';
+COMMENT ON COLUMN exams.linked_plan_id IS '关联的学习计划ID，study_plan工作流并行生成时建立；可为空';
 COMMENT ON COLUMN exams.created_at IS '创建时间';
 
 -- =============================================
@@ -378,6 +381,19 @@ COMMENT ON COLUMN study_plans.status IS '计划状态：created=已生成，in_p
 COMMENT ON COLUMN study_plans.phase_count IS '阶段总数';
 COMMENT ON COLUMN study_plans.created_at IS '创建时间';
 COMMENT ON COLUMN study_plans.updated_at IS '最后更新时间';
+
+-- exams.linked_plan_id 外键约束（study_plans 表已定义，延迟添加以避免顺序依赖）
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_exams_linked_plan_id' AND table_name = 'exams'
+    ) THEN
+        ALTER TABLE exams
+            ADD CONSTRAINT fk_exams_linked_plan_id
+            FOREIGN KEY (linked_plan_id) REFERENCES study_plans(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- =============================================
 -- 13、学习阶段表 study_plan_phases

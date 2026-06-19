@@ -86,6 +86,17 @@ public class ExamService implements IExamService {
     }
 
     /**
+     * 查询关联到指定学习计划的所有测验
+     */
+    @Override
+    public List<ExamVO> listByPlanId(Integer userId, Integer planId) {
+        List<Exam> exams = examMapper.selectByPlanId(userId, planId);
+        return exams.stream()
+                .map(this::toExamVO)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 提交试卷，判分，更新 exams.status 为 completed
      */
     @Transactional
@@ -320,9 +331,11 @@ public class ExamService implements IExamService {
         return ExamVO.builder()
                 .id(exam.getId())
                 .title(exam.getTitle())
+                .description(exam.getDescription())
                 .status(exam.getStatus())
                 .sourceType(exam.getSourceType())
                 .questionCount(exam.getQuestionCount())
+                .linkedPlanId(exam.getLinkedPlanId())
                 .createdAt(exam.getCreatedAt())
                 .build();
     }
@@ -503,13 +516,25 @@ public class ExamService implements IExamService {
     @Transactional
     public Integer parseAndSave(Integer userId, JsonNode root, ValidationStrategy strategy) {
         validateExamJson(root, strategy);
-        return doSave(userId, root);
+        return doSave(userId, root, null);
+    }
+
+    /**
+     * 解析 + 校验 + 持久化（指定校验策略 + 关联学习计划）
+     * 用于 study_plan 工作流中 ExamGeneratorAgent 生成的测验，关联到对应的学习计划。
+     *
+     * @param linkedPlanId 关联的学习计划 ID，null 表示不关联
+     */
+    @Transactional
+    public Integer parseAndSave(Integer userId, JsonNode root, ValidationStrategy strategy, Integer linkedPlanId) {
+        validateExamJson(root, strategy);
+        return doSave(userId, root, linkedPlanId);
     }
 
     /**
      * 实际写入数据库的逻辑，从 parseAndSave 中提取
      */
-    private Integer doSave(Integer userId, JsonNode root) {
+    private Integer doSave(Integer userId, JsonNode root, Integer linkedPlanId) {
         String title = root.get("title").asText();
         String sourceType = root.has("source_type") ? root.get("source_type").asText() : "mixed";
         String description = root.has("description") ? root.get("description").asText() : null;
@@ -525,6 +550,7 @@ public class ExamService implements IExamService {
                 .sourceType(sourceType)
                 .sourceRefs(sourceRefs)
                 .questionCount(questions.size())
+                .linkedPlanId(linkedPlanId)
                 .build();
         examMapper.insert(exam);
 

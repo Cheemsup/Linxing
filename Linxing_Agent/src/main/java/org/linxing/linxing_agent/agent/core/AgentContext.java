@@ -15,6 +15,7 @@ public class AgentContext {
     private final Map<String, Object> metadata;
     private final Map<String, JsonContainer> containers;
     private int stepCount;
+    private AgentStepListener stepListener;
 
     public AgentContext(Integer userId, Integer sessionId, AgentMemory memory, String query) {
         this.userId = userId;
@@ -70,5 +71,13 @@ public class AgentContext {
 
     public void putContainer(String containerId, JsonContainer container) {
         containers.put(containerId, container);
+    }
+
+    public AgentStepListener getStepListener() {
+        return stepListener;
+    }
+
+    public void setStepListener(AgentStepListener stepListener) {
+        this.stepListener = stepListener;
     }
 }

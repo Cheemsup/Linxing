@@ -121,10 +121,40 @@
         </div>
       </div>
     </div>
+
+    <!-- 关联测验区块 -->
+    <div class="linked-exams-section">
+      <div class="section-header">
+        <h3 class="section-title">📝 关联测验</h3>
+        <button v-if="!linkedExamsLoading" class="refresh-exams-btn" @click="fetchLinkedExams" title="刷新">↻</button>
+      </div>
+      <div v-if="linkedExamsLoading" class="exams-loading">加载中...</div>
+      <div v-else-if="linkedExams.length === 0" class="exams-empty">
+        暂无关联测验。可在对话中让助手"制定学习计划并出题"来生成。
+      </div>
+      <div v-else class="linked-exam-cards">
+        <div
+          v-for="exam in linkedExams"
+          :key="exam.id"
+          class="linked-exam-card"
+          @click="goToExam(exam.id)"
+        >
+          <div class="exam-card-title">{{ exam.title }}</div>
+          <div v-if="exam.description" class="exam-card-desc">{{ exam.description }}</div>
+          <div class="exam-card-meta">
+            <span class="exam-meta-item">{{ exam.questionCount }} 题</span>
+            <span class="exam-meta-item" :class="'exam-status-' + exam.status">{{ examStatusLabel(exam.status) }}</span>
+            <span class="exam-meta-item">{{ formatDate(exam.createdAt) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
+import { examApi } from '@/api/rag/exam'
+
 export default {
   name: 'StudyPlanTimeline',
   props: {
@@ -134,6 +164,20 @@ export default {
     }
   },
   emits: ['back', 'status-change', 'notes-update', 'export'],
+  data() {
+    return {
+      linkedExams: [],
+      linkedExamsLoading: false
+    }
+  },
+  watch: {
+    'planData.id': {
+      handler() {
+        this.fetchLinkedExams()
+      },
+      immediate: true
+    }
+  },
   methods: {
     statusLabel(status) {
       const map = {
@@ -145,6 +189,22 @@ export default {
       return map[status] || status
     },
 
+    examStatusLabel(status) {
+      const map = {
+        created: '未开始',
+        in_progress: '答题中',
+        completed: '已完成',
+        expired: '已过期'
+      }
+      return map[status] || status
+    },
+
+    formatDate(dateStr) {
+      if (!dateStr) return ''
+      const d = new Date(dateStr)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    },
+
     parseArray(jsonStr) {
       if (!jsonStr) return []
       if (Array.isArray(jsonStr)) return jsonStr
@@ -154,6 +214,28 @@ export default {
       } catch (e) {
         return []
       }
+    },
+
+    async fetchLinkedExams() {
+      if (!this.planData || !this.planData.id) return
+      this.linkedExamsLoading = true
+      try {
+        const res = await examApi.listByPlanId(this.planData.id)
+        if (res.data && res.data.code === 1) {
+          this.linkedExams = res.data.data || []
+        } else {
+          this.linkedExams = []
+        }
+      } catch (e) {
+        console.error('获取关联测验失败:', e)
+        this.linkedExams = []
+      } finally {
+        this.linkedExamsLoading = false
+      }
+    },
+
+    goToExam(examId) {
+      this.$router.push({ path: '/quiz', query: { examId } })
     },
 
     onStatusChange(phase, newStatus) {
@@ -468,5 +550,114 @@ export default {
   outline: none;
   border-color: #1a73e8;
   background: #fff;
+}
+
+/* 关联测验区块 */
+.linked-exams-section {
+  margin-top: 32px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 18px;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.refresh-exams-btn {
+  background: none;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #6c757d;
+}
+
+.refresh-exams-btn:hover {
+  background: #e9ecef;
+}
+
+.exams-loading,
+.exams-empty {
+  color: #6c757d;
+  font-size: 14px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.linked-exam-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.linked-exam-card {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.linked-exam-card:hover {
+  border-color: #1a73e8;
+  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.1);
+}
+
+.exam-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 6px;
+}
+
+.exam-card-desc {
+  font-size: 13px;
+  color: #6c757d;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.exam-card-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: #6c757d;
+  flex-wrap: wrap;
+}
+
+.exam-meta-item {
+  white-space: nowrap;
+}
+
+.exam-status-created {
+  color: #757575;
+}
+
+.exam-status-in_progress {
+  color: #f57c00;
+}
+
+.exam-status-completed {
+  color: #2e7d32;
+}
+
+.exam-status-expired {
+  color: #c62828;
 }
 </style>

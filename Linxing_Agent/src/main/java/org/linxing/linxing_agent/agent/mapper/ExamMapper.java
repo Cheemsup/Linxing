@@ -16,4 +16,5 @@ public interface ExamMapper {
                               @Param("limit") int limit);
     int countByUserId(@Param("userId") Integer userId, @Param("status") String status);
     int updateStatus(@Param("examId") Integer examId, @Param("status") String status);
+    List<Exam> selectByPlanId(@Param("userId") Integer userId, @Param("planId") Integer planId);
 }

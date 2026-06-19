@@ -10,8 +10,10 @@ import java.time.OffsetDateTime;
 public class ExamVO {
     private Integer id;
     private String title;
+    private String description;
     private String status;
     private String sourceType;
     private Integer questionCount;
+    private Integer linkedPlanId;
     private OffsetDateTime createdAt;
 }

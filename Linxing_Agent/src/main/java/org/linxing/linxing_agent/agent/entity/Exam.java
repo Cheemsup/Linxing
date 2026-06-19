@@ -20,5 +20,6 @@ public class Exam {
     private String sourceType;
     private String sourceRefs;
     private Integer questionCount;
+    private Integer linkedPlanId;
     private OffsetDateTime createdAt;
 }

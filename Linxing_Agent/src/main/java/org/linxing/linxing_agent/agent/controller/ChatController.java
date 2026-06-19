@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.agent.adapter.SseChatAdapter;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
+import org.linxing.linxing_agent.agent.subagent.PendingClarificationRegistry;
 import org.linxing.linxing_agent.common.result.PageResult;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
@@ -33,6 +34,7 @@ public class ChatController {
     private final ChatMessageMapper chatMessageMapper;
     private final ChatMessageCacheService chatMessageCacheService;
     private final AgentStepService agentStepService;
+    private final PendingClarificationRegistry clarificationRegistry;
 
     /**
      * SSE流式对话
@@ -57,6 +59,36 @@ public class ChatController {
     private Integer resolveUserId() {
         Long userId = BaseContext.getCurrentId();
         return userId != null ? userId.intValue() : null;
+    }
+
+    /**
+     * HumanInTheLoop 澄清回复端点
+     * <p>
+     * 当 study_plan 工作流暂停等待用户澄清时，前端调用此端点提交用户回复，
+     * 唤醒阻塞的 CompletableFuture，工作流继续执行。
+     * @param body 包含 sessionId 和 answer
+     * @return 操作结果
+     */
+    @PostMapping("/workflow/clarify")
+    public Result<Map<String, Object>> submitClarification(@RequestBody Map<String, Object> body) {
+        Object sessionIdObj = body.get("sessionId");
+        String answer = (String) body.getOrDefault("answer", "");
+
+        if (sessionIdObj == null) {
+            return Result.error("sessionId 不能为空");
+        }
+
+        String clarificationId = String.valueOf(sessionIdObj);
+        boolean completed = clarificationRegistry.complete(clarificationId, answer);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("completed", completed);
+        if (!completed) {
+            result.put("message", "未找到待处理的澄清请求，可能已超时或已回复");
+        }
+
+        log.info("[ChatController] 澄清回复 sessionId={}, completed={}", clarificationId, completed);
+        return Result.success(result);
     }
 
     /**

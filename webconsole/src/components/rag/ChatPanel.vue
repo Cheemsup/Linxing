@@ -204,6 +204,32 @@
                           <div v-else class="step-placeholder">等待推理内容...</div>
                         </div>
                       </div>
+                      <div v-else-if="isClarifyStep(step)" class="step-item step-sub-agent clarify-step">
+                        <span class="step-icon">{{ getStepIcon(step) }}</span>
+                        <div class="clarify-content">
+                          <div class="step-text">{{ formatStepText(step) }}</div>
+                          <div v-if="!getClarifyState(idx).submitted" class="clarify-input-area">
+                            <textarea
+                              :value="getClarifyState(idx).answer"
+                              @input="setClarifyAnswer(idx, $event.target.value)"
+                              placeholder="请输入您的回复..."
+                              rows="2"
+                              class="clarify-input"
+                              @keydown.enter.exact.prevent="submitClarify(idx)"
+                            ></textarea>
+                            <button
+                              class="clarify-submit-btn"
+                              @click="submitClarify(idx)"
+                              :disabled="getClarifyState(idx).submitting || !getClarifyState(idx).answer || !getClarifyState(idx).answer.trim()"
+                            >
+                              {{ getClarifyState(idx).submitting ? '提交中...' : '提交回复' }}
+                            </button>
+                          </div>
+                          <div v-else class="clarify-status clarify-done">
+                            已回复：{{ getClarifyState(idx).answer }}
+                          </div>
+                        </div>
+                      </div>
                       <div v-else :class="['step-item', getStepClass(step)]">
                         <span class="step-icon">{{ getStepIcon(step) }}</span>
                         <span class="step-text">{{ formatStepText(step) }}</span>
@@ -283,6 +309,7 @@
 
 <script>
 import { ragApi, chatSessionApi } from '@/api/rag/chat'
+import { workflowApi } from '@/api/rag/workflow'
 import ChunkContextPanel from './ChunkContextPanel.vue'
 import ChatTreePanel from './ChatTreePanel.vue'
 import { chatTreeStore } from '@/stores/rag/chatTreeStore'
@@ -314,7 +341,9 @@ export default {
       currentStreamStepNumber: 0,
       messagePanelState: {},
       historyStepsCache: {},
-      loadingSteps: {}
+      loadingSteps: {},
+      // HumanInTheLoop 澄清输入框状态：{ [stepIdx]: { answer: '', submitting: false, submitted: false } }
+      clarifyInputs: {}
     }
   },
   computed: {
@@ -686,6 +715,9 @@ export default {
         case 'error': return 'step-error'
         case 'final': return 'step-final'
         case 'cache_hit': return 'step-cache'
+        case 'workflow_start': return 'step-workflow'
+        case 'sub_agent': return 'step-sub-agent'
+        case 'workflow_end': return 'step-workflow'
         default: return ''
       }
     },
@@ -698,6 +730,9 @@ export default {
         case 'error': return '❌'
         case 'final': return '✅'
         case 'cache_hit': return '⚡'
+        case 'workflow_start': return '🚀'
+        case 'sub_agent': return '🤖'
+        case 'workflow_end': return '🏁'
         default: return '📌'
       }
     },
@@ -711,6 +746,67 @@ export default {
         return cached
       }
       return []
+    },
+
+    /**
+     * 判断是否为 HumanInTheLoop 澄清步骤（需要展示输入框）
+     */
+    isClarifyStep(step) {
+      return step.eventType === 'sub_agent'
+        && step.stepData
+        && step.stepData.agent_role === 'clarify'
+        && step.stepData.question
+    },
+
+    /**
+     * 获取澄清输入框状态，不存在时初始化
+     */
+    getClarifyState(idx) {
+      if (!this.clarifyInputs[idx]) {
+        this.clarifyInputs = {
+          ...this.clarifyInputs,
+          [idx]: {
+            answer: '',
+            submitting: false,
+            submitted: false
+          }
+        }
+      }
+      return this.clarifyInputs[idx]
+    },
+
+    setClarifyAnswer(idx, value) {
+      this.getClarifyState(idx).answer = value
+    },
+
+    /**
+     * 提交 HumanInTheLoop 澄清回复
+     */
+    async submitClarify(idx) {
+      const state = this.getClarifyState(idx)
+      const answer = (state.answer || '').trim()
+      if (!answer || state.submitting) return
+
+      if (!this.activeSessionId) {
+        console.warn('[Clarify] 无活跃会话，无法提交回复')
+        return
+      }
+
+      state.submitting = true
+      try {
+        const res = await workflowApi.submitClarification(this.activeSessionId, answer)
+        const completed = res.data && res.data.data && res.data.data.completed
+        if (completed) {
+          state.submitted = true
+        } else {
+          console.warn('[Clarify] 未找到待处理的澄清请求，可能已超时')
+          state.submitted = true
+        }
+      } catch (e) {
+        console.error('[Clarify] 提交澄清回复失败:', e)
+      } finally {
+        state.submitting = false
+      }
     },
 
     async loadHistorySteps(messageId) {
@@ -775,6 +871,41 @@ export default {
           return '推理完成'
         case 'cache_hit':
           return '缓存命中'
+        case 'workflow_start': {
+          const topic = sd.topic ? `：${sd.topic}` : ''
+          const examFlag = sd.generate_exam ? '（含测验）' : ''
+          return `学习计划工作流启动${topic}${examFlag}`
+        }
+        case 'sub_agent': {
+          const role = sd.agent_role || ''
+          const triggered = sd.triggered !== undefined ? sd.triggered : true
+          const success = sd.success !== undefined ? sd.success : true
+          const roleMap = {
+            clarify: '澄清提问',
+            plan: '计划生成',
+            exam: '测验生成'
+          }
+          const roleLabel = roleMap[role] || role
+          if (!triggered) {
+            return `${roleLabel}（未触发）`
+          }
+          if (sd.question) {
+            return `${roleLabel}：${sd.question}`
+          }
+          return `${roleLabel} ${success ? '✓' : '✗'}`
+        }
+        case 'workflow_end': {
+          const planSaved = sd.plan_saved
+          const examSaved = sd.exam_saved
+          const examTriggered = sd.exam_triggered
+          if (planSaved && (!examTriggered || examSaved)) {
+            return `工作流完成：计划已保存${examTriggered ? '，测验已保存' : ''}`
+          }
+          if (planSaved && examTriggered && !examSaved) {
+            return '工作流完成：计划已保存，测验生成失败'
+          }
+          return `工作流结束${step.error ? '：' + step.error : ''}`
+        }
         default:
           return `${step.eventType}: ${JSON.stringify(step).substring(0, 80)}`
       }
@@ -1413,6 +1544,93 @@ export default {
 .step-final .step-text {
   color: #2e7d32;
   font-weight: 500;
+}
+
+.step-workflow .step-text {
+  color: #6a1b9a;
+  font-weight: 500;
+}
+
+.step-sub-agent .step-text {
+  color: #00838f;
+}
+
+/* HumanInTheLoop 澄清步骤样式 */
+.clarify-step {
+  flex-direction: column;
+  align-items: stretch;
+  background: #f3e5f5;
+  border: 1px solid #ce93d8;
+  border-radius: 6px;
+  padding: 10px;
+  margin: 6px 0;
+}
+
+.clarify-step .step-icon {
+  margin-bottom: 4px;
+}
+
+.clarify-content {
+  flex: 1;
+}
+
+.clarify-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.clarify-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #bdbdbd;
+  border-radius: 4px;
+  font-size: 13px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.clarify-input:focus {
+  outline: none;
+  border-color: #8e24aa;
+  box-shadow: 0 0 0 2px rgba(142, 36, 170, 0.1);
+}
+
+.clarify-submit-btn {
+  align-self: flex-start;
+  padding: 6px 16px;
+  background: #8e24aa;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.clarify-submit-btn:hover:not(:disabled) {
+  background: #6a1b9a;
+}
+
+.clarify-submit-btn:disabled {
+  background: #bdbdbd;
+  cursor: not-allowed;
+}
+
+.clarify-status {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #e8f5e9;
+  border: 1px solid #81c784;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #2e7d32;
+}
+
+.clarify-done {
+  color: #2e7d32;
 }
 
 .thinking-content {

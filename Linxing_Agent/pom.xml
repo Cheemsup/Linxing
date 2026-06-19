@@ -147,6 +147,12 @@
             <artifactId>langchain4j-open-ai</artifactId>
         </dependency>
 
+        <!-- ==================== langchain4j-agentic（多Agent工作流：@Agent/conditionalBuilder/humanInTheLoopBuilder） ==================== -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-agentic</artifactId>
+        </dependency>
+
         <!-- ==================== 本地 Cross-Encoder 重排序 (ONNX) ==================== -->
         <dependency>
             <groupId>dev.langchain4j</groupId>

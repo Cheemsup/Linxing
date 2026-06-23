@@ -52,6 +52,24 @@ public class AgentExecutor {
     @Value("${agent.disclosure.threshold:5}")
     private int disclosureThreshold;
 
+    /**
+     * 普通工具执行超时秒数，默认3分钟
+     */
+    @Value("${agent.tool.timeout-seconds:180}")
+    private int toolTimeoutSeconds;
+
+    /**
+     * 工作流类工具执行超时秒数，默认10分钟
+     * 工作流类工具内部编排多个子Agent，耗时较长，单独放宽
+     */
+    @Value("${agent.tool.workflow-timeout-seconds:600}")
+    private int workflowToolTimeoutSeconds;
+
+    /**
+     * 工作流类工具名集合：这些工具内部编排多Agent工作流，耗时较长，使用更宽松的超时
+     */
+    private static final Set<String> WORKFLOW_TOOL_NAMES = Set.of("start_study_plan_workflow");
+
     private static final String SYSTEM_PROMPT_TEMPLATE_FULL = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_FULL;
 
     private static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE;
@@ -61,15 +79,18 @@ public class AgentExecutor {
     private final List<CatalogProvider> catalogProviders;
     private final AgentStepMapper agentStepMapper;
     private final ObjectMapper objectMapper;
+    private final ToolExecutionTimeout toolExecutionTimeout;
 
     public AgentExecutor(ToolRegistry toolRegistry, SkillRegistry skillRegistry,
                          List<CatalogProvider> catalogProviders,
-                         AgentStepMapper agentStepMapper, ObjectMapper objectMapper) {
+                         AgentStepMapper agentStepMapper, ObjectMapper objectMapper,
+                         ToolExecutionTimeout toolExecutionTimeout) {
         this.toolRegistry = toolRegistry;
         this.skillRegistry = skillRegistry;
         this.catalogProviders = catalogProviders;
         this.agentStepMapper = agentStepMapper;
         this.objectMapper = objectMapper;
+        this.toolExecutionTimeout = toolExecutionTimeout;
     }
 
     /**
@@ -192,7 +213,12 @@ public class AgentExecutor {
                         toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
                                 "未知工具: " + toolReq.name());
                     } else {
-                        toolResult = toolSpec.execute(toolCallRequest, context);//执行工具调用，获取结果
+                        //工作流类工具使用更宽松的超时，普通工具使用默认超时
+                        int timeout = WORKFLOW_TOOL_NAMES.contains(toolReq.name())
+                                ? workflowToolTimeoutSeconds
+                                : toolTimeoutSeconds;
+                        toolResult = toolExecutionTimeout.executeWithTimeout(
+                                toolSpec, toolCallRequest, context, timeout);
                     }
 
                     //渐进披露模式：resolve成功后提取被解析的工具名并动态激活

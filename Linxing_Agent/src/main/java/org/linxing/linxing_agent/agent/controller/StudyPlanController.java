@@ -18,8 +18,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 学习计划 Controller
- * 前端代理剥离 /api 前缀：前端调 /api/study-plan/xxx，后端路径 /study-plan/xxx
+ * 学习计划
  */
 @RestController
 @RequestMapping("/study-plan")
@@ -29,9 +28,6 @@ public class StudyPlanController {
 
     private final IStudyPlanService studyPlanService;
 
-    /**
-     * 1. 列表查询（分页，支持 status 筛选）
-     */
     @GetMapping
     public Result<PageResult<StudyPlanVO>> listPlans(
             @RequestParam(defaultValue = "1") int page,
@@ -41,18 +37,12 @@ public class StudyPlanController {
         return Result.success(studyPlanService.listPlans(userId, status, page, size));
     }
 
-    /**
-     * 2. 详情查询（含阶段列表与进度）
-     */
     @GetMapping("/{planId}")
     public Result<StudyPlanDetailVO> getPlanDetail(@PathVariable Integer planId) {
         Integer userId = getCurrentUserId();
         return Result.success(studyPlanService.getPlanDetail(userId, planId));
     }
 
-    /**
-     * 3. 更新阶段进度状态
-     */
     @PutMapping("/{planId}/phase/{phaseId}/progress")
     public Result<Void> updatePhaseStatus(
             @PathVariable Integer planId,
@@ -64,8 +54,8 @@ public class StudyPlanController {
     }
 
     /**
-     * 4. 导出学习计划（支持 Markdown / HTML 格式，返回文件下载）
-     *
+     * 导出学习计划（支持 Markdown / HTML 格式，返回文件下载）
+     * TODO：此处的代码逻辑复杂，考虑将其下移到service层
      * @param format 导出格式：md（默认）/ html
      */
     @GetMapping("/{planId}/export")

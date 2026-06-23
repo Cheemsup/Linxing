@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.core;
 
+//TODO：由于需要考虑在subAgent中也使用本接口进行step的监听和推送，所以需要考虑再创建一个实现类（因为langchain4j的@Agent体系无法使用有关于流式输出的API）
 public interface AgentStepListener {
 
     /**

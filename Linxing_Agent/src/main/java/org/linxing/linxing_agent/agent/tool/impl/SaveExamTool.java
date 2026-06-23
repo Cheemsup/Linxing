@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.tool.impl;
 
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.model.chat.request.json.JsonAnyOfSchema;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
@@ -14,9 +15,12 @@ import org.linxing.linxing_agent.agent.dto.QuestionError;
 import org.linxing.linxing_agent.agent.exception.ExamParseException;
 import org.linxing.linxing_agent.agent.exception.ExamValidationException;
 import org.linxing.linxing_agent.agent.service.impl.ExamService;
+import org.linxing.linxing_agent.agent.subagent.SaveResult;
+import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
+import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.JsonContainerStore;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -33,6 +37,7 @@ import java.util.Map;
 public class SaveExamTool implements Tool {
 
     private static final String NAME = "save_exam";
+    public static final String ATTR_SAVE_RESULT = "save_exam:last_result";
     private static final String DESCRIPTION = "将生成的测验题目保存到数据库，返回测验ID。"
             + "模式选择规则：题目数 ≤ 5 时使用一次性模式（直接传 title + questions）；"
             + "题目数 > 5 时必须使用分批模式（先 create_container 再 append_to_container 最后传 container_id）。"
@@ -171,6 +176,85 @@ public class SaveExamTool implements Tool {
     }
 
     /**
+     * 供 subagent 体系使用的 {@code @Tool} 入口。
+     * 与 {@link #execute(ToolCallRequest, AgentContext)} 共用
+     * {@link ExamService} 核心服务，userId 与容器均从 {@link SubAgentContext} 读取，
+     * 避免作为 LLM 可控参数暴露。
+     *
+     * @param containerId   容器 ID，由 create_container 返回，容器类型必须为 exam
+     * @param linkedPlanId  关联的学习计划 ID，可选；若传入则保存到 exam.linked_plan_id
+     * @return 保存结果 JSON，包含 examId 与 questionCount；失败时返回错误信息
+     */
+    @dev.langchain4j.agent.tool.Tool(name = "save_exam",
+            value = "将已分批构建完成的测验容器保存到数据库，返回测验ID。"
+                    + "必须在所有 question 追加完毕后调用，传入 create_container 返回的容器ID。")
+    public String saveExam(
+            @P("容器ID，由 create_container 返回，容器类型必须为 exam") String containerId,
+            @P("关联的学习计划ID，可选") String linkedPlanId) {
+        Integer userId = SubAgentContext.currentUserId();
+        if (userId == null) {
+            return "错误：用户未登录";
+        }
+
+        JsonContainerStore store = SubAgentContext.currentStore();
+        if (store == null) {
+            return "错误：subagent 容器存储未绑定";
+        }
+
+        JsonContainer container = store.getContainer(containerId);
+        if (container == null) {
+            return "错误：容器不存在: " + containerId;
+        }
+        if (!"exam".equals(container.getContainerType())) {
+            return "错误：容器类型不匹配: 期望 exam，实际 " + container.getContainerType();
+        }
+
+        Integer planId = parseLinkedPlanId(linkedPlanId);
+
+        try {
+            JsonNode examRoot = container.assemble(objectMapper);
+            Integer examId = examService.parseAndSave(userId, examRoot,
+                    ExamService.ValidationStrategy.COLLECT_ALL, planId);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("examId", examId);
+            int questionCount = 0;
+            if (examRoot.has("questions") && examRoot.get("questions").isArray()) {
+                questionCount = examRoot.get("questions").size();
+                result.put("questionCount", questionCount);
+            }
+
+            SubAgentContext context = SubAgentContext.current();
+            if (context != null) {
+                context.setAttribute(ATTR_SAVE_RESULT, new SaveResult(examId, questionCount));
+            }
+
+            log.info("[SaveExamTool] @Tool 保存测验成功，userId={}, examId={}, linkedPlanId={}",
+                    userId, examId, planId);
+            return objectMapper.writeValueAsString(result);
+        } catch (ExamParseException e) {
+            log.warn("[SaveExamTool] @Tool 测验解析失败: {}", e.getMessage());
+            return "测验保存失败: " + e.getMessage();
+        } catch (ExamValidationException e) {
+            return buildValidationErrorMessage(e);
+        } catch (Exception e) {
+            log.error("[SaveExamTool] @Tool 保存测验异常: {}", e.getMessage(), e);
+            return "测验保存异常: " + e.getMessage();
+        }
+    }
+
+    private Integer parseLinkedPlanId(String linkedPlanId) {
+        if (linkedPlanId == null || linkedPlanId.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(linkedPlanId.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
      * 校验容器是否存在且类型匹配。属于路由逻辑，保留在 Tool 层。
      *
      * @return null 表示校验通过；非 null 表示校验失败的 ToolCallResult
@@ -188,10 +272,17 @@ public class SaveExamTool implements Tool {
     }
 
     /**
-     * 构建校验失败的索引级错误响应
+     * 构建校验失败的索引级错误响应（旧版 {@link Tool} 接口入口使用）
      */
     private ToolCallResult buildValidationErrorResponse(ToolCallRequest request,
                                                          ExamValidationException e) {
+        return ToolCallResult.failure(request.getToolCallId(), NAME, buildValidationErrorMessage(e));
+    }
+
+    /**
+     * 构建校验失败的索引级错误信息（两套入口共用）
+     */
+    private String buildValidationErrorMessage(ExamValidationException e) {
         List<Map<String, Object>> errorList = new ArrayList<>();
         for (QuestionError err : e.getErrors()) {
             Map<String, Object> errorItem = new LinkedHashMap<>();
@@ -208,10 +299,9 @@ public class SaveExamTool implements Tool {
         try {
             String resultJson = objectMapper.writeValueAsString(response);
             log.warn("[SaveExamTool] 测验校验失败，返回 {} 个错误", errorList.size());
-            return ToolCallResult.failure(request.getToolCallId(), NAME, resultJson);
+            return resultJson;
         } catch (Exception ex) {
-            return ToolCallResult.failure(request.getToolCallId(), NAME,
-                    "测验校验失败，但错误信息序列化异常");
+            return "测验校验失败，但错误信息序列化异常";
         }
     }
 }

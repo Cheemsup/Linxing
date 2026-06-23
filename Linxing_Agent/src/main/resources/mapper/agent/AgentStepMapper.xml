@@ -25,14 +25,14 @@
         SELECT id, chat_message_id, session_id, step_order, step_type, content, step_data, created_at
         FROM agent_steps
         WHERE chat_message_id = #{chatMessageId}
-        ORDER BY step_order ASC
+        ORDER BY step_order ASC, id ASC
     </select>
 
     <select id="selectBySessionId" resultMap="BaseResultMap">
         SELECT id, chat_message_id, session_id, step_order, step_type, content, step_data, created_at
         FROM agent_steps
         WHERE session_id = #{sessionId}
-        ORDER BY chat_message_id, step_order ASC
+        ORDER BY chat_message_id ASC, step_order ASC, id ASC
     </select>
 
     <delete id="deleteBySessionId">

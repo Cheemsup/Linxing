@@ -8,6 +8,7 @@ import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -39,10 +40,10 @@ public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>
     public SkillRegistry(SkillLoader skillLoader,
                          @Value("${agent.skills.path:}") String skillsBasePath) {
         this.skillLoader = skillLoader;
-        // 未配置时默认使用 classpath 下的 agent/skill/skills/ 目录
         if (skillsBasePath == null || skillsBasePath.isBlank()) {
-            this.skillsBasePath = Path.of("src/main/java/org/linxing/linxing_agent/agent/skill/skills");
-            log.info("[SkillRegistry] agent.skills.path 未配置，使用默认路径: {}", this.skillsBasePath.toAbsolutePath());
+            // 未配置时从 classpath 定位 skills 目录（编译后位于 target/classes/skills/）
+            this.skillsBasePath = resolveClasspathSkillsPath();
+            log.info("[SkillRegistry] agent.skills.path 未配置，使用 classpath 路径: {}", this.skillsBasePath.toAbsolutePath());
         } else {
             this.skillsBasePath = Path.of(skillsBasePath);
         }
@@ -50,6 +51,24 @@ public class SkillRegistry implements ApplicationListener<ContextRefreshedEvent>
                 .maximumSize(50)
                 .expireAfterAccess(Duration.ofMinutes(30))
                 .build();
+    }
+
+    /**
+     * 从 classpath 定位 skills 目录的文件系统路径。
+     * 开发环境（spring-boot:run）下指向 target/classes/skills/，
+     * 不依赖 JVM 工作目录，避免从非 Linxing_Agent 目录启动时找不到文件。
+     */
+    private Path resolveClasspathSkillsPath() {
+        try {
+            ClassPathResource resource = new ClassPathResource("skills");
+            if (resource.exists()) {
+                return resource.getFile().toPath();
+            }
+        } catch (Exception e) {
+            log.warn("[SkillRegistry] 从 classpath 定位 skills 目录失败: {}", e.getMessage());
+        }
+        // 回退到相对路径（相对于工作目录）
+        return Path.of("src/main/resources/skills");
     }
 
     @Override

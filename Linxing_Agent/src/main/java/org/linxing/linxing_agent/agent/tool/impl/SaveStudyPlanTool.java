@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.tool.impl;
 
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
@@ -13,9 +14,12 @@ import org.linxing.linxing_agent.agent.dto.QuestionError;
 import org.linxing.linxing_agent.agent.exception.StudyPlanParseException;
 import org.linxing.linxing_agent.agent.exception.StudyPlanValidationException;
 import org.linxing.linxing_agent.agent.service.impl.StudyPlanService;
+import org.linxing.linxing_agent.agent.subagent.SaveResult;
+import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
+import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.JsonContainerStore;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -24,7 +28,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 保存学习计划的工具
+ * 保存学习计划的工具。
+ * <p>
+ * 同时支持两套调用体系：
+ * <ol>
+ *   <li>旧版 {@link Tool} 接口：由 {@link org.linxing.linxing_agent.agent.tool.ToolRegistry} 注册，
+ *       供主对话 Agent 的渐进式披露模式调用。</li>
+ *   <li>LangChain4j {@link dev.langchain4j.agent.tool.Tool} 注解方法：
+ *       供 {@link org.linxing.linxing_agent.agent.subagent.PlanGeneratorAgent} 等 subagent
+ *       在容器构建完成后直接保存学习计划。</li>
+ * </ol>
  */
 @Slf4j
 @Component
@@ -32,6 +45,7 @@ import java.util.Map;
 public class SaveStudyPlanTool implements Tool {
 
     private static final String NAME = "save_study_plan";
+    public static final String ATTR_SAVE_RESULT = "save_study_plan:last_result";
     private static final String DESCRIPTION = "将生成的学习计划保存到数据库，返回计划ID。"
             + "模式选择规则：阶段数 ≤ 5 时使用一次性模式（直接传 title + goal + phases）；"
             + "阶段数 > 5 时必须使用分批模式（先 create_container 再 append_to_container 最后传 container_id）。"
@@ -179,6 +193,69 @@ public class SaveStudyPlanTool implements Tool {
     }
 
     /**
+     * 供 subagent 体系使用的 {@code @Tool} 入口。
+     * 与 {@link #execute(ToolCallRequest, AgentContext)} 共用
+     * {@link StudyPlanService} 核心服务，userId 与容器均从 {@link SubAgentContext} 读取，
+     * 避免作为 LLM 可控参数暴露。
+     *
+     * @param containerId 容器 ID，由 create_container 返回，容器类型必须为 study_plan
+     * @return 保存结果 JSON，包含 planId 与 phaseCount；失败时返回错误信息
+     */
+    @dev.langchain4j.agent.tool.Tool(name = "save_study_plan",
+            value = "将已分批构建完成的学习计划容器保存到数据库，返回计划ID。"
+                    + "必须在所有 phase 追加完毕后调用，传入 create_container 返回的容器ID。")
+    public String saveStudyPlan(
+            @P("容器ID，由 create_container 返回，容器类型必须为 study_plan") String containerId) {
+        Integer userId = SubAgentContext.currentUserId();
+        if (userId == null) {
+            return "错误：用户未登录";
+        }
+
+        JsonContainerStore store = SubAgentContext.currentStore();
+        if (store == null) {
+            return "错误：subagent 容器存储未绑定";
+        }
+
+        JsonContainer container = store.getContainer(containerId);
+        if (container == null) {
+            return "错误：容器不存在: " + containerId;
+        }
+        if (!"study_plan".equals(container.getContainerType())) {
+            return "错误：容器类型不匹配: 期望 study_plan，实际 " + container.getContainerType();
+        }
+
+        try {
+            JsonNode planRoot = container.assemble(objectMapper);
+            Integer planId = studyPlanService.parseAndSave(userId, planRoot,
+                    StudyPlanService.ValidationStrategy.COLLECT_ALL);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("planId", planId);
+            int phaseCount = 0;
+            if (planRoot.has("phases") && planRoot.get("phases").isArray()) {
+                phaseCount = planRoot.get("phases").size();
+                result.put("phaseCount", phaseCount);
+            }
+
+            SubAgentContext context = SubAgentContext.current();
+            if (context != null) {
+                context.setAttribute(ATTR_SAVE_RESULT, new SaveResult(planId, phaseCount));
+            }
+
+            log.info("[SaveStudyPlanTool] @Tool 保存学习计划成功，userId={}, planId={}", userId, planId);
+            return objectMapper.writeValueAsString(result);
+        } catch (StudyPlanParseException e) {
+            log.warn("[SaveStudyPlanTool] @Tool 学习计划解析失败: {}", e.getMessage());
+            return "学习计划保存失败: " + e.getMessage();
+        } catch (StudyPlanValidationException e) {
+            return buildValidationErrorMessage(e);
+        } catch (Exception e) {
+            log.error("[SaveStudyPlanTool] @Tool 保存学习计划异常: {}", e.getMessage(), e);
+            return "学习计划保存异常: " + e.getMessage();
+        }
+    }
+
+    /**
      * 校验容器是否存在且类型匹配
      *
      * @return null 表示校验通过；非 null 表示校验失败的 ToolCallResult
@@ -196,10 +273,17 @@ public class SaveStudyPlanTool implements Tool {
     }
 
     /**
-     * 构建校验失败的索引级错误响应
+     * 构建校验失败的索引级错误响应（旧版 {@link Tool} 接口入口使用）
      */
     private ToolCallResult buildValidationErrorResponse(ToolCallRequest request,
                                                          StudyPlanValidationException e) {
+        return ToolCallResult.failure(request.getToolCallId(), NAME, buildValidationErrorMessage(e));
+    }
+
+    /**
+     * 构建校验失败的索引级错误信息（两套入口共用）
+     */
+    private String buildValidationErrorMessage(StudyPlanValidationException e) {
         List<Map<String, Object>> errorList = new ArrayList<>();
         for (QuestionError err : e.getErrors()) {
             Map<String, Object> errorItem = new LinkedHashMap<>();
@@ -216,10 +300,9 @@ public class SaveStudyPlanTool implements Tool {
         try {
             String resultJson = objectMapper.writeValueAsString(response);
             log.warn("[SaveStudyPlanTool] 学习计划校验失败，返回 {} 个错误", errorList.size());
-            return ToolCallResult.failure(request.getToolCallId(), NAME, resultJson);
+            return resultJson;
         } catch (Exception ex) {
-            return ToolCallResult.failure(request.getToolCallId(), NAME,
-                    "学习计划校验失败，但错误信息序列化异常");
+            return "学习计划校验失败，但错误信息序列化异常";
         }
     }
 }

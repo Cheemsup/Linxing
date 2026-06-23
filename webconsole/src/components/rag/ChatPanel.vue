@@ -208,7 +208,7 @@
                         <span class="step-icon">{{ getStepIcon(step) }}</span>
                         <div class="clarify-content">
                           <div class="step-text">{{ formatStepText(step) }}</div>
-                          <div v-if="!getClarifyState(idx).submitted" class="clarify-input-area">
+                          <div v-if="!getClarifyState(idx).submitted && !getClarifyState(idx).expired" class="clarify-input-area">
                             <textarea
                               :value="getClarifyState(idx).answer"
                               @input="setClarifyAnswer(idx, $event.target.value)"
@@ -225,8 +225,11 @@
                               {{ getClarifyState(idx).submitting ? '提交中...' : '提交回复' }}
                             </button>
                           </div>
-                          <div v-else class="clarify-status clarify-done">
+                          <div v-else-if="getClarifyState(idx).submitted" class="clarify-status clarify-done">
                             已回复：{{ getClarifyState(idx).answer }}
+                          </div>
+                          <div v-else class="clarify-status clarify-expired">
+                            工作流已继续（澄清超时或已跳过），已基于现有信息生成初版计划
                           </div>
                         </div>
                       </div>
@@ -534,6 +537,9 @@ export default {
       this.thinkingBuffer = ''
       this.tokenGroups = {}
       this.currentStreamStepNumber = 0
+      // 每次新的流式请求开始时，清空 HumanInTheLoop 澄清输入框状态，
+      // 避免同页面会话中上一次工作流的澄清回复被复用到新工作流。
+      this.clarifyInputs = {}
       if (this.flushTimer) {
         clearTimeout(this.flushTimer)
         this.flushTimer = null
@@ -550,6 +556,27 @@ export default {
 
       this.tempUserMsg = { content: q }
       this.$nextTick(() => this.scrollToBottom())
+
+      // 若无活跃会话，先创建一个，确保 sessionId 在发送前就确定。
+      // 否则工作流暂停等待澄清时，前端 activeSessionId 仍为 null，
+      // submitClarify 会因缺少 sessionId 而无法提交回复。
+      if (!this.activeSessionId) {
+        try {
+          const title = q.length > 20 ? q.substring(0, 20) + '...' : q
+          const res = await chatSessionApi.create(title)
+          const newSession = res.data.data || res.data
+          if (newSession && newSession.id) {
+            this.activeSessionId = newSession.id
+            await this.fetchSessions()
+          }
+        } catch (e) {
+          console.error('创建会话失败:', e)
+          this.loading = false
+          this.tempUserMsg = null
+          alert('创建会话失败: ' + (e.response?.data?.msg || e.message))
+          return
+        }
+      }
 
       let parentMessageId
       if (chatTreeStore.state.branchParentId) {
@@ -618,6 +645,11 @@ export default {
               finalStep: data.finalStep,
               thinkingCollapsed: false
             })
+
+            // workflow_end 到来时，将所有未提交的 clarify 步骤标记为过期（超时或已跳过）
+            if (data.eventType === 'workflow_end') {
+              vm.expirePendingClarifications()
+            }
           }
 
           vm.$nextTick(() => vm.scrollToBottom())
@@ -768,7 +800,8 @@ export default {
           [idx]: {
             answer: '',
             submitting: false,
-            submitted: false
+            submitted: false,
+            expired: false
           }
         }
       }
@@ -777,6 +810,24 @@ export default {
 
     setClarifyAnswer(idx, value) {
       this.getClarifyState(idx).answer = value
+    },
+
+    /**
+     * 工作流结束时，将所有未提交的澄清步骤标记为过期（超时或已跳过），
+     * 禁用输入框并提示用户工作流已继续。
+     */
+    expirePendingClarifications() {
+      const updated = { ...this.clarifyInputs }
+      let changed = false
+      this.stepEvents.forEach((step, idx) => {
+        if (this.isClarifyStep(step) && updated[idx] && !updated[idx].submitted) {
+          updated[idx] = { ...updated[idx], expired: true }
+          changed = true
+        }
+      })
+      if (changed) {
+        this.clarifyInputs = updated
+      }
     },
 
     /**
@@ -799,11 +850,15 @@ export default {
         if (completed) {
           state.submitted = true
         } else {
-          console.warn('[Clarify] 未找到待处理的澄清请求，可能已超时')
-          state.submitted = true
+          // 后端未找到 pending 请求（可能已超时或 sessionId 不匹配），
+          // 不标记 submitted，允许用户重试或等待工作流结束
+          const msg = (res.data && res.data.data && res.data.data.message) || '未找到待处理的澄清请求，可能已超时'
+          console.warn('[Clarify]', msg)
+          alert(msg)
         }
       } catch (e) {
         console.error('[Clarify] 提交澄清回复失败:', e)
+        alert('提交澄清回复失败: ' + (e.response?.data?.msg || e.message))
       } finally {
         state.submitting = false
       }
@@ -882,8 +937,13 @@ export default {
           const success = sd.success !== undefined ? sd.success : true
           const roleMap = {
             clarify: '澄清提问',
+            clarify_answer: '澄清回复',
+            knowledge_search: '知识收集',
             plan: '计划生成',
-            exam: '测验生成'
+            plan_save: '保存计划',
+            plan_retry: '计划重试',
+            exam: '测验生成',
+            exam_save: '保存测验'
           }
           const roleLabel = roleMap[role] || role
           if (!triggered) {
@@ -892,19 +952,29 @@ export default {
           if (sd.question) {
             return `${roleLabel}：${sd.question}`
           }
+          // 工作流子步骤的详情文本保存在 answer / content / error 中
+          const detail = step.answer || step.content || step.error
+          if (detail) {
+            return `${roleLabel} ${success ? '✓' : '✗'}：${detail}`
+          }
           return `${roleLabel} ${success ? '✓' : '✗'}`
         }
         case 'workflow_end': {
           const planSaved = sd.plan_saved
           const examSaved = sd.exam_saved
           const examTriggered = sd.exam_triggered
+          const clarificationTimedOut = sd.clarification_timed_out
+          let suffix = ''
+          if (clarificationTimedOut) {
+            suffix = '（澄清超时，已生成初版）'
+          }
           if (planSaved && (!examTriggered || examSaved)) {
-            return `工作流完成：计划已保存${examTriggered ? '，测验已保存' : ''}`
+            return `工作流完成：计划已保存${examTriggered ? '，测验已保存' : ''}${suffix}`
           }
           if (planSaved && examTriggered && !examSaved) {
-            return '工作流完成：计划已保存，测验生成失败'
+            return `工作流完成：计划已保存，测验生成失败${suffix}`
           }
-          return `工作流结束${step.error ? '：' + step.error : ''}`
+          return `工作流结束${step.error ? '：' + step.error : ''}${suffix}`
         }
         default:
           return `${step.eventType}: ${JSON.stringify(step).substring(0, 80)}`
@@ -1631,6 +1701,12 @@ export default {
 
 .clarify-done {
   color: #2e7d32;
+}
+
+.clarify-expired {
+  background: #fff3e0;
+  border-color: #ffb74d;
+  color: #e65100;
 }
 
 .thinking-content {

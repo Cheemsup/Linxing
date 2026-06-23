@@ -20,6 +20,10 @@ public final class AgentStepTypes {
     public static final String SUB_AGENT = "sub_agent";
     public static final String WORKFLOW_END = "workflow_end";
 
+    // ---- 工作流 phase 标识 ----
+    public static final String PHASE_STUDY_PLAN = "study_plan";
+    public static final String PHASE_KNOWLEDGE_SEARCH = "knowledge_search";
+
     // ---- phase ----
     public static final String PHASE_THINKING = "thinking";
     public static final String PHASE_ANSWER = "answer";
@@ -43,4 +47,5 @@ public final class AgentStepTypes {
     // ---- error_code values ----
     public static final String ERR_LLM_CALL_FAILED = "llm_call_failed";
     public static final String ERR_MAX_STEPS_EXCEEDED = "max_steps_exceeded";
+    public static final String ERR_TOOL_TIMEOUT = "tool_timeout";
 }

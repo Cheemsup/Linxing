@@ -1,12 +1,13 @@
 package org.linxing.linxing_agent.agent.core;
 
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
+import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.JsonContainerStore;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class AgentContext {
+public class AgentContext implements JsonContainerStore {
 
     private final Integer userId;
     private final Integer sessionId;

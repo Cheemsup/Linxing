@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.tool.impl;
 
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
@@ -7,6 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
+import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
@@ -15,6 +17,7 @@ import org.linxing.linxing_agent.rag.service.ISearchService;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -84,28 +87,63 @@ public class RagSearchTool implements Tool {
         try {
             RagSearchArgs args = objectMapper.readValue(arguments, RagSearchArgs.class);
             query = args.getQuery();
-            topK = args.getTopK() > 0 ? args.getTopK() : 5;
+            topK = args.getTopK();
         } catch (Exception e) {
             log.warn("[RagSearchTool] 参数解析失败: {}", arguments, e);
             return ToolCallResult.failure(request.getToolCallId(), NAME,
                     "参数解析失败: " + e.getMessage());
         }
 
-        if (query == null || query.isBlank()) {
-            return ToolCallResult.failure(request.getToolCallId(), NAME, "查询关键词不能为空");
-        }
-
         try {
-            log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, topK);
-            List<SearchResult> results = searchService.search(userId, query, topK, true);
-
-            String resultJson = objectMapper.writeValueAsString(results);
+            String resultJson = doSearch(userId, query, topK);
             return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
+        } catch (IllegalArgumentException e) {
+            return ToolCallResult.failure(request.getToolCallId(), NAME, e.getMessage());
         } catch (Exception e) {
             log.error("[RagSearchTool] 搜索异常: {}", e.getMessage(), e);
             return ToolCallResult.failure(request.getToolCallId(), NAME,
                     "搜索执行失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 供 subagent 体系使用的 @Tool 入口。
+     * 与 {@link #execute(ToolCallRequest, AgentContext)} 共享 {@link ISearchService}，
+     * userId 从 {@link SubAgentContext} 读取，避免作为 LLM 可控参数暴露。
+     */
+    @dev.langchain4j.agent.tool.Tool("搜索用户个人知识库中的笔记和文档，返回相关的文本片段及其来源信息。"
+            + "当需要查找用户自己记录的笔记、文档内容时使用此工具。")
+    public String searchKnowledgeBase(
+            @P("搜索查询关键词，支持自然语言描述") String query,
+            @P("返回结果数量，默认为5，最大不超过10") int topK) {
+        Integer userId = SubAgentContext.currentUserId();
+        if (userId == null) {
+            return "用户未登录，无法搜索知识库";
+        }
+        if (query == null || query.isBlank()) {
+            return "查询关键词不能为空";
+        }
+        try {
+            return doSearch(userId, query, topK);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        } catch (Exception e) {
+            log.error("[RagSearchTool] @Tool 知识库搜索异常: {}", e.getMessage(), e);
+            return "知识库搜索失败: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 核心搜索逻辑，两个入口共用。
+     */
+    private String doSearch(Integer userId, String query, int topK) throws Exception {
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("查询关键词不能为空");
+        }
+        int resultCount = topK > 0 ? Math.min(topK, 10) : 5;
+        log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, resultCount);
+        List<SearchResult> results = searchService.search(userId, query, resultCount, true);
+        return objectMapper.writeValueAsString(results);
     }
 
     //TODO:实体类移到另外的包下

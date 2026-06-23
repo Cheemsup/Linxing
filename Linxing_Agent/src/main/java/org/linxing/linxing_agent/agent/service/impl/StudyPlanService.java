@@ -48,10 +48,16 @@ public class StudyPlanService implements IStudyPlanService {
     private static final Set<String> VALID_SOURCE_TYPES = Set.of("notes", "web_search", "mixed");
     private static final Set<String> VALID_PHASE_STATUSES = Set.of("not_started", "in_progress", "completed");
 
-    // ============================================================
-    // 列表查询
-    // ============================================================
 
+    /**
+     * 列表查询study_plan
+     *
+     * @param userId
+     * @param status
+     * @param page
+     * @param size
+     * @return
+     */
     @Override
     public PageResult<StudyPlanVO> listPlans(Integer userId, String status, int page, int size) {
         int offset = (page - 1) * size;
@@ -65,19 +71,23 @@ public class StudyPlanService implements IStudyPlanService {
         return PageResult.of(vos, total, page, size);
     }
 
-    // ============================================================
-    // 详情查询
-    // ============================================================
 
+    /**
+     * 获取学习计划的详情
+     *
+     * @param userId
+     * @param planId
+     * @return
+     */
     @Override
     public StudyPlanDetailVO getPlanDetail(Integer userId, Integer planId) {
-        StudyPlan plan = studyPlanMapper.selectById(userId, planId);
+        StudyPlan plan = studyPlanMapper.selectById(userId, planId);//获取plan的元信息
         if (plan == null) {
             throw new StudyPlanNotFoundException("学习计划不存在或无权访问: " + planId);
         }
 
-        List<StudyPlanPhase> phases = studyPlanPhaseMapper.selectByPlanId(planId);
-        List<StudyPlanProgress> progressList = studyPlanProgressMapper.selectByPlanId(planId, userId);
+        List<StudyPlanPhase> phases = studyPlanPhaseMapper.selectByPlanId(planId);//获取这个plan的各阶段的元信息
+        List<StudyPlanProgress> progressList = studyPlanProgressMapper.selectByPlanId(planId, userId);//获取该plan的各阶段的内容详情
 
         // 按 phaseId 索引进度
         Map<Integer, StudyPlanProgress> progressMap = progressList.stream()
@@ -110,10 +120,15 @@ public class StudyPlanService implements IStudyPlanService {
                 .build();
     }
 
-    // ============================================================
-    // 进度更新
-    // ============================================================
 
+    /**
+     * 梗系plan的状态，以plan的一个节点为单位
+     *
+     * @param userId
+     * @param planId
+     * @param phaseId
+     * @param body
+     */
     @Override
     @Transactional
     public void updatePhaseStatus(Integer userId, Integer planId, Integer phaseId, StudyPlanProgressUpdateRequest body) {
@@ -171,16 +186,27 @@ public class StudyPlanService implements IStudyPlanService {
         studyPlanMapper.updateStatus(planId, newStatus);
     }
 
-    // ============================================================
-    // 导出
-    // ============================================================
 
+    /**
+     * 导出markdown格式的plan内容
+     *
+     * @param userId
+     * @param planId
+     * @return
+     */
     @Override
     public String exportAsMarkdown(Integer userId, Integer planId) {
         StudyPlanDetailVO detail = getPlanDetail(userId, planId);
         return buildMarkdown(detail);
     }
 
+    /**
+     * 导出html格式的plan内容
+     *
+     * @param userId
+     * @param planId
+     * @return
+     */
     @Override
     public String exportAsHtml(Integer userId, Integer planId) {
         StudyPlanDetailVO detail = getPlanDetail(userId, planId);
@@ -416,9 +442,6 @@ public class StudyPlanService implements IStudyPlanService {
         return "[]";
     }
 
-    // ============================================================
-    // VO 转换
-    // ============================================================
 
     private StudyPlanVO toPlanVO(StudyPlan plan) {
         return StudyPlanVO.builder()
@@ -449,6 +472,14 @@ public class StudyPlanService implements IStudyPlanService {
                 .build();
     }
 
+
+    /**
+     * 统计plan的各个阶段的完成情况
+     *
+     * @param total
+     * @param progressList
+     * @return
+     */
     private StudyPlanDetailVO.ProgressStats buildProgressStats(int total, List<StudyPlanProgress> progressList) {
         int completed = 0, inProgress = 0, notStarted = 0;
         for (StudyPlanProgress p : progressList) {
@@ -468,9 +499,6 @@ public class StudyPlanService implements IStudyPlanService {
                 .build();
     }
 
-    // ============================================================
-    // 导出实现
-    // ============================================================
 
     /**
      * 构建 Markdown 格式的学习计划

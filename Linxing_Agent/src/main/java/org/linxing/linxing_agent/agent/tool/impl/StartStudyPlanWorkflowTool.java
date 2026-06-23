@@ -19,7 +19,6 @@ import java.util.Map;
 
 /**
  * 启动 study_plan 工作流的工具
- * <p>
  * 由主 ReAct 循环中的 LLM 调用，触发 study_plan 多 Agent 工作流。
  * 工作流内部编排 clarify → plan → exam 三个子 Agent，通过 SSE step 事件汇报进度。
  */
@@ -29,12 +28,14 @@ import java.util.Map;
 public class StartStudyPlanWorkflowTool implements Tool {
 
     private static final String NAME = "start_study_plan_workflow";
-    private static final String DESCRIPTION = "启动学习计划生成工作流。工作流会依次执行：澄清提问（可选）→ 计划生成 → 测验生成（可选），"
-            + "并自动持久化到数据库。调用后通过 SSE step 事件推送进度，无需再调用 save_study_plan。";
-    private static final String BRIEF = "启动学习计划生成工作流（含可选测验）";
+    private static final String DESCRIPTION = "启动学习计划生成工作流。工作流分两阶段执行："
+            + "阶段一知识收集（条件澄清提问 + 自主搜索知识库/联网）→ 阶段二内容生成（计划 + 可选测验）并持久化。"
+            + "调用后通过 SSE step 事件推送进度，无需再调用 save_study_plan。";
+    private static final String BRIEF = "启动学习计划生成工作流（含知识收集与可选测验）";
     private static final String WHEN_TO_USE = "当用户要求制定学习计划时调用此工具。"
             + "如果用户信息不足（如缺少目标、时长或素材），设置 needs_clarification=true 并提供 clarification_question，工作流会暂停等待用户回复。"
-            + "如果用户同时要求生成测验/题目，设置 generate_exam=true。";
+            + "如果用户同时要求生成测验/题目，设置 generate_exam=true。"
+            + "materials 参数可选：若为空，工作流内部会自主搜索知识库和联网收集素材；若已传入（如基于笔记的计划），则作为已有素材补充使用。";
 
     private final StudyPlanWorkflowService workflowService;
     private final ObjectMapper objectMapper;
@@ -69,7 +70,7 @@ public class StartStudyPlanWorkflowTool implements Tool {
                 .addProperty("duration", JsonStringSchema.builder()
                         .description("学习时长，如\"3个月\"。可选").build())
                 .addProperty("materials", JsonStringSchema.builder()
-                        .description("学习素材内容（笔记摘要、搜索结果等）。可选").build())
+                        .description("学习素材内容（可选）。若为空，工作流内部会自主搜索知识库和联网收集；若已传入则作为已有素材补充使用").build())
                 .addProperty("source_type", JsonStringSchema.builder()
                         .description("素材来源类型：notes / web_search / mixed / none。默认 none").build())
                 .addProperty("generate_exam", JsonBooleanSchema.builder()
@@ -122,6 +123,9 @@ public class StartStudyPlanWorkflowTool implements Tool {
             resultMap.put("planSaved", result.isPlanSaved());
             resultMap.put("examSaved", result.isExamSaved());
             resultMap.put("examTriggered", result.isExamTriggered());
+            resultMap.put("clarificationTriggered", result.isClarificationTriggered());
+            resultMap.put("clarificationTimedOut", result.isClarificationTimedOut());
+            resultMap.put("planRetryCount", result.getPlanRetryCount());
             if (result.getPlanId() != null) {
                 resultMap.put("planId", result.getPlanId());
             }
@@ -137,10 +141,19 @@ public class StartStudyPlanWorkflowTool implements Tool {
             if (result.getError() != null) {
                 resultMap.put("error", result.getError());
             }
+            if (result.getPlanParseError() != null) {
+                resultMap.put("planParseError", result.getPlanParseError());
+            }
+            if (result.getExamParseError() != null) {
+                resultMap.put("examParseError", result.getExamParseError());
+            }
 
             String resultJson = objectMapper.writeValueAsString(resultMap);
-            log.info("[StartStudyPlanWorkflowTool] 用户 {} 工作流完成: planSaved={}, examSaved={}",
-                    userId, result.isPlanSaved(), result.isExamSaved());
+            log.info("[StartStudyPlanWorkflowTool] 用户 {} 工作流完成: planSaved={}, examSaved={}, "
+                            + "clarificationTriggered={}, clarificationTimedOut={}, planRetryCount={}",
+                    userId, result.isPlanSaved(), result.isExamSaved(),
+                    result.isClarificationTriggered(), result.isClarificationTimedOut(),
+                    result.getPlanRetryCount());
 
             return ToolCallResult.success(request.getToolCallId(), NAME, resultJson);
 

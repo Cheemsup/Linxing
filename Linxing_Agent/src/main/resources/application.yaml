@@ -50,7 +50,7 @@ rag:
     default-provider: ${LLM_DEFAULT_PROVIDER}
     temperature: 0.3
     timeout-seconds: 60
-    max-tokens: 2048
+    max-tokens: 8192
     providers:
       minimax:
         model: ${MINIMAX_MODEL}
@@ -98,6 +98,9 @@ agent:
     path: ${AGENT_SKILLS_PATH:}
   disclosure:
     threshold: 5
+  tool:
+    timeout-seconds: ${AGENT_TOOL_TIMEOUT_SECONDS:180}
+    workflow-timeout-seconds: ${AGENT_TOOL_WORKFLOW_TIMEOUT_SECONDS:600}
   memory:
     type: ${AGENT_MEMORY_TYPE:window}
     max-messages: ${AGENT_MEMORY_MAX_MESSAGES:40}

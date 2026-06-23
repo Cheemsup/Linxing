@@ -27,7 +27,11 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class SseChatAdapter {
 
-    private static final long SSE_TIMEOUT_MS = 300_000L;
+    /**
+     * SSE 连接超时（毫秒）。需大于 study_plan 工作流的澄清等待超时（25 分钟），
+     * 确保澄清等待期间 SSE 不会提前断开。设为 30 分钟。
+     */
+    private static final long SSE_TIMEOUT_MS = 1_800_000L;
 
     private final IChatService chatService;
 

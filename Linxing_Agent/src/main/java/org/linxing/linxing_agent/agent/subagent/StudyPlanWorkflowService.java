@@ -4,36 +4,30 @@ import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.UntypedAgent;
 import dev.langchain4j.agentic.agent.ErrorContext;
 import dev.langchain4j.agentic.agent.ErrorRecoveryResult;
-import dev.langchain4j.agentic.observability.AgentInvocationError;
-import dev.langchain4j.agentic.observability.AgentListener;
-import dev.langchain4j.agentic.observability.AgentResponse;
-import dev.langchain4j.agentic.scope.AgenticScope;
-import dev.langchain4j.agentic.workflow.HumanInTheLoop;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepListener;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
-import org.linxing.linxing_agent.agent.service.impl.ExamService;
-import org.linxing.linxing_agent.agent.service.impl.StudyPlanService;
+import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
+import org.linxing.linxing_agent.agent.subagent.common.StepRecorder;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
- * study_plan 工作流编排服务
- * <p>
- * 使用 langchain4j-agentic 的 sequenceBuilder + conditionalBuilder + humanInTheLoopBuilder
- * 编排三个子 Agent：StudyPlanClarifyAgent（条件触发）→ PlanGeneratorAgent → ExamGeneratorAgent（条件触发）。
- * <p>
+ * study_plan 工作流顶层编排服务。
+ * 两阶段顺序编排，确保"最终 plan/exam 生成一定要建立在前一阶段充分收集知识内容和用户情况之后"：
+ *   阶段一 {@link KnowledgeCollectionWorkflowService}：条件澄清（仅一次）+ 知识收集 Agent 自主搜索，
+ *       产出 materials / clarification 写入 AgenticScope
+ *   阶段二 {@link ContentGenerationWorkflowService}：基于 scope 中的 materials/clarification 生成 plan
+ *       + 条件生成 exam，持久化并返回 {@link StudyPlanWorkflowResult}
+ * 
+ * 两阶段通过 {@code sequenceBuilder(StudyPlanWorkflowAgent.class).subAgents(knowledge, content)} 顺序编排，
+ * 
  * 工作流内部使用非流式 ChatModel，通过 AgentStepListener 以 step 事件向主循环 SSE 通道汇报进度。
  */
 @Service
@@ -42,31 +36,25 @@ import java.util.concurrent.TimeUnit;
 public class StudyPlanWorkflowService {
 
     private final LlmManager llmManager;
-    private final StudyPlanService studyPlanService;
-    private final ExamService examService;
+    private final AgentStepMapper agentStepMapper;
+    private final KnowledgeCollectionWorkflowService knowledgeCollectionWorkflowService;
+    private final ContentGenerationWorkflowService contentGenerationWorkflowService;
     private final PendingClarificationRegistry clarificationRegistry;
-    private final ObjectMapper objectMapper;
-
-    private static final String CLARIFY_AGENT_NAME = "StudyPlanClarifyAgent";
-    private static final String PLAN_AGENT_NAME = "PlanGeneratorAgent";
-    private static final String EXAM_AGENT_NAME = "ExamGeneratorAgent";
-    private static final String CLARIFY_TIMEOUT_REPLY = "无补充信息";
-    private static final long CLARIFY_TIMEOUT_SECONDS = 120;
 
     /**
-     * 启动 study_plan 工作流
+     * 启动 study_plan 工作流。
      *
-     * @param topic               学习主题
-     * @param goal                学习目标
-     * @param duration            学习时长
-     * @param sourceType          素材来源类型
-     * @param materials           素材内容
-     * @param generateExam        是否生成测验
-     * @param needsClarification  是否需要澄清
+     * @param topic                 学习主题
+     * @param goal                  学习目标
+     * @param duration              学习时长
+     * @param sourceType            素材来源类型
+     * @param materials             素材内容（可选，若为空则由知识收集阶段自主搜索）
+     * @param generateExam          是否生成测验
+     * @param needsClarification    是否需要澄清
      * @param clarificationQuestion 澄清问题
-     * @param userId              用户 ID
-     * @param sessionId           会话 ID（用于 HumanInTheLoop 回复路由）
-     * @param listener            SSE step 监听器
+     * @param userId                用户 ID
+     * @param sessionId             会话 ID（用于 HumanInTheLoop 回复路由）
+     * @param listener              SSE step 监听器
      * @return 工作流执行结果
      */
     public StudyPlanWorkflowResult startWorkflow(
@@ -77,85 +65,76 @@ public class StudyPlanWorkflowService {
 
         ChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
 
-        // 推送 workflow_start 事件
-        pushEvent(listener, AgentStepTypes.WORKFLOW_START, "study_plan",
+        log.info("study_plan 工作流启动（两阶段编排）: userId={}, sessionId={}, topic='{}', generateExam={}, needsClarification={}",
+                userId, sessionId, topic, generateExam, needsClarification);
+
+        // 绑定 subagent 线程上下文：userId、sessionId、容器存储均不向 LLM 暴露
+        SubAgentContext.bind(userId, sessionId);
+
+        try {
+            return doStartWorkflow(
+                    topic, goal, duration, sourceType, materials,
+                    generateExam, needsClarification, clarificationQuestion,
+                    userId, sessionId, listener, chatModel);
+        } finally {
+            SubAgentContext.clear();
+            // 工作流结束时强制清理本会话的待澄清请求，避免网络中断/客户端重试时
+            // 旧 pending future 被后续同 session 工作流复用或阻塞。
+            if (sessionId != null) {
+                clarificationRegistry.cancel(String.valueOf(sessionId));
+            }
+        }
+    }
+
+    private StudyPlanWorkflowResult doStartWorkflow(
+            String topic, String goal, String duration, String sourceType,
+            String materials, boolean generateExam, boolean needsClarification,
+            String clarificationQuestion, Integer userId, Integer sessionId,
+            AgentStepListener listener, ChatModel chatModel) {
+
+        // 工作流步骤记录器：统一向 SSE 推送并持久化到 agent_steps
+        //TODO：考虑是否应该改为单例模式
+        StepRecorder recorder = new StepRecorder(listener, agentStepMapper, sessionId);
+
+        // 推送 workflow_start 事件，使得前端能够显示本工作流状态
+        recorder.emit(AgentStepTypes.WORKFLOW_START, AgentStepTypes.PHASE_STUDY_PLAN,
                 buildWorkflowStartData(topic, generateExam, needsClarification),
                 null, null, false);
 
-        // ---- 构建子 Agent ----
+        // ---- 知识收集（信息补充 + 自主搜索）----
+        UntypedAgent knowledgeWorkflowAgent = knowledgeCollectionWorkflowService
+                .build(recorder, chatModel, sessionId);
 
-        // 计划生成 Agent
-        PlanGeneratorAgent planAgent = AgenticServices
-                .agentBuilder(PlanGeneratorAgent.class)
-                .chatModel(chatModel)
-                .outputKey("plan_json")
-                .defaultKeyValue("clarification", CLARIFY_TIMEOUT_REPLY)
-                .listener(createAgentListener(PLAN_AGENT_NAME, "plan", "plan_json", listener))
-                .build();
+        // ---- 内容生成（plan + 条件 exam + 持久化）----
+        UntypedAgent contentWorkflowAgent = contentGenerationWorkflowService
+                .build(recorder, chatModel, userId, generateExam);
 
-        // 测验生成 Agent
-        ExamGeneratorAgent examAgent = AgenticServices
-                .agentBuilder(ExamGeneratorAgent.class)
-                .chatModel(chatModel)
-                .outputKey("exam_json")
-                .listener(createAgentListener(EXAM_AGENT_NAME, "exam", "exam_json", listener))
-                .build();
-
-        // HumanInTheLoop 澄清 Agent
-        HumanInTheLoop clarifyAgent = AgenticServices
-                .humanInTheLoopBuilder()
-                .description("An agent that asks the user for missing information about the study plan")
-                .outputKey("clarification")
-                .responseProvider(scope -> {
-                    String question = scope.readState("clarification_question", "请补充您的学习信息");
-                    // 推送 sub_agent 事件，携带澄清问题
-                    pushEvent(listener, AgentStepTypes.SUB_AGENT, "study_plan",
-                            buildSubAgentData(CLARIFY_AGENT_NAME, "clarify", true,
-                                    "clarification", true, question),
-                            null, null, false);
-                    // 注册 pending future，等待用户回复
-                    CompletableFuture<String> future = new CompletableFuture<>();
-                    clarificationRegistry.register(String.valueOf(sessionId), question, future);
-                    try {
-                        return future.get(CLARIFY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                    } catch (Exception e) {
-                        log.warn("Clarification timeout for session {}", sessionId, e);
-                        return CLARIFY_TIMEOUT_REPLY;
-                    }
-                })
-                .build();
-
-        // 条件包装：needs_clarification → clarifyAgent
-        UntypedAgent clarifyConditional = AgenticServices
-                .conditionalBuilder()
-                .subAgents(
-                        scope -> scope.readState("needs_clarification", false),
-                        clarifyAgent
-                )
-                .build();
-
-        // 条件包装：generate_exam → examAgent
-        UntypedAgent examConditional = AgenticServices
-                .conditionalBuilder()
-                .subAgents(
-                        scope -> scope.readState("generate_exam", false),
-                        examAgent
-                )
-                .build();
-
-        // ---- 构建主工作流（顺序编排）----
+        // ---- 顶层顺序编排：知识收集 → 内容生成 ----
         StudyPlanWorkflowAgent workflow = AgenticServices
                 .sequenceBuilder(StudyPlanWorkflowAgent.class)
-                .subAgents(clarifyConditional, planAgent, examConditional)
-                .output(scope -> persistResults(scope, userId, generateExam, listener))
-                .errorHandler(errorContext -> {
-                    log.error("Agent error in workflow: {}", errorContext.agentName(),
-                            errorContext.exception());
-                    pushEvent(listener, AgentStepTypes.SUB_AGENT, "study_plan",
-                            buildSubAgentData(errorContext.agentName(), "unknown",
-                                    true, null, false, null),
-                            null, getErrorMessage(errorContext), false);
-                    return ErrorRecoveryResult.result(null);
+                .subAgents(knowledgeWorkflowAgent, contentWorkflowAgent)
+                .errorHandler(errorContext -> {//TODO:目前运行现状还是显示“工作流执行失败: 内部 Agent 异常被 errorHandler 吞掉”
+                    String agentName = errorContext.agentName();
+                    Throwable ex = errorContext.exception();
+                    String errMsg = ex != null ? ex.getMessage() : "unknown error";
+                    log.error("Agent error in workflow: agent={}, error={}", agentName, errMsg, ex);
+                    recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+                            StepRecorder.buildSubAgentData(agentName, "error",
+                                    false, null, false, errMsg),
+                            null, "Agent [" + agentName + "] 执行失败: " + errMsg, true);
+                    // 返回包含错误信息的结果，而非 null，避免异常信息被吞掉
+                    StudyPlanWorkflowResult errorResult = StudyPlanWorkflowResult.builder()
+                            .planSaved(false)
+                            .examSaved(false)
+                            .examTriggered(generateExam)
+                            .clarificationTriggered(needsClarification)
+                            .error("Agent [" + agentName + "] 执行失败: " + errMsg)
+                            .build();
+                    SubAgentContext ctx = SubAgentContext.current();
+                    if (ctx != null) {
+                        ctx.setAttribute("study_plan_workflow_result", errorResult);
+                    }
+                    return ErrorRecoveryResult.result(errorResult);
                 })
                 .build();
 
@@ -172,132 +151,41 @@ public class StudyPlanWorkflowService {
                     .planSaved(false)
                     .examSaved(false)
                     .examTriggered(generateExam)
+                    .clarificationTriggered(needsClarification)
                     .error("工作流执行失败: " + e.getMessage())
                     .build();
         }
 
+        // AgenticServices sequenceBuilder 在未指定 output() 时 execute() 可能返回 null，
+        // 但内容生成阶段已通过 SubAgentContext 保存了实际结果，优先从中读取。
+        if (result == null) {
+            SubAgentContext ctx = SubAgentContext.current();
+            Object saved = ctx != null ? ctx.getAttribute("study_plan_workflow_result") : null;
+            if (saved instanceof StudyPlanWorkflowResult) {
+                result = (StudyPlanWorkflowResult) saved;
+                log.info("Workflow execute() returned null, recovered result from SubAgentContext: planSaved={}, examSaved={}",
+                        result.isPlanSaved(), result.isExamSaved());
+            } else {
+                log.error("Workflow returned null result and no result found in SubAgentContext");
+                result = StudyPlanWorkflowResult.builder()
+                        .planSaved(false)
+                        .examSaved(false)
+                        .examTriggered(generateExam)
+                        .clarificationTriggered(needsClarification)
+                        .error("工作流执行失败: 内部 Agent 异常被 errorHandler 吞掉")
+                        .build();
+            }
+        }
+
         // 推送 workflow_end 事件
-        pushEvent(listener, AgentStepTypes.WORKFLOW_END, "study_plan",
+        recorder.emit(AgentStepTypes.WORKFLOW_END, AgentStepTypes.PHASE_STUDY_PLAN,
                 buildWorkflowEndData(result),
                 null, result.getError(), true);
 
         return result;
     }
 
-    /**
-     * output() 函数：解析 plan_json / exam_json 并持久化
-     */
-    private StudyPlanWorkflowResult persistResults(AgenticScope scope, Integer userId,
-                                                   boolean generateExam, AgentStepListener listener) {
-        StudyPlanWorkflowResult.StudyPlanWorkflowResultBuilder builder = StudyPlanWorkflowResult.builder()
-                .examTriggered(generateExam);
-
-        // ---- 解析并保存计划 ----
-        String planJson = scope.readState("plan_json", "");
-        if (planJson != null && !planJson.isBlank()) {
-            try {
-                Integer planId = studyPlanService.parseAndSave(userId, planJson);
-                builder.planId(planId).planSaved(true);
-                // 统计阶段数
-                try {
-                    JsonNode planRoot = objectMapper.readTree(planJson);
-                    if (planRoot.has("phases") && planRoot.get("phases").isArray()) {
-                        builder.phaseCount(planRoot.get("phases").size());
-                    }
-                } catch (Exception ignored) {
-                }
-                log.info("Plan saved with id {} for user {}", planId, userId);
-
-                // ---- 解析并保存测验（如果触发）----
-                if (generateExam) {
-                    String examJson = scope.readState("exam_json", "");
-                    if (examJson != null && !examJson.isBlank()) {
-                        try {
-                            JsonNode examRoot = objectMapper.readTree(examJson);
-                            Integer examId = examService.parseAndSave(userId, examRoot,
-                                    ExamService.ValidationStrategy.FAIL_FAST, planId);
-                            builder.examId(examId).examSaved(true);
-                            // 统计题目数
-                            if (examRoot.has("questions") && examRoot.get("questions").isArray()) {
-                                builder.questionCount(examRoot.get("questions").size());
-                            }
-                            log.info("Exam saved with id {} for plan {}", examId, planId);
-                        } catch (Exception e) {
-                            log.error("Failed to save exam", e);
-                            builder.examSaved(false).error("测验保存失败: " + e.getMessage());
-                        }
-                    } else {
-                        builder.examSaved(false).error("测验生成结果为空");
-                    }
-                }
-            } catch (Exception e) {
-                log.error("Failed to save plan", e);
-                builder.planSaved(false).error("计划保存失败: " + e.getMessage());
-            }
-        } else {
-            builder.planSaved(false).error("计划生成结果为空");
-        }
-
-        return builder.build();
-    }
-
-    // ==================== Agent Listener 工厂 ====================
-
-    /**
-     * 为子 Agent 创建 AgentListener，在执行完成后推送 sub_agent 事件
-     */
-    private AgentListener createAgentListener(String agentName, String agentRole,
-                                              String outputKey, AgentStepListener listener) {
-        return new AgentListener() {
-            @Override
-            public void afterAgentInvocation(AgentResponse response) {
-                pushEvent(listener, AgentStepTypes.SUB_AGENT, "study_plan",
-                        buildSubAgentData(agentName, agentRole, true, outputKey, true, null),
-                        null, null, false);
-            }
-
-            @Override
-            public void onAgentInvocationError(AgentInvocationError error) {
-                pushEvent(listener, AgentStepTypes.SUB_AGENT, "study_plan",
-                        buildSubAgentData(agentName, agentRole, true, outputKey, false, null),
-                        null, getErrorMessage(error), false);
-            }
-        };
-    }
-
-    // ==================== 事件推送辅助方法 ====================
-
-    private void pushEvent(AgentStepListener listener, String eventType, String phase,
-                           Map<String, Object> stepData, String answer, String error, boolean finalStep) {
-        if (listener != null) {
-            listener.onStep(AgentStepEvent.builder()
-                    .eventType(eventType)
-                    .stepNumber(0)
-                    .phase(phase)
-                    .stepData(stepData)
-                    .answer(answer)
-                    .error(error)
-                    .finalStep(finalStep)
-                    .build());
-        }
-    }
-
-    private Map<String, Object> buildSubAgentData(String agentName, String agentRole,
-                                                  boolean triggered, String outputKey,
-                                                  boolean success, String question) {
-        Map<String, Object> data = new HashMap<>();
-        data.put(AgentStepTypes.KEY_AGENT_NAME, agentName);
-        data.put(AgentStepTypes.KEY_AGENT_ROLE, agentRole);
-        data.put(AgentStepTypes.KEY_TRIGGERED, triggered);
-        if (outputKey != null) {
-            data.put(AgentStepTypes.KEY_OUTPUT_KEY, outputKey);
-        }
-        data.put(AgentStepTypes.KEY_SUCCESS, success);
-        if (question != null) {
-            data.put(AgentStepTypes.KEY_QUESTION, question);
-        }
-        return data;
-    }
+    // ==================== 工作流数据构建 ====================
 
     private Map<String, Object> buildWorkflowStartData(String topic, boolean generateExam,
                                                        boolean needsClarification) {
@@ -315,16 +203,14 @@ public class StudyPlanWorkflowService {
         data.put("plan_id", result.getPlanId() != null ? result.getPlanId() : -1);
         data.put("exam_id", result.getExamId() != null ? result.getExamId() : -1);
         data.put("exam_triggered", result.isExamTriggered());
+        data.put("clarification_triggered", result.isClarificationTriggered());
+        data.put("clarification_timed_out", result.isClarificationTimedOut());
+        data.put("plan_retry_count", result.getPlanRetryCount());
         return data;
     }
 
     private String getErrorMessage(ErrorContext errorContext) {
         Throwable ex = errorContext.exception();
-        return ex != null ? ex.getMessage() : "unknown error";
-    }
-
-    private String getErrorMessage(AgentInvocationError error) {
-        Throwable ex = error.error();
         return ex != null ? ex.getMessage() : "unknown error";
     }
 }

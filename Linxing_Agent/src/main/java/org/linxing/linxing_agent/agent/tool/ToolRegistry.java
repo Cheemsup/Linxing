@@ -4,6 +4,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
+import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.stereotype.Component;
@@ -39,6 +40,11 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>,
         }
         Map<String, Tool> toolBeans = event.getApplicationContext().getBeansOfType(Tool.class);
         toolBeans.forEach((beanName, tool) -> {
+            Class<?> beanClass = AopProxyUtils.ultimateTargetClass(tool);
+            if (beanClass.isAnnotationPresent(Deprecated.class)) {
+                log.info("[ToolRegistry] 跳过已废弃工具: {}", beanClass.getSimpleName());
+                return;
+            }
             ToolSpec existing = tools.get(tool.name());
             if (existing != null) {
                 throw new IllegalStateException(

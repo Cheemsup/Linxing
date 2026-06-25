@@ -17,14 +17,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 待澄清请求注册表
- * <p>
- * 管理 HumanInTheLoop 交互的 pending 状态：
- * <ul>
- *   <li>工作流的 responseProvider 注册一个问题 + CompletableFuture，阻塞等待用户回复</li>
- *   <li>clarify 端点收到用户回复后，通过 clarificationId 完成对应 future</li>
- *   <li>注册时启动超时定时任务，超时后自动 complete(默认值) 并移除，避免内存泄漏</li>
- *   <li>同一 clarificationId 重复注册时，先取消旧的 pending 请求（版本/陈旧校验）</li>
- * </ul>
+ * 能够管理 HumanInTheLoop 交互的 pending 状态：包括超时澄清时的上下文清除、避免同一对话流中的内容残留
+ *
+ * TODO：后续需要跟随HumanInTheLoop一同移动到core包下，因为这是整个系统的公共性质组件
  */
 @Slf4j
 @Component
@@ -108,7 +103,7 @@ public class PendingClarificationRegistry {
     }
 
     /**
-     * 取消待澄清请求（工作流异常/中断时调用）
+     * 清除待澄清内容（工作流异常/中断时调用）
      */
     public void cancel(String clarificationId) {
         PendingClarification pc = pending.remove(clarificationId);

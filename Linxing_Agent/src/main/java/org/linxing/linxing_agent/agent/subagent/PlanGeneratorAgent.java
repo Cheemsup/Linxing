@@ -7,11 +7,7 @@ import dev.langchain4j.agentic.Agent;
 
 /**
  * 学习计划生成 Agent
- * <p>
- * 读取 AgenticScope 中的 topic / goal / duration / source_type / materials / clarification，
- * 调用 LLM 通过容器工具分批构建结构化学习计划，最终返回 container_id 写入 outputKey "plan_container_id"。
- * <p>
- * 使用容器工具分批构建可绕过 max_tokens 限制，避免长 JSON 被截断导致解析失败。
+ * 读取 AgenticScope 中的 topic / goal / duration / source_type / materials / clarification，调用 LLM 通过JSON容器工具分批构建结构化学习计划，最终返回 container_id 写入 outputKey "plan_container_id"。
  */
 public interface PlanGeneratorAgent {
 

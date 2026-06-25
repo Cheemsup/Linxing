@@ -29,15 +29,7 @@ import java.util.Map;
 
 /**
  * 保存学习计划的工具。
- * <p>
- * 同时支持两套调用体系：
- * <ol>
- *   <li>旧版 {@link Tool} 接口：由 {@link org.linxing.linxing_agent.agent.tool.ToolRegistry} 注册，
- *       供主对话 Agent 的渐进式披露模式调用。</li>
- *   <li>LangChain4j {@link dev.langchain4j.agent.tool.Tool} 注解方法：
- *       供 {@link org.linxing.linxing_agent.agent.subagent.PlanGeneratorAgent} 等 subagent
- *       在容器构建完成后直接保存学习计划。</li>
- * </ol>
+ * 同时支持两套调用体系：主循环的直接调用、langchain4j的@Agent系列调用
  */
 @Slf4j
 @Component

@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * subagent 工作流执行期间的线程上下文。1、承载不应该暴露给大模型但是业务代码需要的信息，如userID；2、JSONContainer需要使用
+ * subagent 工作流执行期间的线程上下文。1、承载不应该暴露给大模型但是业务代码需要的信息，如userID；2、JSONContainer需要依靠这个载体实现
  */
 public final class SubAgentContext implements JsonContainerStore {
 

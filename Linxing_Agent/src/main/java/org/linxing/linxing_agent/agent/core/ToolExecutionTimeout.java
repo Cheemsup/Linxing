@@ -17,24 +17,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 工具执行超时封装组件（watchdog 模式 + 分段计时）
- * <p>
- * 使用独立线程池执行工具，watchdog 定时扣减预算实现超时控制：
- * <ul>
- *   <li>工作线程执行工具前创建 {@link ToolTimeoutContext} 并设置到 ThreadLocal</li>
- *   <li>watchdog 每 {@link #TICK_NANOS} 纳秒检查一次：非暂停状态扣减预算，预算耗尽则取消工作 future</li>
- *   <li>HumanInTheLoop 等待期间通过 {@link ToolTimeoutContext#pause()} 暂停计时，不扣减预算</li>
- *   <li>工具执行完成后取消 watchdog 任务</li>
- * </ul>
- * <p>
- * 设计目标：工具超时只计算实际执行时间，不包含 HumanInTheLoop 等待用户回复的时间。
+ * 工具执行超时封装组件（watchdog 模式 + 分段计时），使用独立线程池执行工具，watchdog 定时扣减预算实现超时控制：
+ * 工具超时只计算实际执行时间，不包含 HumanInTheLoop 等待用户回复的时间。
  */
 @Slf4j
 @Component
 public class ToolExecutionTimeout {
 
-    /** watchdog 检查间隔（纳秒），100ms */
-    private static final long TICK_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
+    /** watchdog 检查间隔（毫秒），1000ms */
+    private static final long TICK = TimeUnit.SECONDS.toMillis(1000);
 
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
@@ -80,7 +71,7 @@ public class ToolExecutionTimeout {
         executor.submit(() -> {
             CONTEXT_HOLDER.set(timeoutCtx);
             try {
-                ToolCallResult result = toolSpec.execute(request, context);
+                ToolCallResult result = toolSpec.execute(request, context);//工具执行
                 if (!future.isDone()) {
                     future.complete(result);
                 }
@@ -97,14 +88,14 @@ public class ToolExecutionTimeout {
             if (future.isDone()) {
                 return;
             }
-            if (timeoutCtx.decrement(TICK_NANOS)) {
+            if (timeoutCtx.decrement(TICK)) {
                 // 预算耗尽，触发超时
                 if (timeoutCtx.triggerTimeout()) {
                     log.warn("[ToolExecutionTimeout] 工具 {} 执行超时（预算{}秒已耗尽），已打断",
                             toolName, timeoutSeconds);
                 }
             }
-        }, TICK_NANOS, TICK_NANOS, TimeUnit.NANOSECONDS);
+        }, TICK, TICK, TimeUnit.NANOSECONDS);
 
         // 主线程阻塞等待结果
         try {

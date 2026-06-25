@@ -6,17 +6,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 工具执行超时上下文
- * <p>
- * 用于实现"分段计时"：ToolExecutionTimeout 只计算工具实际执行时间，
- * HumanInTheLoop 等待期间通过 {@link #pause()} 暂停计时，{@link #resume()} 恢复计时。
- * <p>
- * 工作流程：
- * <ol>
- *   <li>ToolExecutionTimeout 在工作线程执行工具前创建此上下文，并设置到 ThreadLocal</li>
- *   <li>watchdog 线程定期（每100ms）检查：非暂停状态扣减预算，预算耗尽则取消工作 future</li>
- *   <li>HumanInTheLoop 在阻塞等待用户回复前调用 {@link #pause()}，恢复后调用 {@link #resume()}</li>
- *   <li>工具执行完成后，ToolExecutionTimeout 取消 watchdog 任务</li>
- * </ol>
+ * 用于实现"分段计时"：ToolExecutionTimeout 只计算工具实际执行时间，遇到 HumanInTheLoop 期间暂停计时，结束后恢复计时。
  */
 public class ToolTimeoutContext {
 

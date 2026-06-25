@@ -7,14 +7,8 @@ import dev.langchain4j.service.V;
 
 /**
  * 知识收集 Agent。
- * <p>
- * 装配 {@link org.linxing.linxing_agent.agent.tool.impl.WebSearchTool} 与
- * {@link org.linxing.linxing_agent.agent.tool.impl.RagSearchTool} 后，
- * LLM 在内部 tool-calling 循环中自主决定搜索次数与关键词，
- * 将收集到的素材整理为结构化摘要，写入 outputKey "materials"。
- * <p>
- * 与 {@link PlanGeneratorAgent} 的区别：本 Agent 不直接生成计划 JSON，
- * 只负责为后续内容生成阶段准备素材背景。
+ * 装配 网络搜索和本地RAG搜索的tool，LLM 在内部 tool-calling 循环中自主决定搜索次数与关键词，将收集到的素材整理为结构化摘要，写入 outputKey "materials"。
+ * 本 Agent 不直接生成计划 JSON，只负责为后续内容生成阶段准备素材背景。
  */
 public interface KnowledgeCollectorAgent {
 

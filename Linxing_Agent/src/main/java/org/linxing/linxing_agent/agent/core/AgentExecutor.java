@@ -12,8 +12,6 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.WindowMemory;
 import org.linxing.linxing_agent.agent.memory.SummaryMemory;
-import org.linxing.linxing_agent.agent.entity.AgentStep;
-import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.catalog.Catalog;
 import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
@@ -23,7 +21,6 @@ import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.linxing.linxing_agent.agent.tool.ToolRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolSpec;
-import org.linxing.linxing_agent.agent.vo.AgentStepVO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -77,18 +74,16 @@ public class AgentExecutor {
     private final ToolRegistry toolRegistry;
     private final SkillRegistry skillRegistry;
     private final List<CatalogProvider> catalogProviders;
-    private final AgentStepMapper agentStepMapper;
     private final ObjectMapper objectMapper;
     private final ToolExecutionTimeout toolExecutionTimeout;
 
     public AgentExecutor(ToolRegistry toolRegistry, SkillRegistry skillRegistry,
                          List<CatalogProvider> catalogProviders,
-                         AgentStepMapper agentStepMapper, ObjectMapper objectMapper,
+                         ObjectMapper objectMapper,
                          ToolExecutionTimeout toolExecutionTimeout) {
         this.toolRegistry = toolRegistry;
         this.skillRegistry = skillRegistry;
         this.catalogProviders = catalogProviders;
-        this.agentStepMapper = agentStepMapper;
         this.objectMapper = objectMapper;
         this.toolExecutionTimeout = toolExecutionTimeout;
     }
@@ -101,7 +96,8 @@ public class AgentExecutor {
      * @return
      */
     public AgentResult execute(AgentContext context, OpenAiStreamingChatModel chatModel, AgentStepListener listener) {
-        List<AgentStepVO> recordedSteps = new ArrayList<>();
+        // 从 context 取统一步骤记录器：主循环与工作流共享同一实例，step_order 单调递增
+        StepRecorder recorder = context.getStepRecorder();
 
         //根据工具+技能总数决定是否启用渐进披露模式
         int totalCount = toolRegistry.size() + skillRegistry.size();
@@ -124,6 +120,8 @@ public class AgentExecutor {
         while (stepNumber < MAX_STEPS) {
             stepNumber++;
 
+            //推送 thinking 空占位 SSE（前端"思考中"状态），不入库不消耗 order
+            //thinking 的 DB 持久化在 LLM 完成后由 recorder.recordThinkingContent 处理
             listener.onStep(AgentStepEvent.builder()
                     .eventType(AgentStepTypes.THINKING)
                     .stepNumber(stepNumber)
@@ -147,24 +145,19 @@ public class AgentExecutor {
                 response = future.await(600, TimeUnit.SECONDS);
             } catch (Exception e) {
                 log.error("[AgentExecutor] LLM调用失败: {}", e.getMessage(), e);
-                listener.onStep(AgentStepEvent.builder()
+                recorder.record(AgentStepEvent.builder()
                         .eventType(AgentStepTypes.ERROR)
                         .stepNumber(stepNumber)
                         .phase(AgentStepTypes.PHASE_THINKING)
-                        .error(e.getMessage())
+                        .error("LLM调用失败: " + e.getMessage())
                         .stepData(Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_LLM_CALL_FAILED))
                         .finalStep(true)
                         .build());
-                AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                        AgentStepTypes.ERROR, "LLM调用失败: " + e.getMessage(),
-                        Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_LLM_CALL_FAILED));
-                agentStepMapper.insert(step);
-                recordedSteps.add(toStepVO(step));
 
                 return AgentResult.builder()
                         .answer("抱歉，处理您的问题时出现了错误，请稍后重试。")
                         .sourcesJson("[]")
-                        .steps(recordedSteps)
+                        .steps(recorder.getRecordedSteps())
                         .totalSteps(stepNumber)
                         .build();
             }
@@ -174,13 +167,13 @@ public class AgentExecutor {
             log.debug("[DEBUG] 步骤{} hasTool={}", stepNumber, aiMessage.hasToolExecutionRequests());
 
             //持久化推理/思考内容到agent_steps（仅当LLM产生了thinking token时）
+            //thinking 步骤 SSE（循环开头空占位 + 流式token通道）与 DB（完整文本）语义分离，
+            //用 recorder.recordThinkingContent 仅做 DB 持久化 + VO 累积，不推 SSE（避免重复）。
             if (future.hasThinkingContent()) {
                 String thinkingText = future.getThinkingContent();
-                AgentStep thinkingStep = buildStep(context.getSessionId(), null, stepNumber,
-                        AgentStepTypes.THINKING, truncate(thinkingText, 8000),
+                recorder.recordThinkingContent(
+                        truncate(thinkingText, 8000),
                         Map.of("thinking_tokens", thinkingText.length()));
-                agentStepMapper.insert(thinkingStep);
-                recordedSteps.add(toStepVO(thinkingStep));
             }
 
             if (aiMessage.hasToolExecutionRequests()) {
@@ -190,10 +183,12 @@ public class AgentExecutor {
 
                 for (ToolExecutionRequest toolReq : toolRequests) {
 
-                    listener.onStep(AgentStepEvent.builder()
+                    // 推送 tool_call 事件（SSE + 入库）：content 为请求参数，执行前已知
+                    recorder.record(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_CALL)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)
+                            .answer(toolReq.arguments())
                             .stepData(Map.of(
                                     AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
                                     AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
@@ -218,7 +213,7 @@ public class AgentExecutor {
                                 ? workflowToolTimeoutSeconds
                                 : toolTimeoutSeconds;
                         toolResult = toolExecutionTimeout.executeWithTimeout(
-                                toolSpec, toolCallRequest, context, timeout);
+                                toolSpec, toolCallRequest, context, timeout);//将tool传入带计时的执行类中执行
                     }
 
                     //渐进披露模式：resolve成功后提取被解析的工具名并动态激活
@@ -245,10 +240,13 @@ public class AgentExecutor {
                             ? toolResult.getResult()
                             : "Error: " + toolResult.getError();
 
-                    listener.onStep(AgentStepEvent.builder()
+                    // 推送 tool_result 事件（SSE + 入库）：成功用 answer 存结果，失败用 error 存错误
+                    recorder.record(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_RESULT)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)
+                            .answer(toolResult.isSuccess() ? toolResult.getResult() : null)
+                            .error(toolResult.isSuccess() ? null : toolResult.getError())
                             .stepData(Map.of(
                                     AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
                                     AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
@@ -258,27 +256,6 @@ public class AgentExecutor {
                     //工具执行结果注入记忆，供LLM下一轮参考
                     ToolExecutionResultMessage resultMsg = ToolExecutionResultMessage.from(toolReq, resultText);
                     context.getMemory().add(resultMsg);
-
-                    //记录工具调用步骤到数据库
-                    String stepContent = toolResult.isSuccess()
-                            ? toolReq.arguments()
-                            : "Error: " + toolResult.getError();
-                    AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                            AgentStepTypes.TOOL_CALL, stepContent,
-                            Map.of(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
-                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name()));
-                    agentStepMapper.insert(step);
-                    recordedSteps.add(toStepVO(step));
-
-                    //记录工具返回结果步骤
-                    AgentStep obsStep = buildStep(context.getSessionId(), null, stepNumber,
-                            AgentStepTypes.TOOL_RESULT,
-                            toolResult.isSuccess() ? toolResult.getResult() : toolResult.getError(),
-                            Map.of(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
-                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
-                                    AgentStepTypes.KEY_IS_SUCCESS, toolResult.isSuccess()));
-                    agentStepMapper.insert(obsStep);
-                    recordedSteps.add(toStepVO(obsStep));
                 }
 
                 //SummaryMemory在工具调用后尝试摘要压缩，避免上下文过长
@@ -292,7 +269,7 @@ public class AgentExecutor {
                     answer = "抱歉，无法生成回答。";
                 }
 
-                listener.onStep(AgentStepEvent.builder()
+                recorder.record(AgentStepEvent.builder()
                         .eventType(AgentStepTypes.FINAL)
                         .stepNumber(stepNumber)
                         .phase(AgentStepTypes.PHASE_ANSWER)
@@ -305,7 +282,7 @@ public class AgentExecutor {
                 return AgentResult.builder()
                         .answer(answer)
                         .sourcesJson("[]")
-                        .steps(recordedSteps)
+                        .steps(recorder.getRecordedSteps())
                         .totalSteps(stepNumber)
                         .build();
             }
@@ -313,7 +290,7 @@ public class AgentExecutor {
 
         //超过最大步骤数，兜底返回
         log.warn("[AgentExecutor] 超过最大步骤数 {}!", MAX_STEPS);
-        listener.onStep(AgentStepEvent.builder()
+        recorder.record(AgentStepEvent.builder()
                 .eventType(AgentStepTypes.ERROR)
                 .stepNumber(stepNumber)
                 .phase(AgentStepTypes.PHASE_THINKING)
@@ -322,17 +299,11 @@ public class AgentExecutor {
                         AgentStepTypes.KEY_STEP_COUNT, MAX_STEPS))
                 .finalStep(true)
                 .build());
-        AgentStep step = buildStep(context.getSessionId(), null, stepNumber,
-                AgentStepTypes.ERROR, "超过最大步骤数 " + MAX_STEPS,
-                Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_MAX_STEPS_EXCEEDED,
-                        AgentStepTypes.KEY_STEP_COUNT, MAX_STEPS));
-        agentStepMapper.insert(step);
-        recordedSteps.add(toStepVO(step));
 
         return AgentResult.builder()
                 .answer("抱歉，回答该问题需要过多的处理步骤，请尝试简化问题。")
                 .sourcesJson("[]")
-                .steps(recordedSteps)
+                .steps(recorder.getRecordedSteps())
                 .totalSteps(stepNumber)
                 .exceededMaxSteps(true)
                 .build();
@@ -426,30 +397,6 @@ public class AgentExecutor {
             log.warn("[AgentExecutor] 解析 resolve 参数失败: {}", arguments);
         }
         return List.of();
-    }
-
-    private AgentStep buildStep(Integer sessionId, Integer chatMessageId,
-                                 int stepOrder, String stepType, String content,
-                                 Map<String, Object> stepData) {
-        return AgentStep.builder()
-                .chatMessageId(chatMessageId)
-                .sessionId(sessionId)
-                .stepOrder(stepOrder)
-                .stepType(stepType)
-                .content(content)
-                .stepData(stepData != null ? stepData : Map.of())
-                .build();
-    }
-
-    private AgentStepVO toStepVO(AgentStep step) {
-        return AgentStepVO.builder()
-                .id(step.getId())
-                .stepOrder(step.getStepOrder())
-                .stepType(step.getStepType())
-                .content(step.getContent())
-                .stepData(step.getStepData())
-                .createdAt(step.getCreatedAt())
-                .build();
     }
 
     private String truncate(String text, int maxLen) {

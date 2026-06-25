@@ -11,12 +11,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 流式聊天响应的同步等待封装
- * 使用方式：
- * <pre>
- *   StreamingResponseFuture future = new StreamingResponseFuture(listener, stepNumber);
- *   chatModel.chat(request, future);
- *   ChatResponse response = future.await(120, TimeUnit.SECONDS);
- * </pre>
  * 
  */
 @Slf4j

@@ -20,7 +20,6 @@ import java.util.Map;
 /**
  * 启动 study_plan 工作流的工具
  * 由主 ReAct 循环中的 LLM 调用，触发 study_plan 多 Agent 工作流。
- * 工作流内部编排 clarify → plan → exam 三个子 Agent，通过 SSE step 事件汇报进度。
  */
 @Slf4j
 @Component
@@ -115,7 +114,7 @@ public class StartStudyPlanWorkflowTool implements Tool {
             StudyPlanWorkflowResult result = workflowService.startWorkflow(
                     topic, goal, duration, sourceType, materials,
                     generateExam, needsClarification, clarificationQuestion,
-                    userId, sessionId, context.getStepListener()
+                    userId, sessionId, context.getStepRecorder()
             );
 
             // 构建返回结果

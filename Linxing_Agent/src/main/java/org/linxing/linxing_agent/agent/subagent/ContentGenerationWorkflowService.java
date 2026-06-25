@@ -7,8 +7,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
-import org.linxing.linxing_agent.agent.subagent.common.StepRecorder;
-import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.tool.impl.SaveExamTool;
 import org.linxing.linxing_agent.agent.tool.impl.SaveStudyPlanTool;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.AppendToContainerTool;
@@ -22,9 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * 内容生成阶段编排：计划生成 → （条件）测验生成 → 持久化结果汇总。
- * <p>
- * PlanGeneratorAgent / ExamGeneratorAgent 负责使用容器工具分批构建 plan/exam，
- * 并自主调用 {@link SaveStudyPlanTool} / {@link SaveExamTool} 完成持久化。
+ * PlanGeneratorAgent / ExamGeneratorAgent 负责使用JSON容器工具分批构建 plan/exam，并自主调用 {@link SaveStudyPlanTool} / {@link SaveExamTool} 完成持久化。
  * 本 Service 通过 {@link SubAgentContext} 读取工具保存后的结果，不再依赖 LLM 最终文本输出。
  */
 @Slf4j
@@ -60,7 +57,7 @@ public class ContentGenerationWorkflowService {
                               ChatModel chatModel,
                               Integer userId,
                               boolean generateExam) {
-        // 计划生成 Agent：使用容器工具构建 plan，并自主调用 save_study_plan
+        // 计划生成 Agent
         var planAgent = AgenticServices.agentBuilder(PlanGeneratorAgent.class)
                 .chatModel(chatModel)
                 .tools(createContainerTool, appendToContainerTool,
@@ -74,7 +71,7 @@ public class ContentGenerationWorkflowService {
                         AgentStepTypes.PHASE_STUDY_PLAN))
                 .build();
 
-        // 测验生成 Agent：使用容器工具构建 exam，并自主调用 save_exam
+        // 测验生成 Agent
         var examAgent = AgenticServices.agentBuilder(ExamGeneratorAgent.class)
                 .chatModel(chatModel)
                 .tools(createContainerTool, appendToContainerTool,
@@ -89,6 +86,7 @@ public class ContentGenerationWorkflowService {
                 .build();
 
         // 根据 generate_exam 条件决定是否执行 examAgent
+        //TODO：考虑使用langchain4j的自带条件辨析器取代这部分的代码
         var examConditional = AgenticServices
                 .conditionalBuilder()
                 .subAgents(
@@ -105,7 +103,9 @@ public class ContentGenerationWorkflowService {
     }
 
     /**
-     * 汇总 plan/exam 保存结果。
+     * 对agent最终输出做处理：汇总和处理 plan/exam 保存结果。
+     *
+     * TODO：如下的代码考虑是否真的需要如此复杂的处理和兜底，它还连带如下的很多私有方法
      */
     private StudyPlanWorkflowResult persistResults(AgenticScope scope, boolean generateExam,
                                                    StepRecorder recorder) {
@@ -120,7 +120,7 @@ public class ContentGenerationWorkflowService {
                     .planId(planResult.id())
                     .phaseCount(planResult.count());
             scope.writeState(LINKED_PLAN_ID_KEY, String.valueOf(planResult.id()));
-            recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+            recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                     StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan", true,
                             PLAN_OUTPUT_KEY, true,
                             "planId=" + planResult.id() + ", phases=" + planResult.count()),
@@ -129,7 +129,7 @@ public class ContentGenerationWorkflowService {
         } else {
             builder.planSaved(false)
                     .error("学习计划保存失败：未获取到保存结果");
-            recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+            recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                     StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan", false,
                             PLAN_OUTPUT_KEY, false, "no save result"),
                     null, "学习计划保存失败", true);
@@ -144,7 +144,7 @@ public class ContentGenerationWorkflowService {
                 builder.examSaved(true)
                         .examId(examResult.id())
                         .questionCount(examResult.count());
-                recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+                recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                         StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", true,
                                 EXAM_OUTPUT_KEY, true, "examId=" + examResult.id()),
                         null, "测验已保存（examId=" + examResult.id() + "）", true);
@@ -153,7 +153,7 @@ public class ContentGenerationWorkflowService {
             } else {
                 builder.examSaved(false)
                         .examParseError("测验保存失败：未获取到保存结果");
-                recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+                recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                         StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", false,
                                 EXAM_OUTPUT_KEY, false, "no save result"),
                         null, "测验保存失败", true);
@@ -162,7 +162,7 @@ public class ContentGenerationWorkflowService {
         } else if (generateExam) {
             builder.examSaved(false)
                     .examParseError("计划保存失败，测验未触发保存");
-            recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+            recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                     StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", false,
                             EXAM_OUTPUT_KEY, false, "skipped: plan not saved"),
                     null, "保存测验（未触发：计划保存失败）", true);

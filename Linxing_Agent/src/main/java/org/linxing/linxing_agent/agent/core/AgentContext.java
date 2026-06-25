@@ -17,6 +17,10 @@ public class AgentContext implements JsonContainerStore {
     private final Map<String, JsonContainer> containers;
     private int stepCount;
     private AgentStepListener stepListener;
+    /**
+     * 统一步骤记录器：主循环与工作流共享同一实例，保证一次会话内 step_order 单调递增。
+     */
+    private StepRecorder stepRecorder;
 
     public AgentContext(Integer userId, Integer sessionId, AgentMemory memory, String query) {
         this.userId = userId;
@@ -80,5 +84,13 @@ public class AgentContext implements JsonContainerStore {
 
     public void setStepListener(AgentStepListener stepListener) {
         this.stepListener = stepListener;
+    }
+
+    public StepRecorder getStepRecorder() {
+        return stepRecorder;
+    }
+
+    public void setStepRecorder(StepRecorder stepRecorder) {
+        this.stepRecorder = stepRecorder;
     }
 }

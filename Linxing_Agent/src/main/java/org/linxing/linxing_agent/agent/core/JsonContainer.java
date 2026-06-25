@@ -10,6 +10,8 @@ import java.util.Map;
 /**
  * JSON 容器，用于分批次构建复杂 JSON 数据。
  * 存储在 AgentContext 内存中，请求结束即销毁。
+ *
+ * TODO：考虑是否可以改用tool包下的类似工具
  */
 @Getter
 public class JsonContainer {

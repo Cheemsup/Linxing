@@ -7,10 +7,8 @@ import dev.langchain4j.agentic.agent.ErrorRecoveryResult;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.core.AgentStepListener;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
-import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
-import org.linxing.linxing_agent.agent.subagent.common.StepRecorder;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.springframework.stereotype.Service;
@@ -19,16 +17,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * study_plan 工作流顶层编排服务。
- * 两阶段顺序编排，确保"最终 plan/exam 生成一定要建立在前一阶段充分收集知识内容和用户情况之后"：
- *   阶段一 {@link KnowledgeCollectionWorkflowService}：条件澄清（仅一次）+ 知识收集 Agent 自主搜索，
- *       产出 materials / clarification 写入 AgenticScope
- *   阶段二 {@link ContentGenerationWorkflowService}：基于 scope 中的 materials/clarification 生成 plan
- *       + 条件生成 exam，持久化并返回 {@link StudyPlanWorkflowResult}
- * 
- * 两阶段通过 {@code sequenceBuilder(StudyPlanWorkflowAgent.class).subAgents(knowledge, content)} 顺序编排，
- * 
- * 工作流内部使用非流式 ChatModel，通过 AgentStepListener 以 step 事件向主循环 SSE 通道汇报进度。
+ * study_plan 工作流顶层编排服务。学习计划的制定流程分为两阶段：资料收集和用户补充、plan（和可能的exam）生成，内部使用langchain4j的顺序工作流编排agent
  */
 @Service
 @Slf4j
@@ -36,7 +25,6 @@ import java.util.Map;
 public class StudyPlanWorkflowService {
 
     private final LlmManager llmManager;
-    private final AgentStepMapper agentStepMapper;
     private final KnowledgeCollectionWorkflowService knowledgeCollectionWorkflowService;
     private final ContentGenerationWorkflowService contentGenerationWorkflowService;
     private final PendingClarificationRegistry clarificationRegistry;
@@ -54,16 +42,16 @@ public class StudyPlanWorkflowService {
      * @param clarificationQuestion 澄清问题
      * @param userId                用户 ID
      * @param sessionId             会话 ID（用于 HumanInTheLoop 回复路由）
-     * @param listener              SSE step 监听器
+     * @param recorder              统一步骤记录器（由主循环传入，共享 step_order 序列）
      * @return 工作流执行结果
      */
     public StudyPlanWorkflowResult startWorkflow(
             String topic, String goal, String duration, String sourceType,
             String materials, boolean generateExam, boolean needsClarification,
             String clarificationQuestion, Integer userId, Integer sessionId,
-            AgentStepListener listener) {
+            StepRecorder recorder) {
 
-        ChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);
+        ChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);//TODO：后续需要扩充llmManager的模型注册类型并改用专门的type
 
         log.info("study_plan 工作流启动（两阶段编排）: userId={}, sessionId={}, topic='{}', generateExam={}, needsClarification={}",
                 userId, sessionId, topic, generateExam, needsClarification);
@@ -75,7 +63,7 @@ public class StudyPlanWorkflowService {
             return doStartWorkflow(
                     topic, goal, duration, sourceType, materials,
                     generateExam, needsClarification, clarificationQuestion,
-                    userId, sessionId, listener, chatModel);
+                    userId, sessionId, recorder, chatModel);
         } finally {
             SubAgentContext.clear();
             // 工作流结束时强制清理本会话的待澄清请求，避免网络中断/客户端重试时
@@ -90,14 +78,10 @@ public class StudyPlanWorkflowService {
             String topic, String goal, String duration, String sourceType,
             String materials, boolean generateExam, boolean needsClarification,
             String clarificationQuestion, Integer userId, Integer sessionId,
-            AgentStepListener listener, ChatModel chatModel) {
-
-        // 工作流步骤记录器：统一向 SSE 推送并持久化到 agent_steps
-        //TODO：考虑是否应该改为单例模式
-        StepRecorder recorder = new StepRecorder(listener, agentStepMapper, sessionId);
+            StepRecorder recorder, ChatModel chatModel) {
 
         // 推送 workflow_start 事件，使得前端能够显示本工作流状态
-        recorder.emit(AgentStepTypes.WORKFLOW_START, AgentStepTypes.PHASE_STUDY_PLAN,
+        recorder.record(AgentStepTypes.WORKFLOW_START, AgentStepTypes.PHASE_STUDY_PLAN,
                 buildWorkflowStartData(topic, generateExam, needsClarification),
                 null, null, false);
 
@@ -118,7 +102,7 @@ public class StudyPlanWorkflowService {
                     Throwable ex = errorContext.exception();
                     String errMsg = ex != null ? ex.getMessage() : "unknown error";
                     log.error("Agent error in workflow: agent={}, error={}", agentName, errMsg, ex);
-                    recorder.emit(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
+                    recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                             StepRecorder.buildSubAgentData(agentName, "error",
                                     false, null, false, errMsg),
                             null, "Agent [" + agentName + "] 执行失败: " + errMsg, true);
@@ -156,8 +140,7 @@ public class StudyPlanWorkflowService {
                     .build();
         }
 
-        // AgenticServices sequenceBuilder 在未指定 output() 时 execute() 可能返回 null，
-        // 但内容生成阶段已通过 SubAgentContext 保存了实际结果，优先从中读取。
+        // AgenticServices sequenceBuilder 在未指定 output() 时 execute() 可能返回 null，不过内容生成阶段已通过 SubAgentContext 保存了实际结果，优先从中读取。
         if (result == null) {
             SubAgentContext ctx = SubAgentContext.current();
             Object saved = ctx != null ? ctx.getAttribute("study_plan_workflow_result") : null;
@@ -178,7 +161,7 @@ public class StudyPlanWorkflowService {
         }
 
         // 推送 workflow_end 事件
-        recorder.emit(AgentStepTypes.WORKFLOW_END, AgentStepTypes.PHASE_STUDY_PLAN,
+        recorder.record(AgentStepTypes.WORKFLOW_END, AgentStepTypes.PHASE_STUDY_PLAN,
                 buildWorkflowEndData(result),
                 null, result.getError(), true);
 

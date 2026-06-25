@@ -7,11 +7,8 @@ import dev.langchain4j.agentic.Agent;
 
 /**
  * 测验生成 Agent
- * <p>
  * 读取 AgenticScope 中的 topic / sourceType / materials，
- * 调用 LLM 通过容器工具分批构建结构化测验题目，最终返回 container_id 写入 outputKey "exam_container_id"。
- * <p>
- * 使用容器工具分批构建可绕过 max_tokens 限制，避免题目较多时 JSON 被截断导致解析失败。
+ * 调用 LLM 通过JSON容器工具分批构建结构化测验题目，最终返回 container_id 写入 outputKey "exam_container_id"。
  */
 public interface ExamGeneratorAgent {
 

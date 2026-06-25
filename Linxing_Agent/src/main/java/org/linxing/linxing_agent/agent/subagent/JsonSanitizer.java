@@ -2,9 +2,7 @@ package org.linxing.linxing_agent.agent.subagent;
 
 /**
  * LLM 输出 JSON 清洗工具
- * <p>
- * Agent 生成的 JSON 常见污染：Markdown 代码块包裹（```json ... ```）、
- * 前后多余解释文字、尾随逗号等。本工具提取最外层 JSON 对象，提升解析容错性。
+ * Agent 生成的 JSON 常见污染：Markdown 代码块包裹（```json ... ```）、前后多余解释文字、尾随逗号等。本工具提取最外层 JSON 对象，提升解析容错性。
  */
 public final class JsonSanitizer {
 
@@ -12,12 +10,9 @@ public final class JsonSanitizer {
     }
 
     /**
-     * 清洗 LLM 输出，提取最外层 JSON 对象字符串。
-     * <ol>
-     *   <li>去除 Markdown 代码块围栏（```json / ```）</li>
-     *   <li>定位第一个 '{'，按字符串/转义感知匹配对应的最后一个 '}'</li>
-     *   <li>返回截取后的子串；找不到合法对象时返回原文本 trim 后的结果</li>
-     * </ol>
+     * 清洗 LLM 输出，提取最外层 JSON 对象字符串。去除 Markdown 代码块围栏（```json / ```）
+     * 定位第一个 '{'，按字符串/转义感知匹配对应的最后一个 '}'
+     * 返回截取后的子串；找不到合法对象时返回原文本 trim 后的结果
      *
      * @param raw LLM 原始输出，可为 null
      * @return 清洗后的 JSON 字符串；输入为 null/空白时返回空串

@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.subagent.common.HumanInTheLoopFactory;
-import org.linxing.linxing_agent.agent.subagent.common.StepRecorder;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.tool.impl.RagSearchTool;
 import org.linxing.linxing_agent.agent.tool.impl.WebSearchTool;
 import org.springframework.stereotype.Service;

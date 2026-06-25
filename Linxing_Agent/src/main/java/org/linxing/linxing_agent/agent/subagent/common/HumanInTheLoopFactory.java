@@ -1,11 +1,11 @@
 package org.linxing.linxing_agent.agent.subagent.common;
 
 import dev.langchain4j.agentic.AgenticServices;
-import dev.langchain4j.agentic.scope.AgenticScope;
 import dev.langchain4j.agentic.workflow.HumanInTheLoop;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.core.ToolExecutionTimeout;
 import org.linxing.linxing_agent.agent.core.ToolTimeoutContext;
 import org.linxing.linxing_agent.agent.subagent.PendingClarificationRegistry;
@@ -52,7 +52,7 @@ public class HumanInTheLoopFactory {
                     String question = scope.readState("clarification_question",
                             "请补充您的信息");
                     // 推送 sub_agent 事件，携带澄清问题
-                    recorder.emit(AgentStepTypes.SUB_AGENT, phase,
+                    recorder.record(AgentStepTypes.SUB_AGENT, phase,
                             StepRecorder.buildSubAgentData(agentName, "clarify", true,
                                     outputKey, true, question),
                             null, null, false);
@@ -80,7 +80,7 @@ public class HumanInTheLoopFactory {
                             statusLabel = "（已回复）";
                         }
                         // 推送用户已回复/超时的状态事件
-                        recorder.emit(AgentStepTypes.SUB_AGENT, phase,
+                        recorder.record(AgentStepTypes.SUB_AGENT, phase,
                                 StepRecorder.buildSubAgentData(agentName, "clarify_answer", true,
                                         outputKey, true, null),
                                 answer + statusLabel, null, false);
@@ -90,7 +90,7 @@ public class HumanInTheLoopFactory {
                         log.warn("澄清等待被中断或安全网超时: session={}", sessionId, e);
                         scope.writeState("clarification_timed_out", true);
                         clarificationRegistry.cancel(String.valueOf(sessionId));
-                        recorder.emit(AgentStepTypes.SUB_AGENT, phase,
+                        recorder.record(AgentStepTypes.SUB_AGENT, phase,
                                 StepRecorder.buildSubAgentData(agentName, "clarify_answer", true,
                                         outputKey, false, null),
                                 null, "澄清等待被中断：" + e.getMessage(), false);

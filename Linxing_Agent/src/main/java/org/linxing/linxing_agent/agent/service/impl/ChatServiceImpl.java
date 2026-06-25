@@ -13,6 +13,7 @@ import org.linxing.linxing_agent.agent.core.AgentResult;
 import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepListener;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
 import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
 import org.linxing.linxing_agent.rag.constant.OperationType;
@@ -64,6 +65,9 @@ public class ChatServiceImpl implements IChatService {
 
             Integer sessionId = chatMessageService.resolveSession(userId, request.getSessionId());//解析或创建会话
 
+            // 统一步骤记录器：主循环与工作流共享同一实例，保证 session 级 step_order 单调递增
+            StepRecorder recorder = new StepRecorder(listener, agentStepMapper, sessionId);
+
             ChatMessage userMsg = chatMessageService.saveUserMessage(
                     userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息
 
@@ -78,10 +82,10 @@ public class ChatServiceImpl implements IChatService {
                     semanticCacheService.lookup(userId, queryEmbedding.vector());//语义缓存查找
 
             if (cacheResult.isHit()) {
-                return buildCachedResponse(userId, sessionId, userMsg, cacheResult, listener);
+                return buildCachedResponse(userId, sessionId, userMsg, cacheResult, recorder);
             }
 
-            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery, listener);//执行ReAct Agent循环
+            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery, listener, recorder);//执行ReAct Agent循环
 
             semanticCacheService.store(userId, queryEmbedding.vector(), originalQuery,
                     agentResponse.getAnswer(),
@@ -113,7 +117,8 @@ public class ChatServiceImpl implements IChatService {
      */
     private ChatResponse runAgentLoop(Integer userId, Integer sessionId,
                                        ChatMessage userMsg, List<ChatMessage> history,
-                                       String originalQuery, AgentStepListener listener) {
+                                       String originalQuery, AgentStepListener listener,
+                                       StepRecorder recorder) {
         AgentMemory memory = memoryFactory.create();
 
         //将历史消息填入Agent记忆
@@ -129,6 +134,7 @@ public class ChatServiceImpl implements IChatService {
 
         AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);
         context.setStepListener(listener);
+        context.setStepRecorder(recorder);//注入统一步骤记录器，主循环与工作流共享
 
         OpenAiStreamingChatModel chatModel = llmManager.getStreamingModel(LlmType.CHAT_MODEL);//获取流式LLM对象
 
@@ -167,14 +173,15 @@ public class ChatServiceImpl implements IChatService {
     private ChatResponse buildCachedResponse(Integer userId, Integer sessionId,
                                               ChatMessage userMsg,
                                               SemanticCacheService.CacheResult cacheResult,
-                                              AgentStepListener listener) {
-        listener.onStep(AgentStepEvent.builder()
+                                              StepRecorder recorder) {
+        // 缓存命中：推送 SSE + 入库（cache_hit 按 schema 设计入库，finalStep=true 仅影响 SSE 语义）
+        recorder.record(AgentStepEvent.builder()
                 .eventType(AgentStepTypes.CACHE_HIT)
                 .stepNumber(0)
                 .phase(AgentStepTypes.PHASE_CACHE)
                 .answer(cacheResult.getEntry().getAnswer())
                 .finalStep(true)
-                .build());//向前端发送缓存命中事件
+                .build());
 
         SemanticCacheService.CacheEntry cached = cacheResult.getEntry();
 

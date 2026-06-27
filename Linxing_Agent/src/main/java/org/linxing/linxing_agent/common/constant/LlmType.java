@@ -4,7 +4,7 @@ public final class LlmType {
 
     public static final String CHAT_MODEL = "deepseek";
     public static final String SEMANTIC_CHUNK_MODEL = "glm";
-    public static final String CONTEXT_ENRICH_MODEL = "glm";
+    public static final String CONTEXT_ENRICH_MODEL = "deepseek";//补全短chunk上下文
     public static final String QUERY_REWRITE = "minimax";
     public static final String SUMMARY_MODEL = "deepseek";
 

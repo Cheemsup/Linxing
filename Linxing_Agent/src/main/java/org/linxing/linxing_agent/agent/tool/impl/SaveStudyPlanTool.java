@@ -13,7 +13,7 @@ import org.linxing.linxing_agent.agent.core.JsonContainer;
 import org.linxing.linxing_agent.agent.dto.QuestionError;
 import org.linxing.linxing_agent.agent.exception.StudyPlanParseException;
 import org.linxing.linxing_agent.agent.exception.StudyPlanValidationException;
-import org.linxing.linxing_agent.agent.service.impl.StudyPlanService;
+import org.linxing.linxing_agent.agent.service.impl.StudyPlanServiceImpl;
 import org.linxing.linxing_agent.agent.subagent.SaveResult;
 import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
@@ -50,7 +50,7 @@ public class SaveStudyPlanTool implements Tool {
             + "再分批调用 append_to_container 追加阶段（每批1-3个），最后调用本工具传入 container_id 保存。"
             + "不要尝试一次性生成超过5个阶段的 JSON，极易导致格式错误。";
 
-    private final StudyPlanService studyPlanService;
+    private final StudyPlanServiceImpl studyPlanService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -146,7 +146,7 @@ public class SaveStudyPlanTool implements Tool {
             // 解析数据来源：分批模式从容器读取，一次性模式直接使用 arguments
             boolean isContainerMode = root.has("container_id") && !root.get("container_id").asText().isBlank();
             JsonNode planRoot;
-            StudyPlanService.ValidationStrategy strategy;
+            StudyPlanServiceImpl.ValidationStrategy strategy;
 
             if (isContainerMode) {
                 // 分批模式：从容器解析，使用 COLLECT_ALL 策略
@@ -156,11 +156,11 @@ public class SaveStudyPlanTool implements Tool {
                 }
                 JsonContainer container = context.getContainer(root.get("container_id").asText());
                 planRoot = container.assemble(objectMapper);
-                strategy = StudyPlanService.ValidationStrategy.COLLECT_ALL;
+                strategy = StudyPlanServiceImpl.ValidationStrategy.COLLECT_ALL;
             } else {
                 // 一次性模式：直接使用 arguments，使用 FAIL_FAST 策略
                 planRoot = root;
-                strategy = StudyPlanService.ValidationStrategy.FAIL_FAST;
+                strategy = StudyPlanServiceImpl.ValidationStrategy.FAIL_FAST;
             }
 
             // 统一调用 StudyPlanService（校验 + 持久化）
@@ -193,7 +193,7 @@ public class SaveStudyPlanTool implements Tool {
     /**
      * 供 subagent 体系使用的 {@code @Tool} 入口。
      * 与 {@link #execute(ToolCallRequest, AgentContext)} 共用
-     * {@link StudyPlanService} 核心服务，userId 与容器均从 {@link SubAgentContext} 读取，
+     * {@link StudyPlanServiceImpl} 核心服务，userId 与容器均从 {@link SubAgentContext} 读取，
      * 避免作为 LLM 可控参数暴露。
      *
      * @param containerId 容器 ID，由 create_container 返回，容器类型必须为 study_plan
@@ -225,7 +225,7 @@ public class SaveStudyPlanTool implements Tool {
         try {
             JsonNode planRoot = container.assemble(objectMapper);
             Integer planId = studyPlanService.parseAndSave(userId, planRoot,
-                    StudyPlanService.ValidationStrategy.COLLECT_ALL);
+                    StudyPlanServiceImpl.ValidationStrategy.COLLECT_ALL);
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("planId", planId);

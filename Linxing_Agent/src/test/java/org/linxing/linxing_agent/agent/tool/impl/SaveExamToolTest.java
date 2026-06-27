@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.linxing.linxing_agent.agent.core.JsonContainer;
-import org.linxing.linxing_agent.agent.service.impl.ExamService;
+import org.linxing.linxing_agent.agent.service.impl.ExamServiceImpl;
 import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -27,7 +27,7 @@ import static org.mockito.Mockito.when;
 class SaveExamToolTest {
 
     @Mock
-    private ExamService examService;
+    private ExamServiceImpl examService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SaveExamTool tool;
@@ -57,7 +57,7 @@ class SaveExamToolTest {
                 java.util.Map.of("questions", questions));
         SubAgentContext.currentStore().putContainer(containerId, container);
 
-        when(examService.parseAndSave(eq(42), any(), eq(ExamService.ValidationStrategy.COLLECT_ALL), eq(7)))
+        when(examService.parseAndSave(eq(42), any(), eq(ExamServiceImpl.ValidationStrategy.COLLECT_ALL), eq(7)))
                 .thenReturn(9);
 
         // When
@@ -65,7 +65,7 @@ class SaveExamToolTest {
 
         // Then
         assertThat(result).contains("\"examId\":9").contains("\"questionCount\":1");
-        verify(examService).parseAndSave(eq(42), any(), eq(ExamService.ValidationStrategy.COLLECT_ALL), eq(7));
+        verify(examService).parseAndSave(eq(42), any(), eq(ExamServiceImpl.ValidationStrategy.COLLECT_ALL), eq(7));
     }
 
     @Test
@@ -82,7 +82,7 @@ class SaveExamToolTest {
                 java.util.Map.of("questions", questions));
         SubAgentContext.currentStore().putContainer(containerId, container);
 
-        when(examService.parseAndSave(eq(42), any(), eq(ExamService.ValidationStrategy.COLLECT_ALL), isNull()))
+        when(examService.parseAndSave(eq(42), any(), eq(ExamServiceImpl.ValidationStrategy.COLLECT_ALL), isNull()))
                 .thenReturn(11);
 
         // When
@@ -90,7 +90,7 @@ class SaveExamToolTest {
 
         // Then
         assertThat(result).contains("\"examId\":11");
-        verify(examService).parseAndSave(eq(42), any(), eq(ExamService.ValidationStrategy.COLLECT_ALL), isNull());
+        verify(examService).parseAndSave(eq(42), any(), eq(ExamServiceImpl.ValidationStrategy.COLLECT_ALL), isNull());
     }
 
     @Test

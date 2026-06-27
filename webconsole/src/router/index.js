@@ -4,14 +4,14 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 
 // 路由懒加载，减少首屏体积
-const SearchView = () => import('@/views/rag/SearchView.vue')
-const ChatView = () => import('@/views/rag/ChatView.vue')
-const IngestView = () => import('@/views/rag/IngestView.vue')
-const NotesView = () => import('@/views/rag/NotesView.vue')
-const ExamListView = () => import('@/views/rag/ExamListView.vue')
-const ExamDetailView = () => import('@/views/rag/ExamDetailView.vue')
-const PlanListView = () => import('@/views/rag/PlanListView.vue')
-const PlanDetailView = () => import('@/views/rag/PlanDetailView.vue')
+const SearchView = () => import('@/views/agent/SearchView.vue')
+const ChatView = () => import('@/views/agent/ChatView.vue')
+const IngestView = () => import('@/views/agent/IngestView.vue')
+const NotesView = () => import('@/views/agent/NotesView.vue')
+const ExamListView = () => import('@/views/agent/ExamListView.vue')
+const ExamDetailView = () => import('@/views/agent/ExamDetailView.vue')
+const PlanListView = () => import('@/views/agent/PlanListView.vue')
+const PlanDetailView = () => import('@/views/agent/PlanDetailView.vue')
 
 const routes = [
   {

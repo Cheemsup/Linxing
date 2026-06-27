@@ -116,7 +116,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { authStore } from '@/stores/authStore'
-import { chatSessionStore } from '@/stores/rag/chatSessionStore'
+import { chatSessionStore } from '@/stores/agent/chatSessionStore'
 
 const COLLAPSE_KEY = 'linxing_sidebar_collapsed'
 

@@ -1,0 +1,26 @@
+<template>
+  <div class="notes-view">
+    <NotesPanel />
+  </div>
+</template>
+
+<script>
+import NotesPanel from '@/components/agent/NotesPanel.vue'
+
+export default {
+  name: 'NotesView',
+  components: {
+    NotesPanel
+  }
+}
+</script>
+
+<style scoped>
+.notes-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fafbfc;
+}
+</style>

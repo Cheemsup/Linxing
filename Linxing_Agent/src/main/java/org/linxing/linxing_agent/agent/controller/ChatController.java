@@ -5,14 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.agent.adapter.SseChatAdapter;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
-import org.linxing.linxing_agent.agent.subagent.PendingClarificationRegistry;
+import org.linxing.linxing_agent.agent.core.PendingClarificationRegistry;
 import org.linxing.linxing_agent.common.result.PageResult;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.agent.service.IChatSessionService;
-import org.linxing.linxing_agent.agent.service.impl.AgentStepService;
-import org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheService;
+import org.linxing.linxing_agent.agent.service.impl.AgentStepServiceImpl;
+import org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheServiceImpl;
 import org.linxing.linxing_agent.agent.vo.AgentStepVO;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
@@ -32,8 +32,8 @@ public class ChatController {
     private final SseChatAdapter sseChatAdapter;
     private final IChatSessionService chatSessionService;
     private final ChatMessageMapper chatMessageMapper;
-    private final ChatMessageCacheService chatMessageCacheService;
-    private final AgentStepService agentStepService;
+    private final ChatMessageCacheServiceImpl chatMessageCacheService;
+    private final AgentStepServiceImpl agentStepService;
     private final PendingClarificationRegistry clarificationRegistry;
 
     /**

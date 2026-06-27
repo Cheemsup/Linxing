@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.subagent.StudyPlanWorkflowResult;
-import org.linxing.linxing_agent.agent.subagent.StudyPlanWorkflowService;
+import org.linxing.linxing_agent.agent.subagent.StudyPlanner;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
@@ -37,7 +37,7 @@ public class StartStudyPlanWorkflowTool implements Tool {
             + "如果用户同时要求生成测验/题目，设置 generate_exam=true。"
             + "materials 参数可选：若为空，工作流内部会自主搜索知识库和联网收集素材；若已传入（如基于笔记的计划），则作为已有素材补充使用。";
 
-    private final StudyPlanWorkflowService workflowService;
+    private final StudyPlanner workflowService;
     private final ObjectMapper objectMapper;
 
     @Override

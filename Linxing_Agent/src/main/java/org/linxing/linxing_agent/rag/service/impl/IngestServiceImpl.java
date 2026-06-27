@@ -7,7 +7,7 @@ import dev.langchain4j.data.document.parser.TextDocumentParser;
 import dev.langchain4j.data.document.parser.apache.poi.ApachePoiDocumentParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.service.impl.SemanticCacheService;
+import org.linxing.linxing_agent.agent.service.impl.SemanticCacheServiceImpl;
 import org.linxing.linxing_agent.rag.constant.DocumentStatus;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.dto.IngestResponse;
@@ -36,7 +36,7 @@ public class IngestServiceImpl implements IIngestService {
     private final ChunkPipelineCoordinator chunkPipelineCoordinator;
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
-    private final SemanticCacheService semanticCacheService;
+    private final SemanticCacheServiceImpl semanticCacheService;
 
     @Override
     @Transactional

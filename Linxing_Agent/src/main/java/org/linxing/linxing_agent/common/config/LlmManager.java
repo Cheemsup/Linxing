@@ -48,8 +48,8 @@ public class LlmManager {
                     .temperature(llm.getTemperature())
                     .timeout(Duration.ofSeconds(llm.getTimeoutSeconds()))
                     .maxTokens(llm.getMaxTokens())
-                    .logRequests(true)
-                    .logResponses(true);
+                    .logRequests(false)//打印http请求信息
+                    .logResponses(true);//打印模型响应信息
 
             if (config.getReturnThinking() != null) {
                 modelBuilder.returnThinking(config.getReturnThinking());

@@ -16,6 +16,7 @@ import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
 import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
+import org.linxing.linxing_agent.agent.utils.SourceExtractor;
 import org.linxing.linxing_agent.rag.constant.OperationType;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.common.constant.LlmType;
@@ -41,9 +42,9 @@ public class ChatServiceImpl implements IChatService {
     private final EmbeddingModel embeddingModel;
     private final LlmManager llmManager;
     private final ActivityLogMapper activityLogMapper;
-    private final ChatMessageService chatMessageService;
-    private final ChatMessageCacheService chatMessageCacheService;
-    private final SemanticCacheService semanticCacheService;
+    private final ChatMessageServiceImpl chatMessageService;
+    private final ChatMessageCacheServiceImpl chatMessageCacheService;
+    private final SemanticCacheServiceImpl semanticCacheService;
     private final SourceExtractor sourceExtractor;
     private final AgentExecutor agentExecutor;
     private final AgentMemoryFactory memoryFactory;
@@ -78,7 +79,7 @@ public class ChatServiceImpl implements IChatService {
 
             Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();//向量化query进行redis缓存查找
 
-            SemanticCacheService.CacheResult cacheResult =
+            SemanticCacheServiceImpl.CacheResult cacheResult =
                     semanticCacheService.lookup(userId, queryEmbedding.vector());//语义缓存查找
 
             if (cacheResult.isHit()) {
@@ -172,7 +173,7 @@ public class ChatServiceImpl implements IChatService {
      */
     private ChatResponse buildCachedResponse(Integer userId, Integer sessionId,
                                               ChatMessage userMsg,
-                                              SemanticCacheService.CacheResult cacheResult,
+                                              SemanticCacheServiceImpl.CacheResult cacheResult,
                                               StepRecorder recorder) {
         // 缓存命中：推送 SSE + 入库（cache_hit 按 schema 设计入库，finalStep=true 仅影响 SSE 语义）
         recorder.record(AgentStepEvent.builder()
@@ -184,7 +185,7 @@ public class ChatServiceImpl implements IChatService {
                 .finalStep(true)
                 .build());
 
-        SemanticCacheService.CacheEntry cached = cacheResult.getEntry();
+        SemanticCacheServiceImpl.CacheEntry cached = cacheResult.getEntry();
 
         List<ChatResponse.SourceDetail> cachedSourceDetails =
                 sourceExtractor.parseSourceDetails(cached.getSources());//反序列化缓存的来源详情

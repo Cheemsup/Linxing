@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.linxing.linxing_agent.agent.core.JsonContainer;
-import org.linxing.linxing_agent.agent.service.impl.StudyPlanService;
+import org.linxing.linxing_agent.agent.service.impl.StudyPlanServiceImpl;
 import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 class SaveStudyPlanToolTest {
 
     @Mock
-    private StudyPlanService studyPlanService;
+    private StudyPlanServiceImpl studyPlanService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SaveStudyPlanTool tool;
@@ -56,7 +56,7 @@ class SaveStudyPlanToolTest {
                 java.util.Map.of("phases", phases));
         SubAgentContext.currentStore().putContainer(containerId, container);
 
-        when(studyPlanService.parseAndSave(eq(42), any(), eq(StudyPlanService.ValidationStrategy.COLLECT_ALL)))
+        when(studyPlanService.parseAndSave(eq(42), any(), eq(StudyPlanServiceImpl.ValidationStrategy.COLLECT_ALL)))
                 .thenReturn(7);
 
         // When
@@ -64,7 +64,7 @@ class SaveStudyPlanToolTest {
 
         // Then
         assertThat(result).contains("\"planId\":7").contains("\"phaseCount\":2");
-        verify(studyPlanService).parseAndSave(eq(42), any(), eq(StudyPlanService.ValidationStrategy.COLLECT_ALL));
+        verify(studyPlanService).parseAndSave(eq(42), any(), eq(StudyPlanServiceImpl.ValidationStrategy.COLLECT_ALL));
     }
 
     @Test

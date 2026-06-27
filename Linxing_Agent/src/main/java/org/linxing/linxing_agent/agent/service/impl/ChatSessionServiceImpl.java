@@ -23,7 +23,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
-    private final ChatMessageCacheService chatMessageCacheService;
+    private final ChatMessageCacheServiceImpl chatMessageCacheService;
     private final LlmManager llmManager;
 
     @Override

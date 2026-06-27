@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.linxing.linxing_agent.agent.service.impl.SemanticCacheService;
+import org.linxing.linxing_agent.agent.service.impl.SemanticCacheServiceImpl;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
 import org.linxing.linxing_agent.rag.vo.ChunkTreeVO;
@@ -44,7 +44,7 @@ public class DocumentServiceImpl implements IDocumentService {
     private final StringRedisTemplate stringRedisTemplate;
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
-    private final SemanticCacheService semanticCacheService;
+    private final SemanticCacheServiceImpl semanticCacheService;
 
     @Override
     public PageResult<DocumentVO> listDocuments(Integer userId, int page, int size) {

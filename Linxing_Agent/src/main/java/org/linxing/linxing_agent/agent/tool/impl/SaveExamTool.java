@@ -14,7 +14,7 @@ import org.linxing.linxing_agent.agent.core.JsonContainer;
 import org.linxing.linxing_agent.agent.dto.QuestionError;
 import org.linxing.linxing_agent.agent.exception.ExamParseException;
 import org.linxing.linxing_agent.agent.exception.ExamValidationException;
-import org.linxing.linxing_agent.agent.service.impl.ExamService;
+import org.linxing.linxing_agent.agent.service.impl.ExamServiceImpl;
 import org.linxing.linxing_agent.agent.subagent.SaveResult;
 import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
 import org.linxing.linxing_agent.agent.tool.Tool;
@@ -50,7 +50,7 @@ public class SaveExamTool implements Tool {
             + "再分批调用 append_to_container 追加题目（每批1-3题），最后调用本工具传入 container_id 保存。"
             + "不要尝试一次性生成超过5题的 JSON，极易导致格式错误。";
 
-    private final ExamService examService;
+    private final ExamServiceImpl examService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -137,7 +137,7 @@ public class SaveExamTool implements Tool {
             // 解析数据来源：分批模式从容器读取，一次性模式直接使用 arguments
             boolean isContainerMode = root.has("container_id") && !root.get("container_id").asText().isBlank();
             JsonNode examRoot;
-            ExamService.ValidationStrategy strategy;
+            ExamServiceImpl.ValidationStrategy strategy;
 
             if (isContainerMode) {
                 // 分批模式：从容器解析，使用 COLLECT_ALL 策略
@@ -147,11 +147,11 @@ public class SaveExamTool implements Tool {
                 }
                 JsonContainer container = context.getContainer(root.get("container_id").asText());
                 examRoot = container.assemble(objectMapper);
-                strategy = ExamService.ValidationStrategy.COLLECT_ALL;
+                strategy = ExamServiceImpl.ValidationStrategy.COLLECT_ALL;
             } else {
                 // 一次性模式：直接使用 arguments，使用 FAIL_FAST 策略
                 examRoot = root;
-                strategy = ExamService.ValidationStrategy.FAIL_FAST;
+                strategy = ExamServiceImpl.ValidationStrategy.FAIL_FAST;
             }
 
             // 统一调用 ExamService（校验 + 持久化）
@@ -217,7 +217,7 @@ public class SaveExamTool implements Tool {
         try {
             JsonNode examRoot = container.assemble(objectMapper);
             Integer examId = examService.parseAndSave(userId, examRoot,
-                    ExamService.ValidationStrategy.COLLECT_ALL, planId);
+                    ExamServiceImpl.ValidationStrategy.COLLECT_ALL, planId);
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("examId", examId);

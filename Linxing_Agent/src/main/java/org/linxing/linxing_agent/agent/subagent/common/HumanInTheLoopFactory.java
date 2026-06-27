@@ -29,6 +29,12 @@ public class HumanInTheLoopFactory {
 
     private final PendingClarificationRegistry clarificationRegistry;
 
+    private static final String CLARIFY_AGENT_NAME = "StudyPlanClarifyAgent";
+    private static final String CLARIFY_ROLE = "clarify";
+    private static final String CLARIFY_ANSWER_ROLE = "clarify_answer";
+    private static final String CLARIFY_DISPLAY_LABEL = "补充信息";
+    private static final String CLARIFY_ANSWER_DISPLAY_LABEL = "已收到补充信息";
+
     /**
      * 创建一个阻塞式 HumanInTheLoop Agent。
      *
@@ -53,8 +59,8 @@ public class HumanInTheLoopFactory {
                             "请补充您的信息");
                     // 推送 sub_agent 事件，携带澄清问题
                     recorder.record(AgentStepTypes.SUB_AGENT, phase,
-                            StepRecorder.buildSubAgentData(agentName, "clarify", true,
-                                    outputKey, true, question),
+                            StepRecorder.buildSubAgentData(agentName, CLARIFY_ROLE,
+                                    CLARIFY_DISPLAY_LABEL, true, outputKey, true, question),
                             null, null, false);
                     // 注册 pending future，等待用户回复；registry 负责超时自清理与版本校验
                     CompletableFuture<String> future = new CompletableFuture<>();
@@ -81,8 +87,8 @@ public class HumanInTheLoopFactory {
                         }
                         // 推送用户已回复/超时的状态事件
                         recorder.record(AgentStepTypes.SUB_AGENT, phase,
-                                StepRecorder.buildSubAgentData(agentName, "clarify_answer", true,
-                                        outputKey, true, null),
+                                StepRecorder.buildSubAgentData(agentName, CLARIFY_ANSWER_ROLE,
+                                        CLARIFY_ANSWER_DISPLAY_LABEL, true, outputKey, true, null),
                                 answer + statusLabel, null, false);
                         return answer;
                     } catch (Exception e) {
@@ -91,8 +97,8 @@ public class HumanInTheLoopFactory {
                         scope.writeState("clarification_timed_out", true);
                         clarificationRegistry.cancel(String.valueOf(sessionId));
                         recorder.record(AgentStepTypes.SUB_AGENT, phase,
-                                StepRecorder.buildSubAgentData(agentName, "clarify_answer", true,
-                                        outputKey, false, null),
+                                StepRecorder.buildSubAgentData(agentName, CLARIFY_ANSWER_ROLE,
+                                        CLARIFY_ANSWER_DISPLAY_LABEL, true, outputKey, false, null),
                                 null, "澄清等待被中断：" + e.getMessage(), false);
                         return defaultReply;
                     } finally {

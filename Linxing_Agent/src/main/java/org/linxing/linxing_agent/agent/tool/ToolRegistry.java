@@ -147,6 +147,8 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>,
         return entries;
     }
 
+
+    //批量获取标准的langchain4j工具定义的JSON schema字符串
     @Override
     public String resolve(List<String> names) {
         List<ToolSpec> specs = resolveSpecs(names);

@@ -3,7 +3,9 @@
     <div class="tree-nav-container">
       <div class="tree-header">
         <h3>{{ fileName }}</h3>
-        <button @click="$emit('close')" class="btn-close" title="关闭">✕</button>
+        <button @click="$emit('close')" class="btn-close" title="关闭">
+          <el-icon><Close /></el-icon>
+        </button>
       </div>
 
       <div v-if="loading" class="tree-loading">
@@ -197,7 +199,7 @@ export default {
   width: 14px;
   height: 14px;
   border: 2px solid #ddd;
-  border-top-color: #1a73e8;
+  border-top-color: #b8763d;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -232,13 +234,13 @@ export default {
 }
 
 .filter-chip:hover {
-  border-color: #1a73e8;
-  color: #1a73e8;
+  border-color: #b8763d;
+  color: #b8763d;
 }
 
 .filter-chip.active {
-  background: #1a73e8;
-  border-color: #1a73e8;
+  background: #b8763d;
+  border-color: #b8763d;
   color: #fff;
 }
 

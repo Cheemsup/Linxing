@@ -15,7 +15,7 @@
 
     <!-- 得分展示 -->
     <div v-if="submitted && submitResult" class="score-bar" :class="scoreClass">
-      <span class="score-icon">{{ scoreIcon }}</span>
+      <el-icon class="score-icon"><component :is="scoreIcon" /></el-icon>
       <span class="score-text">得分：{{ submitResult.score }} / {{ submitResult.total }}</span>
       <span class="score-pct">（{{ scorePct }}%）</span>
     </div>
@@ -185,9 +185,9 @@ export default {
       return 'score-poor'
     },
     scoreIcon() {
-      if (this.scorePct >= 80) return '🎉'
-      if (this.scorePct >= 60) return '👍'
-      return '💪'
+      if (this.scorePct >= 80) return 'Trophy'
+      if (this.scorePct >= 60) return 'Medal'
+      return 'Flag'
     },
     detailMap() {
       if (!this.submitResult || !this.submitResult.details) return {}
@@ -298,12 +298,12 @@ export default {
 }
 
 .btn-primary {
-  background: #1a73e8;
+  background: #b8763d;
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #1557b0;
+  background: #a0682f;
 }
 
 .btn-secondary {
@@ -379,7 +379,7 @@ export default {
 
 .question-number {
   font-weight: 600;
-  color: #1a73e8;
+  color: #b8763d;
   font-size: 14px;
 }
 
@@ -390,7 +390,7 @@ export default {
   font-weight: 500;
 }
 
-.type-single_choice { background: #e3f2fd; color: #1565c0; }
+.type-single_choice { background: #f3e6d4; color: #a0682f; }
 .type-multi_choice { background: #f3e5f5; color: #7b1fa2; }
 .type-fill_blank { background: #e8f5e9; color: #2e7d32; }
 .type-true_false { background: #fff3e0; color: #e65100; }
@@ -421,13 +421,13 @@ export default {
 }
 
 .option-item:hover {
-  background: #f5f8ff;
-  border-color: #bbdefb;
+  background: #faf5ed;
+  border-color: #ecd9b8;
 }
 
 .option-selected {
-  background: #e3f2fd;
-  border-color: #1a73e8;
+  background: #f3e6d4;
+  border-color: #b8763d;
 }
 
 .option-correct {
@@ -456,8 +456,8 @@ export default {
 
 .fill-input:focus {
   outline: none;
-  border-color: #1a73e8;
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+  border-color: #b8763d;
+  box-shadow: 0 0 0 3px rgba(184, 118, 61, 0.1);
 }
 
 .short-textarea {
@@ -474,8 +474,8 @@ export default {
 
 .short-textarea:focus {
   outline: none;
-  border-color: #1a73e8;
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+  border-color: #b8763d;
+  box-shadow: 0 0 0 3px rgba(184, 118, 61, 0.1);
 }
 
 .correct-answer {

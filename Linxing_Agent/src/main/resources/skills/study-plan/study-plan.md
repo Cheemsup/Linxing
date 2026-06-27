@@ -1,5 +1,6 @@
 ---
 name: study_plan
+display_name: "学习计划制定"
 description: "根据用户学习意向、知识库笔记或网络搜索结果，生成结构化分阶段学习计划，可选生成关联测验。当用户要求制定学习计划、规划学习路径、安排学习进度时触发。"
 tool_names:
   - search_knowledge_base

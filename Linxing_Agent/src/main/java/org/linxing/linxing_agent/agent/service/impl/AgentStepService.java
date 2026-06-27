@@ -2,6 +2,7 @@ package org.linxing.linxing_agent.agent.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.vo.AgentStepVO;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
@@ -11,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -55,13 +57,28 @@ public class AgentStepService {
     }
 
     private AgentStepVO toVO(org.linxing.linxing_agent.agent.entity.AgentStep step) {
+        Map<String, Object> stepData = step.getStepData();
+        String label = extractDisplayLabel(stepData);
         return AgentStepVO.builder()
                 .id(step.getId())
                 .stepOrder(step.getStepOrder())
                 .stepType(step.getStepType())
                 .content(step.getContent())
-                .stepData(step.getStepData())
+                .label(label)
+                .stepData(stepData)
                 .createdAt(step.getCreatedAt())
                 .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractDisplayLabel(Map<String, Object> stepData) {
+        if (stepData == null) {
+            return null;
+        }
+        Object value = stepData.get(StepRecorder.KEY_DISPLAY_LABEL);
+        if (value instanceof String) {
+            return (String) value;
+        }
+        return null;
     }
 }

@@ -29,6 +29,7 @@ public class RemoveFromContainerTool implements Tool {
     private static final String DESCRIPTION = "移除容器中指定数组路径、指定索引的元素。移除后后续元素索引前移。"
             + "当某元素修正3次仍不通过时，可移除该元素作为兜底。";
     private static final String BRIEF = "移除容器中指定索引的元素";
+    private static final String DISPLAY_LABEL = "移除JSON内容";
     private static final String WHEN_TO_USE = "某元素反复修正仍不通过时，移除该元素作为兜底";
 
     private final ObjectMapper objectMapper;
@@ -51,6 +52,11 @@ public class RemoveFromContainerTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

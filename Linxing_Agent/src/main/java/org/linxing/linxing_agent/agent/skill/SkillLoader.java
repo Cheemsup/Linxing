@@ -75,6 +75,7 @@ public class SkillLoader {
 
         String name = getString(frontmatter, "name");
         String description = getString(frontmatter, "description");
+        String displayName = getString(frontmatter, "display_name");
         List<String> toolNames = getStringList(frontmatter, "tool_names");
 
         if (name == null || name.isBlank()) {
@@ -90,6 +91,7 @@ public class SkillLoader {
         return SkillMetadata.builder()
                 .name(name.trim())
                 .description(description.trim())
+                .displayName(displayName != null && !displayName.isBlank() ? displayName.trim() : name.trim())
                 .toolNames(toolNames != null ? toolNames : List.of())
                 .skillFilePath(skillFile.toAbsolutePath().toString())
                 .skillDirPath(skillDir.toAbsolutePath().toString())

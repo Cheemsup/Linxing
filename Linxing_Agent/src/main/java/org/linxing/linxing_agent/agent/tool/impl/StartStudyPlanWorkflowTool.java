@@ -31,6 +31,7 @@ public class StartStudyPlanWorkflowTool implements Tool {
             + "阶段一知识收集（条件澄清提问 + 自主搜索知识库/联网）→ 阶段二内容生成（计划 + 可选测验）并持久化。"
             + "调用后通过 SSE step 事件推送进度，无需再调用 save_study_plan。";
     private static final String BRIEF = "启动学习计划生成工作流（含知识收集与可选测验）";
+    private static final String DISPLAY_LABEL = "计划生成工作流";
     private static final String WHEN_TO_USE = "当用户要求制定学习计划时调用此工具。"
             + "如果用户信息不足（如缺少目标、时长或素材），设置 needs_clarification=true 并提供 clarification_question，工作流会暂停等待用户回复。"
             + "如果用户同时要求生成测验/题目，设置 generate_exam=true。"
@@ -57,6 +58,11 @@ public class StartStudyPlanWorkflowTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

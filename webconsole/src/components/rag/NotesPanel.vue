@@ -4,7 +4,7 @@
       <div class="notes-header">
         <h2>笔记管理</h2>
         <div class="header-actions">
-          <span class="doc-count">共 {{ total }} 篇文档</span>
+          <span class="doc-count">共 {{ total }} 篇笔记</span>
           <button @click="loadDocuments" class="btn-refresh" :disabled="loading">刷新</button>
         </div>
       </div>
@@ -14,14 +14,14 @@
       </div>
 
       <div v-else-if="documents.length === 0" class="empty-state">
-        <span class="empty-icon">📭</span>
-        <p>暂无笔记，请先导入文档。</p>
+        <el-icon class="empty-icon"><FolderOpened /></el-icon>
+        <p>暂无笔记，请先去导入页上传。</p>
       </div>
 
       <div v-else>
         <div class="documents-list">
           <div v-for="doc in documents" :key="doc.id" class="doc-card">
-            <div class="doc-icon">{{ getFileIcon(doc.fileType) }}</div>
+            <div class="doc-icon"><el-icon><component :is="getFileIcon(doc.fileType)" /></el-icon></div>
             <div class="doc-info">
               <div class="doc-name" :title="doc.fileName">{{ doc.fileName }}</div>
               <div class="doc-meta">
@@ -40,16 +40,21 @@
                 <span :class="['status-badge', doc.status]">
                   {{ getStatusLabel(doc.status) }}
                 </span>
-                <span v-if="doc.chunkStrategy && doc.chunkStrategy !== 'auto'" class="strategy-badge">
-                  {{ getStrategyLabel(doc.chunkStrategy) }}
-                </span>
               </div>
             </div>
             <div class="doc-actions">
-              <button @click="openTreeNav(doc)" class="btn-action btn-tree" title="结构导航">🌳 导航</button>
-              <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">👁 预览</button>
-              <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">⬇ 下载</button>
-              <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">🗑 删除</button>
+              <button @click="openTreeNav(doc)" class="btn-action btn-tree" title="查看笔记目录">
+                <el-icon><Connection /></el-icon><span>目录</span>
+              </button>
+              <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">
+                <el-icon><View /></el-icon><span>预览</span>
+              </button>
+              <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">
+                <el-icon><Download /></el-icon><span>下载</span>
+              </button>
+              <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">
+                <el-icon><Delete /></el-icon><span>删除</span>
+              </button>
             </div>
           </div>
         </div>
@@ -76,7 +81,7 @@
       <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
         <div class="modal-box">
           <h3>确认删除</h3>
-          <p>确定要删除文档「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
+          <p>确定要删除笔记「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
           <div class="modal-actions">
             <button @click="showDeleteConfirm = false" class="btn-cancel">取消</button>
             <button @click="executeDelete" class="btn-confirm-delete" :disabled="deleting">
@@ -105,7 +110,9 @@
       <div class="chunk-preview-box">
         <div class="chunk-preview-header">
           <h3>内容预览</h3>
-          <button @click="selectedChunkPreview = null" class="btn-close-preview">✕</button>
+          <button @click="selectedChunkPreview = null" class="btn-close-preview">
+            <el-icon><Close /></el-icon>
+          </button>
         </div>
         <div class="chunk-preview-body">
           <div v-if="selectedChunkPreview.titlePath" class="chunk-preview-title">
@@ -169,7 +176,7 @@ export default {
           this.totalPages = pageData.totalPages || 1
         }
       } catch (error) {
-        this.showToast('加载文档列表失败: ' + (error.message || '未知错误'), 'error')
+        this.showToast('加载笔记失败：' + (error.message || '未知错误'), 'error')
       } finally {
         this.loading = false
       }
@@ -198,10 +205,10 @@ export default {
           this.previewData = resData.data
           this.showPreview = true
         } else {
-          this.showToast('预览失败: ' + (resData.msg || '未知错误'), 'error')
+          this.showToast('预览失败：' + (resData.msg || '未知错误'), 'error')
         }
       } catch (error) {
-        this.showToast('预览失败: ' + (error.message || '未知错误'), 'error')
+        this.showToast('预览失败：' + (error.message || '未知错误'), 'error')
       }
     },
 
@@ -219,7 +226,7 @@ export default {
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
       } catch (error) {
-        this.showToast('下载失败: ' + (error.message || '未知错误'), 'error')
+        this.showToast('下载失败：' + (error.message || '未知错误'), 'error')
       }
     },
 
@@ -233,12 +240,12 @@ export default {
       this.deleting = true
       try {
         await documentApi.delete(this.deleteTarget.id)
-        this.showToast('文档已删除', 'success')
+        this.showToast('笔记已删除', 'success')
         this.showDeleteConfirm = false
         this.deleteTarget = null
         this.loadDocuments()
       } catch (error) {
-        this.showToast('删除失败: ' + (error.message || '未知错误'), 'error')
+        this.showToast('删除失败：' + (error.message || '未知错误'), 'error')
       } finally {
         this.deleting = false
       }
@@ -246,15 +253,15 @@ export default {
 
     getFileIcon(fileType) {
       const iconMap = {
-        pdf: '📕',
-        docx: '📘',
-        doc: '📘',
-        xlsx: '📗',
-        xls: '📗',
-        txt: '📄',
-        md: '📝'
+        pdf: 'Document',
+        docx: 'Document',
+        doc: 'Document',
+        xlsx: 'Document',
+        xls: 'Document',
+        txt: 'Document',
+        md: 'EditPen'
       }
-      return iconMap[fileType] || '📄'
+      return iconMap[fileType] || 'Document'
     },
 
     getFileTypeLabel(fileType) {
@@ -277,19 +284,6 @@ export default {
         failed: '失败'
       }
       return labelMap[status] || status || '未知'
-    },
-
-    getStrategyLabel(strategy) {
-      const labelMap = {
-        MarkdownChunkStrategy: 'Markdown',
-        HtmlChunkStrategy: 'HTML',
-        CodeChunkStrategy: '代码',
-        StructureAwareChunkStrategy: '结构化',
-        LineBasedChunkStrategy: '行式',
-        RecursiveChunkStrategy: '递归',
-        SemanticChunkStrategy: '语义'
-      }
-      return labelMap[strategy] || strategy
     },
 
     formatFileSize(bytes) {
@@ -394,7 +388,7 @@ export default {
   width: 16px;
   height: 16px;
   border: 2px solid #ddd;
-  border-top-color: #1a73e8;
+  border-top-color: #b8763d;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -421,8 +415,8 @@ export default {
 }
 
 .doc-card:hover {
-  border-color: #1a73e8;
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.1);
+  border-color: #b8763d;
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.1);
 }
 
 .doc-icon {
@@ -480,15 +474,6 @@ export default {
   color: #c62828;
 }
 
-.strategy-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 500;
-  background: #e3f2fd;
-  color: #1565c0;
-}
-
 .doc-actions {
   display: flex;
   gap: 6px;
@@ -514,12 +499,12 @@ export default {
 }
 
 .btn-preview {
-  background: #e3f2fd;
-  color: #1565c0;
+  background: #f3e6d4;
+  color: #a0682f;
 }
 
 .btn-preview:hover {
-  background: #bbdefb;
+  background: #ecd9b8;
 }
 
 .btn-download {
@@ -731,7 +716,7 @@ export default {
 
 .chunk-preview-title {
   font-weight: 600;
-  color: #1565c0;
+  color: #a0682f;
   margin-bottom: 12px;
   font-size: 14px;
 }

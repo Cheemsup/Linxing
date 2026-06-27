@@ -5,16 +5,26 @@
       <div class="plan-header-main">
         <h2 class="plan-title">{{ planData.title }}</h2>
         <div class="plan-meta">
-          <span class="meta-item">🎯 {{ planData.goal }}</span>
-          <span v-if="planData.duration" class="meta-item">⏱ {{ planData.duration }}</span>
+          <span class="meta-item">
+            <el-icon><Aim /></el-icon><span>{{ planData.goal }}</span>
+          </span>
+          <span v-if="planData.duration" class="meta-item">
+            <el-icon><Timer /></el-icon><span>{{ planData.duration }}</span>
+          </span>
           <span class="meta-item" :class="'status-' + planData.status">{{ statusLabel(planData.status) }}</span>
         </div>
         <p v-if="planData.description" class="plan-desc">{{ planData.description }}</p>
       </div>
       <div class="plan-header-actions">
-        <button class="export-btn" @click="onExport('md')" title="导出为 Markdown">📄 导出 MD</button>
-        <button class="export-btn" @click="onExport('html')" title="导出为 HTML">🌐 导出 HTML</button>
-        <button class="back-btn" @click="$emit('back')">← 返回列表</button>
+        <button class="export-btn" @click="onExport('md')" title="导出为 Markdown">
+          <el-icon><Document /></el-icon><span>导出 MD</span>
+        </button>
+        <button class="export-btn" @click="onExport('html')" title="导出为 HTML">
+          <el-icon><Browser /></el-icon><span>导出 HTML</span>
+        </button>
+        <button class="back-btn" @click="$emit('back')">
+          <el-icon><ArrowLeft /></el-icon><span>返回列表</span>
+        </button>
       </div>
     </div>
 
@@ -28,9 +38,9 @@
         <div class="progress-fill" :style="{ width: planData.progress.completionPercentage + '%' }"></div>
       </div>
       <div class="progress-stats">
-        <span class="stat-completed">✓ 已完成 {{ planData.progress.completedPhases }}</span>
-        <span class="stat-in-progress">◐ 进行中 {{ planData.progress.inProgressPhases }}</span>
-        <span class="stat-not-started">○ 未开始 {{ planData.progress.notStartedPhases }}</span>
+        <span class="stat-completed"><el-icon><CircleCheckFilled /></el-icon>已完成 {{ planData.progress.completedPhases }}</span>
+        <span class="stat-in-progress"><el-icon><Clock /></el-icon>进行中 {{ planData.progress.inProgressPhases }}</span>
+        <span class="stat-not-started"><el-icon><RemoveFilled /></el-icon>未开始 {{ planData.progress.notStartedPhases }}</span>
       </div>
     </div>
 
@@ -42,8 +52,8 @@
         :class="['timeline-item', 'phase-' + phase.progressStatus]"
       >
         <div class="timeline-marker">
-          <span v-if="phase.progressStatus === 'completed'" class="marker-icon completed">✓</span>
-          <span v-else-if="phase.progressStatus === 'in_progress'" class="marker-icon in-progress">◐</span>
+          <el-icon v-if="phase.progressStatus === 'completed'" class="marker-icon completed"><CircleCheckFilled /></el-icon>
+          <el-icon v-else-if="phase.progressStatus === 'in_progress'" class="marker-icon in-progress"><Clock /></el-icon>
           <span v-else class="marker-icon not-started">{{ phase.phaseOrder }}</span>
         </div>
 
@@ -59,32 +69,32 @@
                 class="status-select"
                 @change="onStatusChange(phase, $event.target.value)"
               >
-                <option value="not_started">○ 未开始</option>
-                <option value="in_progress">◐ 进行中</option>
-                <option value="completed">✓ 已完成</option>
+                <option value="not_started">未开始</option>
+                <option value="in_progress">进行中</option>
+                <option value="completed">已完成</option>
               </select>
             </div>
           </div>
 
           <div class="phase-body">
             <div v-if="phase.duration" class="phase-field">
-              <span class="field-label">⏱ 时长：</span>
+              <span class="field-label"><el-icon><Timer /></el-icon>时长：</span>
               <span>{{ phase.duration }}</span>
             </div>
             <div v-if="phase.objective" class="phase-field">
-              <span class="field-label">🎯 目标：</span>
+              <span class="field-label"><el-icon><Aim /></el-icon>目标：</span>
               <span>{{ phase.objective }}</span>
             </div>
 
             <div v-if="parseArray(phase.keyTopics).length" class="phase-field">
-              <span class="field-label">📚 关键知识点：</span>
+              <span class="field-label"><el-icon><Reading /></el-icon>关键知识点：</span>
               <ul class="field-list">
                 <li v-for="(item, i) in parseArray(phase.keyTopics)" :key="i">{{ item }}</li>
               </ul>
             </div>
 
             <div v-if="parseArray(phase.resources).length" class="phase-field">
-              <span class="field-label">🔗 学习资源：</span>
+              <span class="field-label"><el-icon><Link /></el-icon>学习资源：</span>
               <ul class="field-list">
                 <li v-for="(item, i) in parseArray(phase.resources)" :key="i">
                   <template v-if="typeof item === 'object' && item.url">
@@ -96,14 +106,14 @@
             </div>
 
             <div v-if="parseArray(phase.practiceTasks).length" class="phase-field">
-              <span class="field-label">✏️ 实践任务：</span>
+              <span class="field-label"><el-icon><EditPen /></el-icon>练习：</span>
               <ul class="field-list">
                 <li v-for="(item, i) in parseArray(phase.practiceTasks)" :key="i">{{ item }}</li>
               </ul>
             </div>
 
             <div v-if="parseArray(phase.milestones).length" class="phase-field">
-              <span class="field-label">🏆 里程碑：</span>
+              <span class="field-label"><el-icon><Trophy /></el-icon>阶段成果：</span>
               <ul class="field-list">
                 <li v-for="(item, i) in parseArray(phase.milestones)" :key="i">{{ item }}</li>
               </ul>
@@ -125,12 +135,14 @@
     <!-- 关联测验区块 -->
     <div class="linked-exams-section">
       <div class="section-header">
-        <h3 class="section-title">📝 关联测验</h3>
-        <button v-if="!linkedExamsLoading" class="refresh-exams-btn" @click="fetchLinkedExams" title="刷新">↻</button>
+        <h3 class="section-title"><el-icon><EditPen /></el-icon>关联测验</h3>
+        <button v-if="!linkedExamsLoading" class="refresh-exams-btn" @click="fetchLinkedExams" title="刷新">
+          <el-icon><Refresh /></el-icon>
+        </button>
       </div>
       <div v-if="linkedExamsLoading" class="exams-loading">加载中...</div>
       <div v-else-if="linkedExams.length === 0" class="exams-empty">
-        暂无关联测验。可在对话中让助手"制定学习计划并出题"来生成。
+        还没有关联测验。可在对话中告诉助手「为这个学习计划出几道题」来生成。
       </div>
       <div v-else class="linked-exam-cards">
         <div
@@ -235,7 +247,7 @@ export default {
     },
 
     goToExam(examId) {
-      this.$router.push({ path: '/quiz', query: { examId } })
+      this.$router.push({ name: 'ExamDetail', params: { examId } })
     },
 
     onStatusChange(phase, newStatus) {
@@ -295,9 +307,10 @@ export default {
 .meta-item {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 
-.status-created { color: #1a73e8; }
+.status-created { color: #b8763d; }
 .status-in_progress { color: #f57f17; }
 .status-completed { color: #2e7d32; }
 .status-archived { color: #999; }
@@ -325,11 +338,14 @@ export default {
   font-size: 13px;
   transition: all 0.2s;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .export-btn:hover {
-  border-color: #1a73e8;
-  color: #1a73e8;
+  border-color: #b8763d;
+  color: #b8763d;
 }
 
 .back-btn:hover {
@@ -338,7 +354,7 @@ export default {
 }
 
 .progress-section {
-  background: #f5f8ff;
+  background: #faf5ed;
   border-radius: 10px;
   padding: 16px 20px;
   margin-bottom: 24px;
@@ -354,7 +370,7 @@ export default {
 
 .progress-percentage {
   font-weight: 600;
-  color: #1a73e8;
+  color: #b8763d;
 }
 
 .progress-bar {
@@ -366,7 +382,7 @@ export default {
 }
 
 .progress-fill {
-  background: linear-gradient(90deg, #1a73e8, #4285f4);
+  background: linear-gradient(90deg, #b8763d, #a0682f);
   height: 100%;
   transition: width 0.3s ease;
 }
@@ -375,6 +391,20 @@ export default {
   display: flex;
   gap: 16px;
   font-size: 12px;
+}
+
+.progress-stats .stat-completed,
+.progress-stats .stat-in-progress,
+.progress-stats .stat-not-started {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress-stats .stat-completed .el-icon,
+.progress-stats .stat-in-progress .el-icon,
+.progress-stats .stat-not-started .el-icon {
+  font-size: 14px;
 }
 
 .stat-completed { color: #2e7d32; }
@@ -422,6 +452,11 @@ export default {
   border-radius: 50%;
   font-size: 14px;
   font-weight: 600;
+}
+
+.marker-icon.el-icon {
+  font-size: 18px;
+  box-sizing: border-box;
 }
 
 .marker-icon.completed {
@@ -477,7 +512,7 @@ export default {
 }
 
 .phase-order {
-  color: #1a73e8;
+  color: #b8763d;
   font-size: 13px;
   margin-right: 8px;
 }
@@ -493,7 +528,7 @@ export default {
 }
 
 .status-select:hover {
-  border-color: #1a73e8;
+  border-color: #b8763d;
 }
 
 .phase-body {
@@ -509,6 +544,9 @@ export default {
 .field-label {
   font-weight: 600;
   color: #333;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .field-list {
@@ -521,7 +559,7 @@ export default {
 }
 
 .field-list a {
-  color: #1a73e8;
+  color: #b8763d;
   text-decoration: none;
 }
 
@@ -548,7 +586,7 @@ export default {
 
 .notes-input:focus {
   outline: none;
-  border-color: #1a73e8;
+  border-color: #b8763d;
   background: #fff;
 }
 
@@ -572,6 +610,9 @@ export default {
   font-size: 18px;
   color: #1a1a1a;
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .refresh-exams-btn {
@@ -582,6 +623,8 @@ export default {
   cursor: pointer;
   font-size: 14px;
   color: #6c757d;
+  display: inline-flex;
+  align-items: center;
 }
 
 .refresh-exams-btn:hover {
@@ -612,8 +655,8 @@ export default {
 }
 
 .linked-exam-card:hover {
-  border-color: #1a73e8;
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.1);
+  border-color: #b8763d;
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.1);
 }
 
 .exam-card-title {

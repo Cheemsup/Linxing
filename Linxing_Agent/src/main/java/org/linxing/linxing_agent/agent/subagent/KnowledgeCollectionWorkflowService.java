@@ -28,6 +28,7 @@ public class KnowledgeCollectionWorkflowService {
 
     private static final String CLARIFY_AGENT_NAME = "StudyPlanClarifyAgent";
     private static final String KNOWLEDGE_AGENT_NAME = "KnowledgeCollectorAgent";
+    private static final String KNOWLEDGE_DISPLAY_LABEL = "收集资料";
 
     /** 澄清等待超时（秒），与 StudyPlanWorkflowService 保持一致 */
     private static final long CLARIFY_TIMEOUT_SECONDS = 1500;
@@ -71,7 +72,8 @@ public class KnowledgeCollectionWorkflowService {
                 // 提供默认值避免 MissingArgumentException
                 .defaultKeyValue("clarification", CLARIFY_TIMEOUT_REPLY)
                 .listener(StepRecorder.createListener(
-                        KNOWLEDGE_AGENT_NAME, "knowledge_search", "materials", recorder,
+                        KNOWLEDGE_AGENT_NAME, "knowledge_search",
+                        KNOWLEDGE_DISPLAY_LABEL, "materials", recorder,
                         AgentStepTypes.PHASE_KNOWLEDGE_SEARCH))
                 .build();
 

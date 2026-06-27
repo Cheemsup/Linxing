@@ -16,6 +16,7 @@ public class AgentStepEvent {
     private String eventType;
     private int stepNumber;
     private String phase;
+    private String label;
     private Map<String, Object> stepData;
     private String answer;
     private String error;

@@ -32,6 +32,14 @@ public interface Tool {
     }
 
     /**
+     * 前端展示名，用于在对话步骤中向用户展示此工具的人类可读的友好名称。
+     * 默认复用 {@link #brief()}，具体工具可覆盖以提供更友好的文案。
+     */
+    default String displayLabel() {
+        return brief();
+    }
+
+    /**
      * 前置条件列表，如需要特定权限、依赖数据等（渐进式披露 Phase 1，可选）
      */
     default List<String> prerequisites() {

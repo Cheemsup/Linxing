@@ -179,6 +179,7 @@ public class ChatServiceImpl implements IChatService {
                 .eventType(AgentStepTypes.CACHE_HIT)
                 .stepNumber(0)
                 .phase(AgentStepTypes.PHASE_CACHE)
+                .label("已为你快速回答")
                 .answer(cacheResult.getEntry().getAnswer())
                 .finalStep(true)
                 .build());

@@ -28,6 +28,7 @@ public class AppendToContainerTool implements Tool {
     private static final String NAME = "append_to_container";
     private static final String DESCRIPTION = "向容器的指定数组路径追加元素。每次建议追加1-3个元素，避免单次输出过长。";
     private static final String BRIEF = "向容器追加数组元素";
+    private static final String DISPLAY_LABEL = "追加JSON内容";
     private static final String WHEN_TO_USE = "分批模式下，向已创建的容器追加数组数据时使用";
 
     private final ObjectMapper objectMapper;
@@ -50,6 +51,11 @@ public class AppendToContainerTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

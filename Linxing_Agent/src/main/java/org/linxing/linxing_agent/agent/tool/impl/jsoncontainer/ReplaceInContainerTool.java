@@ -28,6 +28,7 @@ public class ReplaceInContainerTool implements Tool {
     private static final String NAME = "replace_in_container";
     private static final String DESCRIPTION = "替换容器中指定数组路径、指定索引的元素。用于 save 工具校验失败后精确修正错误元素。";
     private static final String BRIEF = "替换容器中指定索引的元素";
+    private static final String DISPLAY_LABEL = "替换JSON内容";
     private static final String WHEN_TO_USE = "save 工具校验失败返回索引级错误时，用此工具精确修正指定位置的元素";
 
     private final ObjectMapper objectMapper;
@@ -50,6 +51,11 @@ public class ReplaceInContainerTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

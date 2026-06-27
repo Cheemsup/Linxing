@@ -147,11 +147,11 @@ export default {
 }
 
 .node-content:hover {
-  background: #e3f2fd;
+  background: #f3e6d4;
 }
 
 .node-content.selected {
-  background: #bbdefb;
+  background: #ecd9b8;
 }
 
 .expand-icon {
@@ -190,8 +190,8 @@ export default {
 }
 
 .chunk-type-badge.section {
-  background: #e3f2fd;
-  color: #1565c0;
+  background: #f3e6d4;
+  color: #a0682f;
 }
 
 .chunk-type-badge.general {

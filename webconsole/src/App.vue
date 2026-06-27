@@ -1,17 +1,12 @@
 <template>
   <div id="app">
-    <AppLayout />
+    <router-view />
   </div>
 </template>
 
 <script>
-import AppLayout from './layouts/AppLayout.vue'
-
 export default {
-  name: 'App',
-  components: {
-    AppLayout
-  }
+  name: 'App'
 }
 </script>
 
@@ -23,9 +18,9 @@ export default {
 }
 
 html, body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Microsoft YaHei', sans-serif;
-  background: #f0f2f5;
-  color: #333;
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  background: #faf8f4;
+  color: #1a2e2a;
   height: 100%;
   overflow: hidden;
 }

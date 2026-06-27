@@ -79,15 +79,15 @@ export default {
 }
 
 .tree-node-rect:hover {
-  border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+  border-color: #b8763d;
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.2);
   transform: translateY(-1px);
 }
 
 .tree-node-rect.active {
-  border-color: #1a73e8;
-  background: linear-gradient(135deg, #e8f0fe, #d2e3fc);
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.25);
+  border-color: #b8763d;
+  background: linear-gradient(135deg, #f7eede, #ecd9b8);
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.25);
   font-weight: 600;
 }
 
@@ -101,7 +101,7 @@ export default {
 }
 
 .tree-node-rect.active .node-depth {
-  background: #1a73e8;
+  background: #b8763d;
   color: white;
 }
 

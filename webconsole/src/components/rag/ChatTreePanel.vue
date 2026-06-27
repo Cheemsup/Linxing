@@ -3,7 +3,9 @@
     <div class="tree-header">
       <h3>对话树</h3>
       <span class="tree-hint">点击选中节点，再点「确认跳转」切换对话</span>
-      <button class="btn-close" @click="$emit('close')" title="关闭">✕</button>
+      <button class="btn-close" @click="$emit('close')" title="关闭">
+        <el-icon><Close /></el-icon>
+      </button>
     </div>
     <div class="tree-body">
       <div v-if="treeData === null" class="tree-empty">
@@ -216,14 +218,14 @@ export default {
 }
 
 .tree-custom-node:hover {
-  border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+  border-color: #b8763d;
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.2);
 }
 
 .tree-node-active {
-  border-color: #1a73e8;
-  background: linear-gradient(135deg, #e8f0fe, #d2e3fc);
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.25);
+  border-color: #b8763d;
+  background: linear-gradient(135deg, #f7eede, #ecd9b8);
+  box-shadow: 0 2px 8px rgba(184, 118, 61, 0.25);
   font-weight: 600;
 }
 
@@ -246,7 +248,7 @@ export default {
 
 .btn-reset {
   padding: 6px 14px;
-  background: #667eea;
+  background: #b8763d;
   color: white;
   border: none;
   border-radius: 6px;

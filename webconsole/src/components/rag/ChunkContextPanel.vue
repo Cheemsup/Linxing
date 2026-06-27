@@ -2,7 +2,9 @@
   <div class="chunk-context-panel">
     <div class="context-header">
       <h3>上下文定位</h3>
-      <button @click="$emit('close')" class="btn-close" title="关闭">✕</button>
+      <button @click="$emit('close')" class="btn-close" title="关闭">
+        <el-icon><Close /></el-icon>
+      </button>
     </div>
 
     <div v-if="loading" class="context-loading">
@@ -131,7 +133,7 @@ export default {
   width: 14px;
   height: 14px;
   border: 2px solid #ddd;
-  border-top-color: #1a73e8;
+  border-top-color: #b8763d;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -161,7 +163,7 @@ export default {
 }
 
 .current-label {
-  color: #1a73e8;
+  color: #b8763d;
 }
 
 .document-info {
@@ -185,8 +187,8 @@ export default {
 
 .parent-title {
   font-size: 12px;
-  color: #1565c0;
-  background: #e3f2fd;
+  color: #a0682f;
+  background: #f3e6d4;
   padding: 2px 8px;
   border-radius: 3px;
 }
@@ -206,8 +208,8 @@ export default {
 }
 
 .current-body {
-  border-color: #1a73e8;
-  background: #f0f7ff;
+  border-color: #b8763d;
+  background: #faf5ed;
 }
 
 .parent-body {
@@ -233,13 +235,13 @@ export default {
 }
 
 .sibling-item:hover {
-  border-color: #1a73e8;
-  background: #f0f7ff;
+  border-color: #b8763d;
+  background: #faf5ed;
 }
 
 .sibling-item.active {
-  border-color: #1a73e8;
-  background: #e3f2fd;
+  border-color: #b8763d;
+  background: #f3e6d4;
 }
 
 .sibling-id {

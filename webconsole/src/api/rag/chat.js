@@ -123,6 +123,12 @@ export const chatSessionApi = {
   delete(id) {
     return api.delete(`/agent/sessions/${id}`)
   },
+  updateTitle(id, title) {
+    return api.put(`/agent/sessions/${id}/title`, { title })
+  },
+  autoTitle(id) {
+    return api.post(`/agent/sessions/${id}/auto-title`)
+  },
   getMessages(sessionId) {
     return api.get(`/agent/sessions/${sessionId}/messages`)
   },

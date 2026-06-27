@@ -22,6 +22,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public class StepRecorder {
 
+    /**
+     * step_data 中存储前端展示名的 key。
+     * 为兼容现有 agent_steps 表结构（无独立 label 字段），展示名暂通过 step_data 传递。
+     */
+    public static final String KEY_DISPLAY_LABEL = "display_label";
+
     private final AgentStepListener listener;
     private final AgentStepMapper agentStepMapper;
     private final Integer sessionId;
@@ -65,24 +71,38 @@ public class StepRecorder {
 
     /**
      * 记录 thinking 步骤的完整推理文本：仅 DB 持久化 + 累积 VO，不推送 SSE。
-     * thinking 步骤的 SSE 与 DB 语义分离，不能用 {@link #record(AgentStepEvent)} 统一处理
      * thiking内容的SSE推送通过专门的实现来进行，若用 record() 会导致 SSE 重复推送（循环开头一次 + record 内部一次）。
-     * 本方法仅完成 DB 持久化 + VO 累积，step_order 从共享 orderSeq 分配保证连续。
      *
      * @param content  完整推理文本（建议调用方截断）
      * @param stepData 结构化数据（如 thinking_tokens）
      * @return 持久化后的 AgentStep（失败返回 null）
      */
     public AgentStep recordThinkingContent(String content, Map<String, Object> stepData) {
+        return recordThinkingContent(content, stepData, null);
+    }
+
+    /**
+     * 记录 thinking 步骤的完整推理文本，并指定前端展示名。
+     *
+     * @param content 完整推理文本（建议调用方截断）
+     * @param stepData 结构化数据（如 thinking_tokens）
+     * @param label 前端展示名，如"思考中"
+     * @return 持久化后的 AgentStep（失败返回 null）
+     */
+    public AgentStep recordThinkingContent(String content, Map<String, Object> stepData, String label) {
         try {
             int order = orderSeq.getAndIncrement();
+            Map<String, Object> data = stepData != null ? new HashMap<>(stepData) : new HashMap<>();
+            if (label != null && !label.isBlank()) {
+                data.put(KEY_DISPLAY_LABEL, label);
+            }
             AgentStep step = AgentStep.builder()
                     .chatMessageId(null)
                     .sessionId(sessionId)
                     .stepOrder(order)
                     .stepType(AgentStepTypes.THINKING)
                     .content(content != null ? content : "")
-                    .stepData(stepData != null ? stepData : Map.of())
+                    .stepData(data)
                     .build();
             agentStepMapper.insert(step);
             recordedSteps.add(AgentStepVO.builder()
@@ -90,6 +110,7 @@ public class StepRecorder {
                     .stepOrder(step.getStepOrder())
                     .stepType(step.getStepType())
                     .content(step.getContent())
+                    .label(label)
                     .stepData(step.getStepData())
                     .createdAt(step.getCreatedAt())
                     .build());
@@ -103,19 +124,25 @@ public class StepRecorder {
 
     /**
      * 内部持久化逻辑：用 nextOrder 分配 step_order，insert + 累积 VO。
+     * 若事件携带 {@link AgentStepEvent#getLabel()}，会写入 step_data 的 {@link #KEY_DISPLAY_LABEL} 并回显到 VO。
      */
     private void persistWithNextOrder(AgentStepEvent event) {
         try {
             int order = orderSeq.getAndIncrement();
             String content = event.getAnswer() != null ? event.getAnswer()
                     : (event.getError() != null ? event.getError() : "");
+            Map<String, Object> stepData = event.getStepData() != null
+                    ? new HashMap<>(event.getStepData()) : new HashMap<>();
+            if (event.getLabel() != null && !event.getLabel().isBlank()) {
+                stepData.put(KEY_DISPLAY_LABEL, event.getLabel());
+            }
             AgentStep step = AgentStep.builder()
                     .chatMessageId(null)
                     .sessionId(sessionId)
                     .stepOrder(order)
                     .stepType(event.getEventType())
                     .content(content)
-                    .stepData(event.getStepData() != null ? event.getStepData() : Map.of())
+                    .stepData(stepData)
                     .build();
             agentStepMapper.insert(step);
             recordedSteps.add(AgentStepVO.builder()
@@ -123,6 +150,7 @@ public class StepRecorder {
                     .stepOrder(step.getStepOrder())
                     .stepType(step.getStepType())
                     .content(step.getContent())
+                    .label(event.getLabel())
                     .stepData(step.getStepData())
                     .createdAt(step.getCreatedAt())
                     .build());
@@ -159,42 +187,34 @@ public class StepRecorder {
     }
 
     // ==================== 静态辅助方法 ====================
-    // TODO：createListener/buildSubAgentData 配合任务5（展示名源头化）一并重构；
-    //       readBooleanState 与 step 记录无关，后续可迁到 SubAgentContext 或工具类。
+    // TODO：readBooleanState 与 step 记录无关，后续可迁到 SubAgentContext 或工具类。
 
     /**
      * 为子 Agent 创建 AgentListener，在执行完成后推送 sub_agent 事件。
      *
-     * @param agentName  Agent 名称（用于展示）
-     * @param agentRole  Agent 角色（用于前端 roleMap 映射）
-     * @param outputKey  输出 key（可 null）
-     * @param recorder   步骤记录器
+     * @param agentName    Agent 名称（内部标识）
+     * @param agentRole    Agent 角色（用于前端兜底映射）
+     * @param displayLabel 前端展示名（如"收集资料"）
+     * @param outputKey    输出 key（可 null）
+     * @param recorder     步骤记录器
+     * @param phase        阶段标识（用于 step 事件分组）
      */
     public static AgentListener createListener(String agentName, String agentRole,
-                                               String outputKey, StepRecorder recorder) {
-        return createListener(agentName, agentRole, outputKey, recorder, "study_plan");
-    }
-
-    /**
-     * 为子 Agent 创建 AgentListener，在执行完成后推送 sub_agent 事件。
-     *
-     * @param phase      阶段标识（用于 step 事件分组）
-     */
-    public static AgentListener createListener(String agentName, String agentRole,
+                                               String displayLabel,
                                                String outputKey, StepRecorder recorder,
                                                String phase) {
         return new AgentListener() {
             @Override
             public void afterAgentInvocation(AgentResponse response) {
                 recorder.record(AgentStepTypes.SUB_AGENT, phase,
-                        buildSubAgentData(agentName, agentRole, true, outputKey, true, null),
+                        buildSubAgentData(agentName, agentRole, displayLabel, true, outputKey, true, null),
                         null, null, false);
             }
 
             @Override
             public void onAgentInvocationError(AgentInvocationError error) {
                 recorder.record(AgentStepTypes.SUB_AGENT, phase,
-                        buildSubAgentData(agentName, agentRole, true, outputKey, false, null),
+                        buildSubAgentData(agentName, agentRole, displayLabel, true, outputKey, false, null),
                         null, getErrorMessage(error), false);
             }
         };
@@ -202,13 +222,19 @@ public class StepRecorder {
 
     /**
      * 构建 sub_agent 步骤的 stepData。
+     *
+     * @param displayLabel 前端展示名，会写入 {@link #KEY_DISPLAY_LABEL}
      */
     public static Map<String, Object> buildSubAgentData(String agentName, String agentRole,
+                                                        String displayLabel,
                                                         boolean triggered, String outputKey,
                                                         boolean success, String question) {
         Map<String, Object> data = new HashMap<>();
         data.put(AgentStepTypes.KEY_AGENT_NAME, agentName);
         data.put(AgentStepTypes.KEY_AGENT_ROLE, agentRole);
+        if (displayLabel != null && !displayLabel.isBlank()) {
+            data.put(KEY_DISPLAY_LABEL, displayLabel);
+        }
         data.put(AgentStepTypes.KEY_TRIGGERED, triggered);
         if (outputKey != null) {
             data.put(AgentStepTypes.KEY_OUTPUT_KEY, outputKey);

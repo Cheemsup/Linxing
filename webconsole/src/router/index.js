@@ -1,12 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { authStore } from '@/stores/authStore'
+import AppLayout from '@/layouts/AppLayout.vue'
 import LoginView from '@/views/auth/LoginView.vue'
-import SearchView from '@/views/rag/SearchView.vue'
-import ChatView from '@/views/rag/ChatView.vue'
-import IngestView from '@/views/rag/IngestView.vue'
-import NotesView from '@/views/rag/NotesView.vue'
-import QuizView from '@/views/rag/QuizView.vue'
-import StudyPlanView from '@/views/rag/StudyPlanView.vue'
+
+// 路由懒加载，减少首屏体积
+const SearchView = () => import('@/views/rag/SearchView.vue')
+const ChatView = () => import('@/views/rag/ChatView.vue')
+const IngestView = () => import('@/views/rag/IngestView.vue')
+const NotesView = () => import('@/views/rag/NotesView.vue')
+const ExamListView = () => import('@/views/rag/ExamListView.vue')
+const ExamDetailView = () => import('@/views/rag/ExamDetailView.vue')
+const PlanListView = () => import('@/views/rag/PlanListView.vue')
+const PlanDetailView = () => import('@/views/rag/PlanDetailView.vue')
 
 const routes = [
   {
@@ -22,64 +27,67 @@ const routes = [
     path: '/register',
     redirect: '/login'
   },
+  // 主应用：统一由 AppLayout 包裹（顶部导航 + 内容区）
   {
     path: '/',
-    redirect: '/login'
-  },
-  {
-    path: '/search',
-    name: 'Search',
-    component: SearchView,
+    component: AppLayout,
     meta: {
-      title: '知识库搜索',
       requiresAuth: true
-    }
+    },
+    children: [
+      { path: '', redirect: '/chat' },
+      {
+        path: 'search',
+        name: 'Search',
+        component: SearchView,
+        meta: { title: '搜索笔记', requiresAuth: true }
+      },
+      {
+        path: 'chat',
+        name: 'Chat',
+        component: ChatView,
+        meta: { title: '智能问答', requiresAuth: true }
+      },
+      {
+        path: 'ingest',
+        name: 'Ingest',
+        component: IngestView,
+        meta: { title: '导入笔记', requiresAuth: true }
+      },
+      {
+        path: 'notes',
+        name: 'Notes',
+        component: NotesView,
+        meta: { title: '笔记管理', requiresAuth: true }
+      },
+      {
+        path: 'quiz',
+        name: 'Quiz',
+        component: ExamListView,
+        meta: { title: '知识测验', requiresAuth: true }
+      },
+      {
+        path: 'quiz/:examId',
+        name: 'ExamDetail',
+        component: ExamDetailView,
+        meta: { title: '测验作答', requiresAuth: true }
+      },
+      {
+        path: 'study-plan',
+        name: 'StudyPlan',
+        component: PlanListView,
+        meta: { title: '学习计划', requiresAuth: true }
+      },
+      {
+        path: 'study-plan/:planId',
+        name: 'StudyPlanDetail',
+        component: PlanDetailView,
+        meta: { title: '计划详情', requiresAuth: true }
+      }
+    ]
   },
-  {
-    path: '/chat',
-    name: 'Chat',
-    component: ChatView,
-    meta: {
-      title: '智能问答',
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/ingest',
-    name: 'Ingest',
-    component: IngestView,
-    meta: {
-      title: '导入笔记',
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/notes',
-    name: 'Notes',
-    component: NotesView,
-    meta: {
-      title: '笔记管理',
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/quiz',
-    name: 'Quiz',
-    component: QuizView,
-    meta: {
-      title: '知识测验',
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/study-plan',
-    name: 'StudyPlan',
-    component: StudyPlanView,
-    meta: {
-      title: '学习计划',
-      requiresAuth: true
-    }
-  }
+  // 兜底
+  { path: '/:pathMatch(.*)*', redirect: '/chat' }
 ]
 
 const router = createRouter({
@@ -88,14 +96,14 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - Personal Note RAG` : 'Personal Note RAG'
+  document.title = to.meta.title ? `${to.meta.title} - 临星` : '临星'
 
   const isAuthenticated = authStore.isAuthenticated()
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     next('/login')
   } else if ((to.path === '/login' || to.path === '/register') && isAuthenticated) {
-    next('/search')
+    next('/chat')
   } else {
     next()
   }

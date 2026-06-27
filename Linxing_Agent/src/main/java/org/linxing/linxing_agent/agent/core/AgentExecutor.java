@@ -149,6 +149,7 @@ public class AgentExecutor {
                         .eventType(AgentStepTypes.ERROR)
                         .stepNumber(stepNumber)
                         .phase(AgentStepTypes.PHASE_THINKING)
+                        .label("思考失败")
                         .error("LLM调用失败: " + e.getMessage())
                         .stepData(Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_LLM_CALL_FAILED))
                         .finalStep(true)
@@ -173,7 +174,8 @@ public class AgentExecutor {
                 String thinkingText = future.getThinkingContent();
                 recorder.recordThinkingContent(
                         truncate(thinkingText, 8000),
-                        Map.of("thinking_tokens", thinkingText.length()));
+                        Map.of("thinking_tokens", thinkingText.length()),
+                        "思考中");
             }
 
             if (aiMessage.hasToolExecutionRequests()) {
@@ -183,11 +185,16 @@ public class AgentExecutor {
 
                 for (ToolExecutionRequest toolReq : toolRequests) {
 
+                    //查找并执行工具，未知工具返回失败
+                    ToolSpec toolSpec = toolRegistry.getTool(toolReq.name());
+                    String toolLabel = toolSpec != null ? toolSpec.getExecutor().displayLabel() : toolReq.name();
+
                     // 推送 tool_call 事件（SSE + 入库）：content 为请求参数，执行前已知
                     recorder.record(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_CALL)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)
+                            .label(toolLabel)
                             .answer(toolReq.arguments())
                             .stepData(Map.of(
                                     AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
@@ -201,8 +208,6 @@ public class AgentExecutor {
                             .arguments(toolReq.arguments())
                             .build();
 
-                    //查找并执行工具，未知工具返回失败
-                    ToolSpec toolSpec = toolRegistry.getTool(toolReq.name());
                     ToolCallResult toolResult;
                     if (toolSpec == null) {
                         toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
@@ -245,6 +250,7 @@ public class AgentExecutor {
                             .eventType(AgentStepTypes.TOOL_RESULT)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)
+                            .label(toolLabel)
                             .answer(toolResult.isSuccess() ? toolResult.getResult() : null)
                             .error(toolResult.isSuccess() ? null : toolResult.getError())
                             .stepData(Map.of(
@@ -273,6 +279,7 @@ public class AgentExecutor {
                         .eventType(AgentStepTypes.FINAL)
                         .stepNumber(stepNumber)
                         .phase(AgentStepTypes.PHASE_ANSWER)
+                        .label("回答已就绪")
                         .answer(answer)
                         .finalStep(true)
                         .build());
@@ -294,6 +301,7 @@ public class AgentExecutor {
                 .eventType(AgentStepTypes.ERROR)
                 .stepNumber(stepNumber)
                 .phase(AgentStepTypes.PHASE_THINKING)
+                .label("处理步骤过多")
                 .error("超过最大步骤数 " + MAX_STEPS)
                 .stepData(Map.of(AgentStepTypes.KEY_ERROR_CODE, AgentStepTypes.ERR_MAX_STEPS_EXCEEDED,
                         AgentStepTypes.KEY_STEP_COUNT, MAX_STEPS))

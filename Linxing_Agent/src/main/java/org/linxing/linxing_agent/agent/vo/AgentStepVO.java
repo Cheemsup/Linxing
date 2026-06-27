@@ -18,6 +18,7 @@ public class AgentStepVO {
     private Integer stepOrder;
     private String stepType;
     private String content;
+    private String label;
     private Map<String, Object> stepData;
     private OffsetDateTime createdAt;
 }

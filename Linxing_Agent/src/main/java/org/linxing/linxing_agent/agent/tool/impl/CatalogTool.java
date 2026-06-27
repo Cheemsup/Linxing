@@ -34,6 +34,7 @@ public class CatalogTool implements Tool {
             + "当你不确定有哪些工具或技能可用时使用此工具。"
             + "从目录中选出需要的条目后，请调用 resolve 获取其完整定义。";
     private static final String BRIEF = "查看所有可用工具和技能的目录";
+    private static final String DISPLAY_LABEL = "查看能力目录";
     private static final String WHEN_TO_USE = "当你不确定有哪些工具或技能可用时使用";
 
     private final List<CatalogProvider> providers;
@@ -56,6 +57,11 @@ public class CatalogTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

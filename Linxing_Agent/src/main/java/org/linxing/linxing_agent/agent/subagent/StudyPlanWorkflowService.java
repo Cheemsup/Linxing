@@ -7,6 +7,7 @@ import dev.langchain4j.agentic.agent.ErrorRecoveryResult;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.common.config.LlmManager;
@@ -81,9 +82,13 @@ public class StudyPlanWorkflowService {
             StepRecorder recorder, ChatModel chatModel) {
 
         // 推送 workflow_start 事件，使得前端能够显示本工作流状态
-        recorder.record(AgentStepTypes.WORKFLOW_START, AgentStepTypes.PHASE_STUDY_PLAN,
-                buildWorkflowStartData(topic, generateExam, needsClarification),
-                null, null, false);
+        recorder.record(AgentStepEvent.builder()
+                .eventType(AgentStepTypes.WORKFLOW_START)
+                .stepNumber(0)
+                .phase(AgentStepTypes.PHASE_STUDY_PLAN)
+                .label("正在生成学习计划")
+                .stepData(buildWorkflowStartData(topic, generateExam, needsClarification))
+                .build());
 
         // ---- 知识收集（信息补充 + 自主搜索）----
         UntypedAgent knowledgeWorkflowAgent = knowledgeCollectionWorkflowService
@@ -104,7 +109,7 @@ public class StudyPlanWorkflowService {
                     log.error("Agent error in workflow: agent={}, error={}", agentName, errMsg, ex);
                     recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                             StepRecorder.buildSubAgentData(agentName, "error",
-                                    false, null, false, errMsg),
+                                    "生成失败", false, null, false, errMsg),
                             null, "Agent [" + agentName + "] 执行失败: " + errMsg, true);
                     // 返回包含错误信息的结果，而非 null，避免异常信息被吞掉
                     StudyPlanWorkflowResult errorResult = StudyPlanWorkflowResult.builder()
@@ -161,9 +166,15 @@ public class StudyPlanWorkflowService {
         }
 
         // 推送 workflow_end 事件
-        recorder.record(AgentStepTypes.WORKFLOW_END, AgentStepTypes.PHASE_STUDY_PLAN,
-                buildWorkflowEndData(result),
-                null, result.getError(), true);
+        recorder.record(AgentStepEvent.builder()
+                .eventType(AgentStepTypes.WORKFLOW_END)
+                .stepNumber(0)
+                .phase(AgentStepTypes.PHASE_STUDY_PLAN)
+                .label("生成完成")
+                .stepData(buildWorkflowEndData(result))
+                .error(result.getError())
+                .finalStep(true)
+                .build());
 
         return result;
     }

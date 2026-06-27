@@ -24,6 +24,7 @@ public class WebSearchTool implements Tool {
     private static final String DESCRIPTION = "搜索互联网获取最新信息，返回相关的网页片段及其来源链接。"
             + "当用户的问题涉及最新资讯、外部知识、或用户笔记中未涵盖的内容时使用此工具。";
     private static final String BRIEF = "搜索互联网，返回相关网页片段";
+    private static final String DISPLAY_LABEL = "联网搜索";
     private static final String WHEN_TO_USE = "当用户的问题涉及笔记以外的外部知识、最新资讯、或需要联网查询的内容时使用；"
             + "用户笔记中已有的内容应优先使用 search_knowledge_base";
 
@@ -53,6 +54,11 @@ public class WebSearchTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

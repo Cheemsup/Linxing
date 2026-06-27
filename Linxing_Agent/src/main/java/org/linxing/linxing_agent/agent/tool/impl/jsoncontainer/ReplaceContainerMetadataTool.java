@@ -29,6 +29,7 @@ public class ReplaceContainerMetadataTool implements Tool {
     private static final String NAME = "replace_container_metadata";
     private static final String DESCRIPTION = "更新容器的元数据字段。已有字段覆盖，新字段补充。用于补充缺少的元数据或修正错误值。";
     private static final String BRIEF = "更新容器元数据";
+    private static final String DISPLAY_LABEL = "更新元信息";
     private static final String WHEN_TO_USE = "save 工具校验失败提示 metadata 缺少必填字段时，用此工具补充";
 
     private final ObjectMapper objectMapper;
@@ -51,6 +52,11 @@ public class ReplaceContainerMetadataTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

@@ -28,6 +28,7 @@ public class RagSearchTool implements Tool {
     private static final String DESCRIPTION = "搜索用户个人知识库中的笔记和文档，返回相关的文本片段及其来源信息。"
             + "当需要查找用户笔记中存储的信息、知识点、或任何用户自己记录的内容时使用此工具。";
     private static final String BRIEF = "搜索用户个人知识库，返回相关笔记片段";
+    private static final String DISPLAY_LABEL = "搜索知识库";
     private static final String WHEN_TO_USE = "当用户的问题涉及自己记录的笔记、文档内容时使用；"
             + "通用知识问题不需要使用此工具";
 
@@ -52,6 +53,11 @@ public class RagSearchTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     /**

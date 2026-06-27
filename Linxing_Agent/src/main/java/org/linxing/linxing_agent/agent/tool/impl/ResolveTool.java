@@ -28,6 +28,7 @@ public class ResolveTool implements Tool {
             + "当你已从目录中确定了需要使用的工具或技能，需要查看其完整定义时使用此工具。"
             + "支持一次请求获取多个条目的定义。";
     private static final String BRIEF = "获取指定工具或技能的完整定义";
+    private static final String DISPLAY_LABEL = "查找工具";
     private static final String WHEN_TO_USE = "当你已从目录中确定了需要使用的工具或技能，需要查看其完整定义时使用";
 
     private final List<CatalogProvider> providers;
@@ -51,6 +52,11 @@ public class ResolveTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

@@ -81,6 +81,9 @@ public class SseChatAdapter {
                     data.put("eventType", event.getEventType());
                     data.put("stepNumber", event.getStepNumber());
                     data.put("phase", event.getPhase());
+                    if (event.getLabel() != null && !event.getLabel().isBlank()) {
+                        data.put("label", event.getLabel());
+                    }
                     if (event.getStepData() != null && !event.getStepData().isEmpty()) {
                         data.put("stepData", event.getStepData());
                     }

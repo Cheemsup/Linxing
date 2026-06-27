@@ -3,24 +3,38 @@
     <div class="preview-container">
       <div class="preview-header">
         <div class="preview-title">
-          <span class="file-icon">{{ getFileIcon(previewData?.fileType) }}</span>
+          <el-icon class="file-icon"><component :is="getFileIcon(previewData?.fileType)" /></el-icon>
           <span class="file-name">{{ previewData?.fileName || '文档预览' }}</span>
         </div>
         <div class="preview-toolbar">
           <template v-if="previewData?.previewType === 'pdf'">
-            <button @click="zoomOut" class="tool-btn" :disabled="scale <= 0.5" title="缩小">➖</button>
+            <button @click="zoomOut" class="tool-btn" :disabled="scale <= 0.5" title="缩小">
+              <el-icon><ZoomOut /></el-icon>
+            </button>
             <span class="zoom-label">{{ Math.round(scale * 100) }}%</span>
-            <button @click="zoomIn" class="tool-btn" :disabled="scale >= 2" title="放大">➕</button>
-            <button @click="resetZoom" class="tool-btn" title="重置缩放">🔄</button>
+            <button @click="zoomIn" class="tool-btn" :disabled="scale >= 2" title="放大">
+              <el-icon><ZoomIn /></el-icon>
+            </button>
+            <button @click="resetZoom" class="tool-btn" title="重置缩放">
+              <el-icon><Refresh /></el-icon>
+            </button>
           </template>
           <button v-if="previewData?.previewType === 'pdf' && previewData?.pages?.length > 1"
-            @click="prevPage" class="tool-btn" :disabled="currentPage <= 1" title="上一页">⬅</button>
+            @click="prevPage" class="tool-btn" :disabled="currentPage <= 1" title="上一页">
+            <el-icon><ArrowLeft /></el-icon>
+          </button>
           <span v-if="previewData?.previewType === 'pdf' && previewData?.pages?.length > 1"
             class="page-label">{{ currentPage }} / {{ previewData?.pages?.length || 1 }}</span>
           <button v-if="previewData?.previewType === 'pdf' && previewData?.pages?.length > 1"
-            @click="nextPage" class="tool-btn" :disabled="currentPage >= (previewData?.pages?.length || 1)" title="下一页">➡</button>
-          <button @click="toggleFullscreen" class="tool-btn" title="全屏">⛶</button>
-          <button @click="$emit('close')" class="tool-btn btn-close" title="关闭">✕</button>
+            @click="nextPage" class="tool-btn" :disabled="currentPage >= (previewData?.pages?.length || 1)" title="下一页">
+            <el-icon><ArrowRight /></el-icon>
+          </button>
+          <button @click="toggleFullscreen" class="tool-btn" title="全屏">
+            <el-icon><FullScreen /></el-icon>
+          </button>
+          <button @click="$emit('close')" class="tool-btn btn-close" title="关闭">
+            <el-icon><Close /></el-icon>
+          </button>
         </div>
       </div>
 
@@ -37,7 +51,7 @@
         </div>
 
         <div v-else class="unsupported-viewer">
-          <span class="unsupported-icon">📄</span>
+          <el-icon class="unsupported-icon"><Document /></el-icon>
           <p>{{ previewData?.textContent || '该文件类型暂不支持在线预览' }}</p>
         </div>
       </div>
@@ -141,15 +155,15 @@ export default {
 
     getFileIcon(fileType) {
       const iconMap = {
-        pdf: '📕',
-        docx: '📘',
-        doc: '📘',
-        xlsx: '📗',
-        xls: '📗',
-        txt: '📄',
-        md: '📝'
+        pdf: 'Document',
+        docx: 'Document',
+        doc: 'Document',
+        xlsx: 'Document',
+        xls: 'Document',
+        txt: 'Document',
+        md: 'EditPen'
       }
-      return iconMap[fileType] || '📄'
+      return iconMap[fileType] || 'Document'
     }
   }
 }
@@ -235,8 +249,8 @@ export default {
 }
 
 .tool-btn:hover:not(:disabled) {
-  background: #e3f2fd;
-  border-color: #1a73e8;
+  background: #f3e6d4;
+  border-color: #b8763d;
 }
 
 .tool-btn:disabled {

@@ -31,6 +31,10 @@ public class ContentGenerationWorkflowService {
 
     private static final String PLAN_AGENT_NAME = "plan_generator";
     private static final String EXAM_AGENT_NAME = "exam_generator";
+    private static final String PLAN_DISPLAY_LABEL = "生成学习计划";
+    private static final String EXAM_DISPLAY_LABEL = "生成测验";
+    private static final String SAVE_PLAN_DISPLAY_LABEL = "保存学习计划";
+    private static final String SAVE_EXAM_DISPLAY_LABEL = "保存测验";
     private static final String PLAN_OUTPUT_KEY = "plan_container_id";
     private static final String EXAM_OUTPUT_KEY = "exam_container_id";
     private static final String LINKED_PLAN_ID_KEY = "linkedPlanId";
@@ -67,7 +71,8 @@ public class ContentGenerationWorkflowService {
                 .outputKey(PLAN_OUTPUT_KEY)
                 .defaultKeyValue("clarification", "无补充信息")
                 .listener(StepRecorder.createListener(
-                        PLAN_AGENT_NAME, "plan", PLAN_OUTPUT_KEY, recorder,
+                        PLAN_AGENT_NAME, "plan",
+                        PLAN_DISPLAY_LABEL, PLAN_OUTPUT_KEY, recorder,
                         AgentStepTypes.PHASE_STUDY_PLAN))
                 .build();
 
@@ -81,7 +86,8 @@ public class ContentGenerationWorkflowService {
                 .outputKey(EXAM_OUTPUT_KEY)
                 .defaultKeyValue(LINKED_PLAN_ID_KEY, "")
                 .listener(StepRecorder.createListener(
-                        EXAM_AGENT_NAME, "exam", EXAM_OUTPUT_KEY, recorder,
+                        EXAM_AGENT_NAME, "exam",
+                        EXAM_DISPLAY_LABEL, EXAM_OUTPUT_KEY, recorder,
                         AgentStepTypes.PHASE_STUDY_PLAN))
                 .build();
 
@@ -121,8 +127,8 @@ public class ContentGenerationWorkflowService {
                     .phaseCount(planResult.count());
             scope.writeState(LINKED_PLAN_ID_KEY, String.valueOf(planResult.id()));
             recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
-                    StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan", true,
-                            PLAN_OUTPUT_KEY, true,
+                    StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan",
+                            SAVE_PLAN_DISPLAY_LABEL, true, PLAN_OUTPUT_KEY, true,
                             "planId=" + planResult.id() + ", phases=" + planResult.count()),
                     null, "学习计划已保存（planId=" + planResult.id() + "）", true);
             log.info("Plan saved: id={}, phases={}", planResult.id(), planResult.count());
@@ -130,8 +136,8 @@ public class ContentGenerationWorkflowService {
             builder.planSaved(false)
                     .error("学习计划保存失败：未获取到保存结果");
             recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
-                    StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan", false,
-                            PLAN_OUTPUT_KEY, false, "no save result"),
+                    StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan",
+                            SAVE_PLAN_DISPLAY_LABEL, false, PLAN_OUTPUT_KEY, false, "no save result"),
                     null, "学习计划保存失败", true);
             log.warn("Plan save result missing, containerId={}", planContainerId);
         }
@@ -145,8 +151,9 @@ public class ContentGenerationWorkflowService {
                         .examId(examResult.id())
                         .questionCount(examResult.count());
                 recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
-                        StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", true,
-                                EXAM_OUTPUT_KEY, true, "examId=" + examResult.id()),
+                        StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam",
+                                SAVE_EXAM_DISPLAY_LABEL, true, EXAM_OUTPUT_KEY, true,
+                                "examId=" + examResult.id()),
                         null, "测验已保存（examId=" + examResult.id() + "）", true);
                 log.info("Exam saved: id={}, questions={}, linkedPlanId={}",
                         examResult.id(), examResult.count(), planResult.id());
@@ -154,8 +161,8 @@ public class ContentGenerationWorkflowService {
                 builder.examSaved(false)
                         .examParseError("测验保存失败：未获取到保存结果");
                 recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
-                        StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", false,
-                                EXAM_OUTPUT_KEY, false, "no save result"),
+                        StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam",
+                                SAVE_EXAM_DISPLAY_LABEL, false, EXAM_OUTPUT_KEY, false, "no save result"),
                         null, "测验保存失败", true);
                 log.warn("Exam save result missing, containerId={}", examContainerId);
             }
@@ -163,8 +170,8 @@ public class ContentGenerationWorkflowService {
             builder.examSaved(false)
                     .examParseError("计划保存失败，测验未触发保存");
             recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
-                    StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam", false,
-                            EXAM_OUTPUT_KEY, false, "skipped: plan not saved"),
+                    StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam",
+                            SAVE_EXAM_DISPLAY_LABEL, false, EXAM_OUTPUT_KEY, false, "skipped: plan not saved"),
                     null, "保存测验（未触发：计划保存失败）", true);
         }
 

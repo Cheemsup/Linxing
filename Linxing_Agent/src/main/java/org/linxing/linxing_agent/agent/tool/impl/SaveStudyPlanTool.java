@@ -43,6 +43,7 @@ public class SaveStudyPlanTool implements Tool {
             + "阶段数 > 5 时必须使用分批模式（先 create_container 再 append_to_container 最后传 container_id）。"
             + "判断依据：用户明确要求超过5个阶段，或你计划生成超过5个阶段时，必须走分批模式。";
     private static final String BRIEF = "保存生成的学习计划到数据库";
+    private static final String DISPLAY_LABEL = "保存学习计划";
     private static final String WHEN_TO_USE = "当已生成完整的学习计划JSON后，必须调用此工具保存；"
             + "仅在制定学习计划时使用，普通问答不需要。"
             + "重要：如果用户要求生成超过5个阶段的学习计划，必须先调用 create_container 创建容器，"
@@ -70,6 +71,11 @@ public class SaveStudyPlanTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

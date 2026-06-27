@@ -2,38 +2,48 @@
   <div class="search-view">
     <div class="search-header">
       <div class="search-input-wrapper">
+        <el-icon class="search-icon-leading"><Search /></el-icon>
         <input
           ref="searchInput"
           v-model="query"
           type="text"
           class="search-input"
-          placeholder="输入关键词搜索你的知识库..."
+          placeholder="输入关键词，搜索你的笔记..."
           @keydown.enter="doSearch"
         />
         <button class="search-btn" @click="doSearch" :disabled="loading || !query.trim()">
-          {{ loading ? '搜索中...' : '搜索' }}
+          <el-icon v-if="loading" class="is-loading"><Loading /></el-icon>
+          <span>{{ loading ? '搜索中' : '搜索' }}</span>
         </button>
       </div>
-      <div class="search-options">
-        <label class="topk-label">
-          返回条数:
+
+      <button class="advanced-toggle" @click="advancedOpen = !advancedOpen">
+        <el-icon class="toggle-icon"><component :is="advancedOpen ? 'ArrowUp' : 'ArrowDown'" /></el-icon>
+        <span>高级选项</span>
+        <span v-if="hasAdvancedActive" class="advanced-dot"></span>
+      </button>
+      <div v-if="advancedOpen" class="advanced-panel">
+        <label class="adv-field">
+          <span class="adv-label">结果数量</span>
           <select v-model.number="topK" class="topk-select">
             <option :value="0">默认</option>
-            <option :value="5">5</option>
-            <option :value="10">10</option>
-            <option :value="20">20</option>
+            <option :value="5">5 条</option>
+            <option :value="10">10 条</option>
+            <option :value="20">20 条</option>
           </select>
         </label>
-        <label class="hybrid-label">
+        <label class="adv-field adv-switch">
+          <span class="adv-label">混合检索</span>
           <input type="checkbox" v-model="hybrid" />
-          BM25 混合检索
+          <span class="switch-hint">{{ hybrid ? '已开启' : '未开启' }}</span>
         </label>
       </div>
     </div>
 
     <div class="search-results">
       <div v-if="searched && results.length === 0" class="no-results">
-        未找到与 "<strong>{{ lastQuery }}</strong>" 相关的内容
+        <el-icon class="no-results-icon"><Search /></el-icon>
+        <p>未找到与 "<strong>{{ lastQuery }}</strong>" 相关的内容</p>
       </div>
 
       <div v-if="results.length > 0" class="results-info">
@@ -46,19 +56,19 @@
         class="result-card"
       >
         <div class="result-header">
-          <span class="result-index">#{{ index + 1 }}</span>
-          <span class="result-score" :title="'相关性分数: ' + item.score">
-            score: {{ item.score.toFixed(4) }}
-          </span>
+          <span class="result-index">{{ index + 1 }}</span>
+          <div class="relevance">
+            <span class="relevance-label">相关度</span>
+            <div class="relevance-bar">
+              <div class="relevance-fill" :style="{ width: toPercent(item.score) + '%' }"></div>
+            </div>
+            <span class="relevance-pct">{{ toPercent(item.score) }}%</span>
+          </div>
           <span class="result-source">{{ item.fileName }}</span>
           <span v-if="item.titlePath" class="result-titlepath">{{ item.titlePath }}</span>
-          <span v-if="item.chunkType" class="result-chunktype">{{ item.chunkType }}</span>
         </div>
         <div class="result-body">
           <p class="result-text">{{ item.chunkText }}</p>
-        </div>
-        <div v-if="item.documentId" class="result-footer">
-          <span class="result-docid">文档ID: {{ item.documentId }}</span>
         </div>
       </div>
     </div>
@@ -78,7 +88,13 @@ export default {
       loading: false,
       searched: false,
       lastQuery: '',
-      results: []
+      results: [],
+      advancedOpen: false
+    }
+  },
+  computed: {
+    hasAdvancedActive() {
+      return this.topK !== 0 || this.hybrid
     }
   },
   mounted() {
@@ -87,6 +103,11 @@ export default {
     })
   },
   methods: {
+    toPercent(score) {
+      if (typeof score !== 'number' || isNaN(score)) return 0
+      const pct = Math.round(score * 100)
+      return Math.max(0, Math.min(100, pct))
+    },
     async doSearch() {
       const q = this.query.trim()
       if (!q || this.loading) return
@@ -135,12 +156,22 @@ export default {
 
 .search-input-wrapper {
   display: flex;
+  align-items: center;
   gap: 12px;
+  position: relative;
+}
+
+.search-icon-leading {
+  position: absolute;
+  left: 14px;
+  color: #9aa0a6;
+  font-size: 18px;
+  pointer-events: none;
 }
 
 .search-input {
   flex: 1;
-  padding: 12px 16px;
+  padding: 12px 16px 12px 44px;
   font-size: 16px;
   border: 2px solid #e0e0e0;
   border-radius: 8px;
@@ -149,12 +180,12 @@ export default {
 }
 
 .search-input:focus {
-  border-color: #1a73e8;
+  border-color: #b8763d;
 }
 
 .search-btn {
   padding: 12px 28px;
-  background: #1a73e8;
+  background: #b8763d;
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -162,10 +193,13 @@ export default {
   cursor: pointer;
   transition: background 0.2s;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .search-btn:hover:not(:disabled) {
-  background: #1557b0;
+  background: #a0682f;
 }
 
 .search-btn:disabled {
@@ -173,19 +207,74 @@ export default {
   cursor: not-allowed;
 }
 
-.search-options {
+.is-loading {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.advanced-toggle {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.advanced-toggle:hover {
+  color: #b8763d;
+}
+
+.toggle-icon {
+  font-size: 12px;
+}
+
+.advanced-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b8763d;
+  margin-left: 2px;
+}
+
+.advanced-panel {
   margin-top: 10px;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 28px;
+  padding: 12px 16px;
+  background: #f7f8fa;
+  border-radius: 8px;
 }
 
-.topk-label {
+.adv-field {
   font-size: 13px;
-  color: #888;
+  color: #666;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+.adv-label {
+  color: #555;
+  font-weight: 500;
+}
+
+.adv-switch {
+  cursor: pointer;
+}
+
+.switch-hint {
+  font-size: 12px;
+  color: #999;
 }
 
 .topk-select {
@@ -207,6 +296,15 @@ export default {
   color: #999;
   font-size: 16px;
   padding: 60px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.no-results-icon {
+  font-size: 40px;
+  color: #d0d4d9;
 }
 
 .results-info {
@@ -231,24 +329,56 @@ export default {
 .result-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
 
 .result-index {
-  font-size: 12px;
-  color: #bbb;
-  min-width: 24px;
-}
-
-.result-score {
   font-size: 13px;
   font-weight: 600;
-  color: #1a73e8;
-  background: #e8f0fe;
-  padding: 2px 8px;
-  border-radius: 4px;
+  color: #fff;
+  background: #b8763d;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+.relevance {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.relevance-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.relevance-bar {
+  width: 70px;
+  height: 6px;
+  background: #eef0f3;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.relevance-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #b8763d);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.relevance-pct {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b8763d;
+  min-width: 32px;
 }
 
 .result-source {
@@ -266,15 +396,6 @@ export default {
   content: '> ';
 }
 
-.result-chunktype {
-  font-size: 11px;
-  color: #aaa;
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 3px;
-  margin-left: auto;
-}
-
 .result-body {
   margin-bottom: 6px;
 }
@@ -286,10 +407,5 @@ export default {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.result-footer {
-  font-size: 11px;
-  color: #bbb;
 }
 </style>

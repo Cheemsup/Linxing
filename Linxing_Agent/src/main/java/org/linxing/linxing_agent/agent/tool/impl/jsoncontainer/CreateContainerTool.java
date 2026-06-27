@@ -32,6 +32,7 @@ public class CreateContainerTool implements Tool {
             + "返回容器ID，后续通过 append_to_container 追加数据，最终由 save 工具读取容器完成持久化。"
             + "当需要生成超过5个元素的数组数据时，应使用分批模式。";
     private static final String BRIEF = "创建JSON容器，用于分批构建复杂数据";
+    private static final String DISPLAY_LABEL = "创建JSON容器";
     private static final String WHEN_TO_USE = "当需要生成大量数组数据（如超过5道试题）时，先创建容器再分批追加，避免一次性输出过长JSON导致语法错误";
 
     private final ObjectMapper objectMapper;
@@ -55,6 +56,11 @@ public class CreateContainerTool implements Tool {
     @Override
     public String whenToUse() {
         return WHEN_TO_USE;
+    }
+
+    @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
     }
 
     @Override

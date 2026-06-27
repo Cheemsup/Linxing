@@ -1,5 +1,6 @@
 ---
 name: exam
+display_name: "知识测验出题"
 description: "根据用户笔记内容或网络搜索结果，生成结构化知识测验题目。当用户要求出题、测验、测试知识掌握程度时触发。"
 tool_names:
   - search_knowledge_base

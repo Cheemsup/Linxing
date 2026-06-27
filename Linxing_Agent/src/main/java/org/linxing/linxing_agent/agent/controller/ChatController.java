@@ -129,6 +129,34 @@ public class ChatController {
     }
 
     /**
+     * 更新会话标题（手动重命名）
+     * @param sessionId
+     * @param body 包含 title
+     * @return
+     */
+    @PutMapping("/sessions/{sessionId}/title")
+    public Result<Void> updateTitle(@PathVariable Integer sessionId,
+                                    @RequestBody Map<String, String> body) {
+        String title = body.getOrDefault("title", "新对话");
+        chatSessionService.updateTitle(sessionId, title);
+        return Result.success();
+    }
+
+    /**
+     * AI 自动命名会话：基于首条用户消息 + 首条助手回答，调用 LLM 生成简短标题。
+     * 仅当标题仍为默认占位（"新对话"）时才会真正生成，避免覆盖已命名的会话。
+     * @param sessionId
+     * @return 包含新生成的 title
+     */
+    @PostMapping("/sessions/{sessionId}/auto-title")
+    public Result<Map<String, String>> autoTitle(@PathVariable Integer sessionId) {
+        String title = chatSessionService.autoGenerateTitle(sessionId);
+        Map<String, String> result = new LinkedHashMap<>();
+        result.put("title", title);
+        return Result.success(result);
+    }
+
+    /**
      * 获取会话下的消息列表，优先读缓存，缓存不一致时回源DB并刷新缓存
      * @param sessionId
      * @return

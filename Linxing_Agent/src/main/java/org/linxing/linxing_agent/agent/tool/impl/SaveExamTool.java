@@ -43,6 +43,7 @@ public class SaveExamTool implements Tool {
             + "题目数 > 5 时必须使用分批模式（先 create_container 再 append_to_container 最后传 container_id）。"
             + "判断依据：用户明确要求超过5题，或你计划生成超过5题时，必须走分批模式。";
     private static final String BRIEF = "保存生成的测验题目到数据库";
+    private static final String DISPLAY_LABEL = "保存测验";
     private static final String WHEN_TO_USE = "当已生成完整的测验题目JSON后，必须调用此工具保存；"
             + "仅在生成测验时使用，普通问答不需要。"
             + "重要：如果用户要求出超过5道题，必须先调用 create_container 创建容器，"
@@ -73,8 +74,13 @@ public class SaveExamTool implements Tool {
     }
 
     @Override
+    public String displayLabel() {
+        return DISPLAY_LABEL;
+    }
+
+    @Override
     public JsonObjectSchema spec() {
-        // 题目对象的 Schema 定义
+        // 题目对象的 Schema 定义，注意这个schema **包含了** tool真正被调用时所需要的参数（当然还有其他的内容部分），但是真正使用前要经过提取和转换
         JsonObjectSchema questionItemSchema = JsonObjectSchema.builder()
                 .addProperty("type", JsonStringSchema.builder()
                         .description("题型，仅限: single_choice / multi_choice / fill_blank / true_false / short_answer").build())
@@ -177,9 +183,6 @@ public class SaveExamTool implements Tool {
 
     /**
      * 供 subagent 体系使用的 {@code @Tool} 入口。
-     * 与 {@link #execute(ToolCallRequest, AgentContext)} 共用
-     * {@link ExamService} 核心服务，userId 与容器均从 {@link SubAgentContext} 读取，
-     * 避免作为 LLM 可控参数暴露。
      *
      * @param containerId   容器 ID，由 create_container 返回，容器类型必须为 exam
      * @param linkedPlanId  关联的学习计划 ID，可选；若传入则保存到 exam.linked_plan_id

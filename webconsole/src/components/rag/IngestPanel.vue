@@ -1,7 +1,7 @@
 <template>
   <div class="ingest-panel">
-    <h2>导入笔记到知识库</h2>
-    <p class="hint">支持导入多种文档格式，系统将自动分块、向量化后存入向量数据库。</p>
+    <h2>导入笔记</h2>
+    <p class="hint">上传后将自动整理为可检索的笔记。</p>
 
     <div class="upload-area" @click="triggerFileInput" @dragover.prevent @drop.prevent="handleDrop">
       <input
@@ -12,24 +12,37 @@
         style="display: none"
       />
       <div v-if="!selectedFile" class="upload-placeholder">
-        <span class="upload-icon">📄</span>
+        <el-icon class="upload-icon"><Upload /></el-icon>
         <p>点击选择文件或拖拽文件到此处</p>
         <span class="file-types">支持 PDF、Word、Excel、文本、代码、CSV、HTML</span>
       </div>
       <div v-else class="selected-file">
-        <span class="file-icon">{{ getFileIcon(selectedFile.name) }}</span>
+        <el-icon class="file-icon"><component :is="getFileIcon(selectedFile.name)" /></el-icon>
         <span class="file-name">{{ selectedFile.name }}</span>
         <span class="file-size">({{ formatFileSize(selectedFile.size) }})</span>
-        <button @click.stop="clearFile" class="clear-btn">×</button>
+        <button @click.stop="clearFile" class="clear-btn">
+          <el-icon><Close /></el-icon>
+        </button>
       </div>
     </div>
 
     <button @click="uploadFile" :disabled="loading || !selectedFile" class="btn-primary">
-      {{ loading ? '上传中...' : '开始上传' }}
+      <el-icon v-if="loading" class="is-loading"><Loading /></el-icon>
+      <span>{{ loading ? '上传中' : '开始上传' }}</span>
     </button>
 
-    <div v-if="result" :class="['result-box', result.success ? 'success' : 'error']">
-      <strong>{{ result.success ? '成功' : '失败' }}:</strong> {{ result.message }}
+    <div v-if="result && !result.success" class="result-box error">
+      <el-icon class="result-icon"><CircleCloseFilled /></el-icon>
+      <span>{{ result.message }}</span>
+    </div>
+    <div v-else-if="uploadSuccess" class="result-box success">
+      <el-icon class="result-icon"><CircleCheckFilled /></el-icon>
+      <div class="success-content">
+        <p class="success-title">上传成功，已整理为笔记</p>
+        <button class="goto-notes-btn" @click="goToNotes">
+          去笔记管理查看<el-icon><ArrowRight /></el-icon>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -45,10 +58,14 @@ export default {
     return {
       selectedFile: null,
       loading: false,
-      result: null
+      result: null,
+      uploadSuccess: false
     }
   },
   methods: {
+    goToNotes() {
+      this.$router.push('/notes')
+    },
     triggerFileInput() {
       this.$refs.fileInput.click()
     },
@@ -93,23 +110,18 @@ export default {
 
       this.loading = true
       this.result = null
+      this.uploadSuccess = false
 
       try {
         const response = await ingestApi.ingestFile(this.selectedFile)
         const resData = response.data
         if (resData.code === 1) {
-          const data = resData.data || {}
-          this.result = {
-            success: true,
-            message: data.message || '文件上传成功'
-          }
-          if (this.result.success) {
-            this.clearFile()
-          }
+          this.uploadSuccess = true
+          this.clearFile()
         } else {
           this.result = {
             success: false,
-            message: resData.msg || '文件上传失败'
+            message: resData.msg || '上传失败，请重试'
           }
         }
       } catch (error) {
@@ -123,23 +135,23 @@ export default {
     },
 
     getFileIcon(fileName) {
-      if (!fileName) return '📄'
+      if (!fileName) return 'Document'
       const ext = fileName.split('.').pop().toLowerCase()
       const iconMap = {
-        pdf: '📕',
-        doc: '📘',
-        docx: '📘',
-        xls: '📗',
-        xlsx: '📗',
-        txt: '📄',
-        md: '📝',
-        text: '📄',
-        java: '☕',
-        csv: '📊',
-        html: '🌐',
-        htm: '🌐'
+        pdf: 'Document',
+        doc: 'Document',
+        docx: 'Document',
+        xls: 'Document',
+        xlsx: 'Document',
+        txt: 'Document',
+        md: 'EditPen',
+        text: 'Document',
+        java: 'Document',
+        csv: 'DataAnalysis',
+        html: 'Document',
+        htm: 'Document'
       }
-      return iconMap[ext] || '📄'
+      return iconMap[ext] || 'Document'
     },
 
     formatFileSize(bytes) {
@@ -182,7 +194,7 @@ export default {
 }
 
 .upload-area:hover {
-  border-color: #1a73e8;
+  border-color: #b8763d;
   background: #f8f9fa;
 }
 
@@ -249,12 +261,16 @@ export default {
 .btn-primary {
   width: 100%;
   padding: 12px 24px;
-  background: #1a73e8;
+  background: #b8763d;
   color: white;
   border: none;
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .btn-primary:disabled {
@@ -263,13 +279,31 @@ export default {
 }
 
 .btn-primary:not(:disabled):hover {
-  background: #1557b0;
+  background: #a0682f;
+}
+
+.is-loading {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .result-box {
   margin-top: 16px;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.result-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 .result-box.success {
@@ -280,5 +314,32 @@ export default {
 .result-box.error {
   background: #ffebee;
   color: #c62828;
+}
+
+.success-content {
+  flex: 1;
+}
+
+.success-title {
+  margin: 0 0 8px;
+  font-weight: 500;
+}
+
+.goto-notes-btn {
+  background: #2e7d32;
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.2s;
+}
+
+.goto-notes-btn:hover {
+  background: #256528;
 }
 </style>

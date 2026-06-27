@@ -27,6 +27,12 @@ public class SkillMetadata {
     private String description;
 
     /**
+     * 前端展示名，用于向用户展示此技能的人类可读名称。
+     * 未配置时回退到 {@link #name}。
+     */
+    private String displayName;
+
+    /**
      * 所需工具名称列表
      */
     private List<String> toolNames;

@@ -1,140 +1,108 @@
 <template>
-  <div class="notes-panel-wrapper">
-    <div class="notes-panel">
-      <div class="notes-header">
-        <h2>笔记管理</h2>
-        <div class="header-actions">
-          <span class="doc-count">共 {{ total }} 篇笔记</span>
-          <button @click="loadDocuments" class="btn-refresh" :disabled="loading">刷新</button>
-        </div>
+  <div class="notes-panel">
+    <div class="notes-header">
+      <h2>笔记管理</h2>
+      <div class="header-actions">
+        <span class="doc-count">共 {{ total }} 篇笔记</span>
+        <button @click="loadDocuments" class="btn-refresh" :disabled="loading">刷新</button>
       </div>
+    </div>
 
-      <div v-if="loading" class="loading-state">
-        <span class="spinner"></span> 加载中...
-      </div>
+    <div v-if="loading" class="loading-state">
+      <span class="spinner"></span> 加载中...
+    </div>
 
-      <div v-else-if="documents.length === 0" class="empty-state">
-        <el-icon class="empty-icon"><FolderOpened /></el-icon>
-        <p>暂无笔记，请先去导入页上传。</p>
-      </div>
+    <div v-else-if="documents.length === 0" class="empty-state">
+      <el-icon class="empty-icon"><FolderOpened /></el-icon>
+      <p>暂无笔记，请先去导入页上传。</p>
+    </div>
 
-      <div v-else>
-        <div class="documents-list">
-          <div v-for="doc in documents" :key="doc.id" class="doc-card">
-            <div class="doc-icon"><el-icon><component :is="getFileIcon(doc.fileType)" /></el-icon></div>
-            <div class="doc-info">
-              <div class="doc-name" :title="doc.fileName">{{ doc.fileName }}</div>
-              <div class="doc-meta">
-                <span class="meta-item">
-                  <span class="meta-label">类型:</span>
-                  {{ getFileTypeLabel(doc.fileType) }}
-                </span>
-                <span class="meta-item">
-                  <span class="meta-label">大小:</span>
-                  {{ formatFileSize(doc.fileSize) }}
-                </span>
-                <span class="meta-item">
-                  <span class="meta-label">上传:</span>
-                  {{ formatDate(doc.createdAt) }}
-                </span>
-                <span :class="['status-badge', doc.status]">
-                  {{ getStatusLabel(doc.status) }}
-                </span>
-              </div>
-            </div>
-            <div class="doc-actions">
-              <button @click="openTreeNav(doc)" class="btn-action btn-tree" title="查看笔记目录">
-                <el-icon><Connection /></el-icon><span>目录</span>
-              </button>
-              <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">
-                <el-icon><View /></el-icon><span>预览</span>
-              </button>
-              <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">
-                <el-icon><Download /></el-icon><span>下载</span>
-              </button>
-              <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">
-                <el-icon><Delete /></el-icon><span>删除</span>
-              </button>
+    <div v-else>
+      <div class="documents-list">
+        <div v-for="doc in documents" :key="doc.id" class="doc-card">
+          <div class="doc-icon"><el-icon><component :is="getFileIcon(doc.fileType)" /></el-icon></div>
+          <div class="doc-info">
+            <div class="doc-name" :title="doc.fileName">{{ doc.fileName }}</div>
+            <div class="doc-meta">
+              <span class="meta-item">
+                <span class="meta-label">类型:</span>
+                {{ getFileTypeLabel(doc.fileType) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-label">大小:</span>
+                {{ formatFileSize(doc.fileSize) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-label">上传:</span>
+                {{ formatDate(doc.createdAt) }}
+              </span>
+              <span :class="['status-badge', doc.status]">
+                {{ getStatusLabel(doc.status) }}
+              </span>
             </div>
           </div>
-        </div>
-
-        <div v-if="totalPages > 1" class="pagination">
-          <button
-            @click="changePage(currentPage - 1)"
-            :disabled="currentPage <= 1"
-            class="page-btn"
-          >上一页</button>
-          <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <button
-            @click="changePage(currentPage + 1)"
-            :disabled="currentPage >= totalPages"
-            class="page-btn"
-          >下一页</button>
-        </div>
-      </div>
-
-      <div v-if="toast.show" :class="['toast', toast.type]">
-        {{ toast.message }}
-      </div>
-
-      <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
-        <div class="modal-box">
-          <h3>确认删除</h3>
-          <p>确定要删除笔记「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
-          <div class="modal-actions">
-            <button @click="showDeleteConfirm = false" class="btn-cancel">取消</button>
-            <button @click="executeDelete" class="btn-confirm-delete" :disabled="deleting">
-              {{ deleting ? '删除中...' : '确认删除' }}
+          <div class="doc-actions">
+            <button @click="previewDocument(doc)" class="btn-action btn-preview" title="预览">
+              <el-icon><View /></el-icon><span>预览</span>
+            </button>
+            <button @click="downloadDocument(doc.id)" class="btn-action btn-download" title="下载">
+              <el-icon><Download /></el-icon><span>下载</span>
+            </button>
+            <button @click="confirmDelete(doc)" class="btn-action btn-delete" title="删除">
+              <el-icon><Delete /></el-icon><span>删除</span>
             </button>
           </div>
         </div>
       </div>
 
-      <DocumentPreview
-        v-if="showPreview"
-        :previewData="previewData"
-        @close="showPreview = false"
-      />
+      <div v-if="totalPages > 1" class="pagination">
+        <button
+          @click="changePage(currentPage - 1)"
+          :disabled="currentPage <= 1"
+          class="page-btn"
+        >上一页</button>
+        <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
+        <button
+          @click="changePage(currentPage + 1)"
+          :disabled="currentPage >= totalPages"
+          class="page-btn"
+        >下一页</button>
+      </div>
     </div>
 
-    <ChunkTreeNav
-      v-if="showTreeNav"
-      :document-id="selectedDoc.id"
-      :file-name="selectedDoc.fileName"
-      @close="showTreeNav = false"
-      @select="handleChunkSelect"
-    />
+    <div v-if="toast.show" :class="['toast', toast.type]">
+      {{ toast.message }}
+    </div>
 
-    <div v-if="selectedChunkPreview" class="chunk-preview-overlay" @click.self="selectedChunkPreview = null">
-      <div class="chunk-preview-box">
-        <div class="chunk-preview-header">
-          <h3>内容预览</h3>
-          <button @click="selectedChunkPreview = null" class="btn-close-preview">
-            <el-icon><Close /></el-icon>
+    <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
+      <div class="modal-box">
+        <h3>确认删除</h3>
+        <p>确定要删除笔记「{{ deleteTarget?.fileName }}」吗？此操作不可恢复。</p>
+        <div class="modal-actions">
+          <button @click="showDeleteConfirm = false" class="btn-cancel">取消</button>
+          <button @click="executeDelete" class="btn-confirm-delete" :disabled="deleting">
+            {{ deleting ? '删除中...' : '确认删除' }}
           </button>
-        </div>
-        <div class="chunk-preview-body">
-          <div v-if="selectedChunkPreview.titlePath" class="chunk-preview-title">
-            {{ selectedChunkPreview.titlePath }}
-          </div>
-          <div class="chunk-preview-text">{{ selectedChunkPreview.textPreview }}</div>
         </div>
       </div>
     </div>
+
+    <DocumentPreview
+      v-if="showPreview"
+      :previewData="previewData"
+      @close="showPreview = false"
+    />
   </div>
 </template>
 
 <script>
 import { documentApi } from '@/api/agent/document'
 import DocumentPreview from './DocumentPreview.vue'
-import ChunkTreeNav from './ChunkTreeNav.vue'
 
 export default {
   name: 'NotesPanel',
   components: {
-    DocumentPreview,
-    ChunkTreeNav
+    DocumentPreview
   },
   data() {
     return {
@@ -149,9 +117,6 @@ export default {
       deleting: false,
       showPreview: false,
       previewData: null,
-      showTreeNav: false,
-      selectedDoc: {},
-      selectedChunkPreview: null,
       toast: {
         show: false,
         message: '',
@@ -186,15 +151,6 @@ export default {
       if (page < 1 || page > this.totalPages) return
       this.currentPage = page
       this.loadDocuments()
-    },
-
-    openTreeNav(doc) {
-      this.selectedDoc = doc
-      this.showTreeNav = true
-    },
-
-    handleChunkSelect(node) {
-      this.selectedChunkPreview = node
     },
 
     async previewDocument(doc) {
@@ -317,11 +273,6 @@ export default {
 </script>
 
 <style scoped>
-.notes-panel-wrapper {
-  display: flex;
-  height: 100%;
-}
-
 .notes-panel {
   flex: 1;
   padding: 20px;
@@ -489,15 +440,6 @@ export default {
   transition: all 0.2s;
 }
 
-.btn-tree {
-  background: #e8f5e9;
-  color: #2e7d32;
-}
-
-.btn-tree:hover {
-  background: #c8e6c9;
-}
-
 .btn-preview {
   background: #f3e6d4;
   color: #a0682f;
@@ -655,77 +597,5 @@ export default {
 .btn-confirm-delete:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.chunk-preview-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1002;
-}
-
-.chunk-preview-box {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-
-.chunk-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.chunk-preview-header h3 {
-  margin: 0;
-  color: #333;
-}
-
-.btn-close-preview {
-  background: none;
-  border: none;
-  font-size: 16px;
-  color: #999;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.btn-close-preview:hover {
-  background: #eee;
-  color: #333;
-}
-
-.chunk-preview-body {
-  overflow-y: auto;
-  flex: 1;
-}
-
-.chunk-preview-title {
-  font-weight: 600;
-  color: #a0682f;
-  margin-bottom: 12px;
-  font-size: 14px;
-}
-
-.chunk-preview-text {
-  font-size: 14px;
-  line-height: 1.7;
-  color: #333;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 </style>

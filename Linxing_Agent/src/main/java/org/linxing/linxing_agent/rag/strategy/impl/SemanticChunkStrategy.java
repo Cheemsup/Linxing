@@ -16,6 +16,7 @@ import java.util.List;
 /**
  * 语义分块策略，调用 LLM 识别语义边界进行智能分块，仅当用户显式指定时激活，超长文本自动降级为简单均分
  */
+//TODO：后续考虑扩展这样一个agent服务：上传文件、要求大模型直接阅读全文、根据模型理解来直接指定如何chunk，并调用相应的tool进行向量化和持久化
 @Slf4j
 @Component("semanticChunkStrategy")
 public class SemanticChunkStrategy implements ChunkStrategy {

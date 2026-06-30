@@ -26,6 +26,9 @@ public class ChunkStrategyContext {
 
     private Integer chunkOverlap;
 
+    /** 标题区块拆分阈值：超长标题区块按句子拆分时的字符上限（如 1000）。仅对 > 此阈值的区块做拆分 */
+    private Integer chunkThreshold;
+
     @Builder.Default
     private Map<String, Object> extra = new HashMap<>();
 }

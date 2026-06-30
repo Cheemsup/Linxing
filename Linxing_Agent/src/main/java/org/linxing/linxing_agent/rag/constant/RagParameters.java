@@ -18,6 +18,12 @@ public final class RagParameters {
 
     public static final int CHUNK_OVERLAP = 200;
 
+    /** 最小 chunk 大小：Level2 小块文本长度低于此值时，参与相邻同源小块合并。设为 0 关闭合并 */
+    public static final int MIN_CHUNK_SIZE = 200;
+
+    /** 标题区块拆分阈值：超长标题区块按句子拆分时的字符上限（如 1000）。仅对 > 此阈值的区块做拆分，最佳大小还需要经过测试来不断修正 */
+    public static final int CHUNK_THRESHOLD = 600;
+
     public static final int SEARCH_DEFAULT_TOP_K = 5;
 
     public static final int SEARCH_RECALL_SIZE = 20;

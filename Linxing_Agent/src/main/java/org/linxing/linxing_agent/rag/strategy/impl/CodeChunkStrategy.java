@@ -18,6 +18,8 @@ import java.util.regex.Pattern;
 /**
  * 代码分块策略，按类和函数定义拆分源代码文件，生成带有类名/函数名标题路径的代码块。
  * 代码函数/类应尽量保持完整不截断，因此使用更大的 maxChunkSize 且不需要 overlap。
+ *
+ * TODO：逻辑是——先提取所有的方法作为单独的chunk，剩余的部分再直接打包为一个chunk（在主流的c、c++、java、python中，一个代码文件除了方法就只剩变量声明了）
  */
 @Slf4j
 @Component("codeChunkStrategy")

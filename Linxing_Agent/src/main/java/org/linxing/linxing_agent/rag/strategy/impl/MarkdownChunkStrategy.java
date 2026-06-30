@@ -3,7 +3,6 @@ package org.linxing.linxing_agent.rag.strategy.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter;
 import org.linxing.linxing_agent.rag.strategy.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
@@ -16,19 +15,28 @@ import java.util.regex.Pattern;
 
 /**
  * Markdown 分块策略，按标题层级拆分文档，支持 Level 1/2 父子分块和标题路径提取。
- * 总的拆分思路：先按标题拆分，超长 section 会预提取代码块/表格作为原子块保护后再递归拆分普通文本。
- * CHUNK_LEVEL 的级别划分是对于"标题"而言的。
+ * 总的拆分思路：按标题拆分，一般以标题区块作为chunk单位，超长 section 会被递归为使用句子拆分方式进行拆分并维护父子chunk关系；无标题部分则尝试构建"按换行符——按句子"的优先级拆分方式
+ * 使用"最长chunk长度"作为阈值、使用标题划分层级（最低三级）作为区块划分动作的指导
  */
 @Slf4j
 @Component("markdownChunkStrategy")
 public class MarkdownChunkStrategy implements ChunkStrategy {
 
+    // 只识别一二三级标题（#{1,3}）
     private static final Pattern HEADING_PATTERN = Pattern.compile(
-            "^(#{1,6})\\s+(.+)$", Pattern.MULTILINE);
+            "^(#{1,3})\\s+(.+)$", Pattern.MULTILINE);
+    // DJKJ：保留 sqliteCodeFence 和 TABLE_LINE 用于测试和注释，实际已废弃
     private static final Pattern CODE_FENCE = Pattern.compile(
             "^```\\w*\\s*$", Pattern.MULTILINE);
     private static final Pattern TABLE_LINE = Pattern.compile(
             "^\\s*\\|.+\\|\\s*$", Pattern.MULTILINE);
+
+    // 句子分隔符（中英文）
+    private final static Pattern SENTENCE_DELIMITER = Pattern.compile(
+            "[。！？.!?；;]");
+
+    private record HeadingSection(String text, String titlePath) {}
+
 
     @Override
     public boolean supports(ChunkStrategyContext context) {
@@ -47,26 +55,23 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
 
     @Override
     public List<ChunkResult> execute(ChunkStrategyContext context) {
-        int maxChunkSize = context.getMaxChunkSize() != null ? context.getMaxChunkSize() : 800;
-        int chunkOverlap = context.getChunkOverlap() != null ? context.getChunkOverlap() : 50;
+        // 使用 CHUNK_THRESHOLD 作为标题区块拆分阈值（默认 1000，可配置）
+        int threshold = context.getChunkThreshold() != null ? context.getChunkThreshold() : RagParameters.CHUNK_THRESHOLD;
         String fullText = context.getFullText();
 
-        //按照段、句、符号编排的递归拆分器
-        RecursiveTextSplitter refinementPipeline = new RecursiveTextSplitter(maxChunkSize, chunkOverlap);
-
-        //先按照标题进行拆分
+        // 先按照标题进行拆分
         List<HeadingSection> sections = splitByHeadings(fullText);
 
         List<ChunkResult> results = new ArrayList<>();
 
-        for (int i = 0; i < sections.size(); i++) {
-            HeadingSection section = sections.get(i);
+        for (HeadingSection section : sections) {
             String sectionText = section.text().trim();
             if (sectionText.isEmpty()) {
                 continue;
             }
 
-            if (sectionText.length() <= maxChunkSize) {
+            if (sectionText.length() <= threshold) {
+                // 短标题区块：直接作为 Level 2 chunk
                 ChunkResult result = ChunkResult.builder()
                         .parentChunkId(null)
                         .chunkLevel(RagParameters.CHUNK_LEVEL_2)
@@ -77,47 +82,29 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
                         .build();
                 results.add(result);
             } else {
-                // 超长 section：创建 Level 1 父 chunk，然后预提取原子块再拆分
+                // 超长标题区块：创建 Level 1 父 chunk + 按句子拆分为 Level 2 子 chunk
                 int level1Index = results.size();
-                String level1Type = buildSectionType(sectionText);
                 ChunkResult level1 = ChunkResult.builder()
                         .parentChunkId(null)
                         .chunkLevel(RagParameters.CHUNK_LEVEL_1)
                         .chunkText(sectionText)
                         .titlePath(section.titlePath())
-                        .chunkType(level1Type)
+                        .chunkType(ChunkType.SECTION)
                         .sourceStrategy("MarkdownChunkStrategy")
                         .build();
                 results.add(level1);
 
-                // 预提取代码块/表格作为原子块，普通文本块再走 refinementPipeline 拆分
-                List<AtomicBlock> atomicBlocks = extractAtomicBlocks(sectionText);
-                for (AtomicBlock block : atomicBlocks) {
-                    if (block.isAtomic) {
-                        // 原子块（代码/表格）整体保留，不再拆分
+                List<String> subChunks = splitBySentenceWithThreshold(sectionText, threshold);
+                for (String subText : subChunks) {
+                    if (!subText.isBlank()) {
                         results.add(ChunkResult.builder()
                                 .parentChunkId(level1Index)
                                 .chunkLevel(RagParameters.CHUNK_LEVEL_2)
-                                .chunkText(block.text)
+                                .chunkText(subText)
                                 .titlePath(section.titlePath())
-                                .chunkType(block.type)
+                                .chunkType(classifyChunkType(subText))
                                 .sourceStrategy("MarkdownChunkStrategy")
                                 .build());
-                    } else {
-                        // 普通文本块：按段落→句子→字符递归拆分
-                        List<String> subChunks = refinementPipeline.refine(block.text);
-                        for (String subText : subChunks) {
-                            if (!subText.isBlank()) {
-                                results.add(ChunkResult.builder()
-                                        .parentChunkId(level1Index)
-                                        .chunkLevel(RagParameters.CHUNK_LEVEL_2)
-                                        .chunkText(subText)
-                                        .titlePath(section.titlePath())
-                                        .chunkType(classifyChunkType(subText))
-                                        .sourceStrategy("MarkdownChunkStrategy")
-                                        .build());
-                            }
-                        }
                     }
                 }
             }
@@ -131,8 +118,80 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         return results;
     }
 
-    //解析 Markdown 标题，构建层级标题路径，以标题为界拆分文本
-    //使用栈来维护层级关系，最后将栈中所有非空标题用 > 连接成 titlePath
+    /**
+     * 按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
+     * 句子是原子单位，不会被截断。
+     */
+    private List<String> splitBySentenceWithThreshold(String text, int threshold) {
+        List<String> results = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return results;
+        }
+
+        // 按句子分隔符拆分，保留分隔符
+        List<String> sentences = splitIntoSentences(text);
+
+        StringBuilder buffer = new StringBuilder();
+        for (String sentence : sentences) {
+            if (sentence.isBlank()) {
+                continue;
+            }
+
+            // 检查累加后是否超过阈值
+            int addLen = sentence.length();
+            if (buffer.length() + addLen > threshold && buffer.length() > 0) {
+                // 超过阈值，先输出当前 buffer
+                results.add(buffer.toString().trim());
+                buffer = new StringBuilder(sentence);
+            } else {
+                buffer.append(sentence);
+            }
+        }
+
+        // 输出剩余 buffer
+        if (buffer.length() > 0) {
+            results.add(buffer.toString().trim());
+        }
+
+        return results;
+    }
+
+    /**
+     * 按句子分隔符拆分文本，保留分隔符在句子末尾。
+     */
+    private List<String> splitIntoSentences(String text) {
+        List<String> sentences = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return sentences;
+        }
+
+        Matcher matcher = SENTENCE_DELIMITER.matcher(text);
+        int lastEnd = 0;
+
+        while (matcher.find()) {
+            int delimiterEnd = matcher.end();
+            String sentence = text.substring(lastEnd, delimiterEnd);
+            if (!sentence.isBlank()) {
+                sentences.add(sentence);
+            }
+            lastEnd = delimiterEnd;
+        }
+
+        // 剩余部分（无分隔符的结尾）
+        if (lastEnd < text.length()) {
+            String remaining = text.substring(lastEnd);
+            if (!remaining.isBlank()) {
+                sentences.add(remaining);
+            }
+        }
+
+        return sentences;
+    }
+
+    /**
+     * 解析 Markdown 标题（只识别一二三级），构建层级标题路径，以标题为界拆分文本。
+     * 使用简单的状态记录维护层级关系（最多三层），titlePath 格式为 "一级标题 > 二级标题 > 三级标题"。
+     */
     private List<HeadingSection> splitByHeadings(String text) {
         List<HeadingSection> sections = new ArrayList<>();
         if (text == null || text.isEmpty()) {
@@ -143,14 +202,16 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         List<int[]> headingPositions = new ArrayList<>();
 
         while (matcher.find()) {
-            headingPositions.add(new int[]{matcher.start(), matcher.end(), matcher.group(1).length(), headingPositions.size()});
+            int level = matcher.group(1).length();
+            headingPositions.add(new int[]{matcher.start(), matcher.end(), level});
         }
 
         if (headingPositions.isEmpty()) {
-            sections.add(new HeadingSection(text, null));
-            return sections;
+            // 无标题文档：调用专门处理方法
+            return processNoTitleDocument(text, RagParameters.CHUNK_THRESHOLD);
         }
 
+        // 处理第一个标题前的 preamble（前置文本）
         int firstHeadingStart = headingPositions.get(0)[0];
         if (firstHeadingStart > 0) {
             String preamble = text.substring(0, firstHeadingStart).trim();
@@ -159,7 +220,8 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             }
         }
 
-        String[] titleStack = new String[6];
+        // 只跟踪一二三级标题（最多三层）
+        String[] titleStack = new String[3];
 
         for (int i = 0; i < headingPositions.size(); i++) {
             int[] pos = headingPositions.get(i);
@@ -168,14 +230,16 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             int level = pos[2];
             String headingText = text.substring(headingStart, headingEnd).trim();
 
+            // 更新标题栈（level 为 1-3）
             titleStack[level - 1] = headingText.replaceAll("^#+\\s*", "");
-            for (int j = level; j < 6; j++) {
+            // 清空当前级别以下的标题
+            for (int j = level; j < 3; j++) {
                 titleStack[j] = null;
             }
 
-            // 构建路径
+            // 构建 titlePath（最多三层）
             StringBuilder titlePath = new StringBuilder();
-            for (int j = 0; j < 6; j++) {
+            for (int j = 0; j < 3; j++) {
                 if (titleStack[j] != null) {
                     if (titlePath.length() > 0) {
                         titlePath.append(" > ");
@@ -187,12 +251,214 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             int contentStart = headingEnd;
             int contentEnd = (i + 1 < headingPositions.size()) ? headingPositions.get(i + 1)[0] : text.length();
             String content = text.substring(contentStart, contentEnd).trim();
+
+            // 空标题区块：跳过不生成独立 section，但 titleStack 已记录该标题
+            if (content.isEmpty()) {
+                continue;
+            }
+
             String fullSection = headingText + "\n" + content;
 
             sections.add(new HeadingSection(fullSection, titlePath.toString()));
         }
 
         return sections;
+    }
+
+    /**
+     * 处理无标题文档：三级降级拆分（强段落，双换行符 → 弱段落，单换行符 → 句子）+ 阈值累加。
+     *
+     *
+     * 拆分后的子块累加到阈值后输出为一个 chunk（无父子层级，都是 Level2）。
+     */
+    private List<HeadingSection> processNoTitleDocument(String text, int threshold) {
+        List<HeadingSection> sections = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return sections;
+        }
+
+        // 1. 按强段落分隔（双换行）拆分
+        String[] strongParagraphs = text.split("\\n\\s*\\n");
+
+        StringBuilder buffer = new StringBuilder();
+        for (String para : strongParagraphs) {
+            String trimmedPara = para.trim();
+            if (trimmedPara.isEmpty()) {
+                continue;
+            }
+
+            // 2. 检查段落是否显著超长（> threshold * 1.5）
+            if (trimmedPara.length() > threshold * 1.5) {
+                // 先输出当前 buffer
+                if (buffer.length() > 0) {
+                    sections.add(new HeadingSection(buffer.toString().trim(), null));
+                    buffer.setLength(0);
+                }
+                // 三级降级拆分：强段落 → 弱段落 → 句子
+                List<String> subChunks = splitOversizedParagraph(trimmedPara, threshold);
+                for (String sub : subChunks) {
+                    if (sub != null && !sub.isBlank()) {
+                        sections.add(new HeadingSection(sub.trim(), null));
+                    }
+                }
+            } else {
+                // 3. 正常段落：累加到阈值
+                int addLen = trimmedPara.length() + (buffer.length() > 0 ? 2 : 0);
+                if (buffer.length() + addLen > threshold && buffer.length() > 0) {
+                    // 超过阈值，先输出当前 buffer
+                    sections.add(new HeadingSection(buffer.toString().trim(), null));
+                    buffer = new StringBuilder(trimmedPara);
+                } else {
+                    if (buffer.length() > 0) {
+                        buffer.append("\n\n");
+                    }
+                    buffer.append(trimmedPara);
+                }
+            }
+        }
+
+        // 输出剩余 buffer
+        if (buffer.length() > 0) {
+            sections.add(new HeadingSection(buffer.toString().trim(), null));
+        }
+
+        return sections;
+    }
+
+    /**
+     * 拆分显著超长段落：先尝试按单换行拆分为弱段落，无换行或拆分后仍超长则按句子兜底拆分。
+     */
+    private List<String> splitOversizedParagraph(String para, int threshold) {
+        // 1. 尝试按单换行拆分为弱段落（识别并保持列表项完整性）
+        if (para.contains("\n")) {
+            List<String> weakParagraphs = splitByWeakParagraphs(para);
+            // 检查是否所有弱段落都满足阈值
+            boolean allFit = weakParagraphs.stream().allMatch(p -> p.length() <= threshold);
+            if (allFit) {
+                // 累加到阈值后输出
+                return accumulateWithThreshold(weakParagraphs, threshold);
+            }
+        }
+
+        // 2. 无换行或拆分后仍超长 → 复用已有的 splitBySentenceWithThreshold() 方法作为句子级兜底
+        return splitBySentenceWithThreshold(para, threshold);
+    }
+
+    /**
+     * 按单换行拆分弱段落，识别并保持列表项完整性。
+     * 连续的列表项（- / * / + / 数字序号）合并为一个区块，不被拆散。
+     */
+    private List<String> splitByWeakParagraphs(String para) {
+        List<String> weakParagraphs = new ArrayList<>();
+        String[] lines = para.split("\n", -1);
+
+        StringBuilder blockBuffer = new StringBuilder();
+        boolean inList = false;
+
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+            boolean isListItem = isListItem(trimmedLine);
+
+            if (isListItem) {
+                // 当前行是列表项
+                if (!inList && blockBuffer.length() > 0) {
+                    // 之前的非列表内容先输出
+                    weakParagraphs.add(blockBuffer.toString().trim());
+                    blockBuffer = new StringBuilder();
+                }
+                inList = true;
+                if (blockBuffer.length() > 0) {
+                    blockBuffer.append("\n");
+                }
+                blockBuffer.append(line);
+            } else {
+                // 当前行不是列表项
+                if (inList && !trimmedLine.isEmpty()) {
+                    // 列表结束（遇到非空非列表行），输出列表块
+                    if (blockBuffer.length() > 0) {
+                        weakParagraphs.add(blockBuffer.toString().trim());
+                        blockBuffer = new StringBuilder();
+                    }
+                    inList = false;
+                }
+                if (trimmedLine.isEmpty()) {
+                    // 空行：段落分隔，输出当前块
+                    if (blockBuffer.length() > 0) {
+                        weakParagraphs.add(blockBuffer.toString().trim());
+                        blockBuffer = new StringBuilder();
+                    }
+                    inList = false;
+                } else {
+                    // 普通文本行
+                    if (blockBuffer.length() > 0) {
+                        blockBuffer.append("\n");
+                    }
+                    blockBuffer.append(line);
+                }
+            }
+        }
+
+        // 输出剩余
+        if (blockBuffer.length() > 0) {
+            weakParagraphs.add(blockBuffer.toString().trim());
+        }
+
+        return weakParagraphs;
+    }
+
+    /**
+     * 判断一行是否为 Markdown 列表项。
+     * 支持无序列表（- / * / +）和有序列表（1. / 2. 等）。
+     */
+    private boolean isListItem(String line) {
+        if (line == null || line.isEmpty()) {
+            return false;
+        }
+        // 无序列表：- * +
+        if (line.startsWith("- ") || line.startsWith("* ") || line.startsWith("+ ")) {
+            return true;
+        }
+        // 有序列表：1. 2. 等数字序号
+        if (line.matches("^\\d+\\.\\s+.+")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 将拆分后的子块累加到阈值后输出。
+     * 子块之间以单换行连接，累加超过阈值则切出当前块。
+     */
+    private List<String> accumulateWithThreshold(List<String> chunks, int threshold) {
+        List<String> results = new ArrayList<>();
+        if (chunks == null || chunks.isEmpty()) {
+            return results;
+        }
+
+        StringBuilder buffer = new StringBuilder();
+        for (String chunk : chunks) {
+            if (chunk == null || chunk.trim().isEmpty()) {
+                continue;
+            }
+            String trimmed = chunk.trim();
+            // 单换行分隔长度为 1
+            int addLen = trimmed.length() + (buffer.length() > 0 ? 1 : 0);
+            if (buffer.length() + addLen > threshold && buffer.length() > 0) {
+                results.add(buffer.toString().trim());
+                buffer = new StringBuilder(trimmed);
+            } else {
+                if (buffer.length() > 0) {
+                    buffer.append("\n");
+                }
+                buffer.append(trimmed);
+            }
+        }
+
+        if (buffer.length() > 0) {
+            results.add(buffer.toString().trim());
+        }
+
+        return results;
     }
 
     private String classifyChunkType(String text) {
@@ -209,21 +475,22 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         return ChunkType.GENERAL;
     }
 
-    private String buildSectionType(String sectionText) {
-        if (sectionText.startsWith("```")) {
-            return ChunkType.CODE;
-        }
-        if (TABLE_LINE.matcher(sectionText).find()) {
-            return ChunkType.TABLE;
-        }
-        return ChunkType.SECTION;
-    }
-
+    /**
+     * 原子块记录：携带文本、类型、是否为原子块（代码/表格）。
+     *
+     * @deprecated 已废弃复杂的原子区块识别逻辑。原子区块现统一以标题层级的"管辖内容"为标准，
+     *             不再单独识别代码块/表格作为原子块保护。保留仅供历史参考，后续应删除。
+     */
+    @Deprecated
     private record AtomicBlock(String text, String type, boolean isAtomic) {}
 
     /**
      * 提取原子块（代码块、表格）与普通文本的混合列表。
+     *
+     * @deprecated 已废弃。原子区块现统一以标题层级的"管辖内容"为标准，不再预提取代码块/表格。
+     *             超长标题区块直接调用 {@link #splitBySentenceWithThreshold} 按句子拆分。
      */
+    @Deprecated
     private List<AtomicBlock> extractAtomicBlocks(String text) {
         // 识别代码块范围（```...```）
         List<int[]> codeRanges = findCodeBlockRanges(text);
@@ -267,7 +534,10 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
     /**
      * 查找所有代码块范围（```...``` 配对）。
      * 返回每个代码块的 [起始位置, 结束位置]。
+     *
+     * @deprecated 已废弃。仅服务于 {@link #extractAtomicBlocks}，该原子块识别逻辑已不再使用。
      */
+    @Deprecated
     private List<int[]> findCodeBlockRanges(String text) {
         List<int[]> ranges = new ArrayList<>();
         Matcher fenceMatcher = CODE_FENCE.matcher(text);
@@ -294,7 +564,10 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
     /**
      * 查找所有表格范围（连续的 |...| 行）。
      * 排除代码块内部的表格行，避免误判代码中的 | 符号。
+     *
+     * @deprecated 已废弃。仅服务于 {@link #extractAtomicBlocks}，该原子块识别逻辑已不再使用。
      */
+    @Deprecated
     private List<int[]> findTableRanges(String text, List<int[]> codeRanges) {
         List<int[]> ranges = new ArrayList<>();
         Matcher m = TABLE_LINE.matcher(text);
@@ -330,7 +603,10 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
 
     /**
      * 合并两组范围列表，按起始位置排序，并合并重叠区域。
+     *
+     * @deprecated 已废弃。仅服务于 {@link #extractAtomicBlocks}，该原子块识别逻辑已不再使用。
      */
+    @Deprecated
     private List<int[]> mergeSortedRanges(List<int[]> a, List<int[]> b) {
         List<int[]> all = new ArrayList<>();
         all.addAll(a);
@@ -350,7 +626,10 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
 
     /**
      * 判断某个位置是否落在任一范围内（用于排除代码块内的表格行）。
+     *
+     * @deprecated 已废弃。仅服务于 {@link #extractAtomicBlocks}，该原子块识别逻辑已不再使用。
      */
+    @Deprecated
     private static boolean isInsideAny(int pos, List<int[]> ranges) {
         for (int[] r : ranges) {
             if (pos >= r[0] && pos < r[1]) {
@@ -362,7 +641,10 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
 
     /**
      * 判断目标范围是否在给定范围列表中（用于区分代码块和表格）。
+     *
+     * @deprecated 已废弃。仅服务于 {@link #extractAtomicBlocks}，该原子块识别逻辑已不再使用。
      */
+    @Deprecated
     private static boolean containsRange(int[] target, List<int[]> ranges) {
         for (int[] r : ranges) {
             if (r[0] == target[0] && r[1] == target[1]) {
@@ -372,5 +654,4 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
         return false;
     }
 
-    private record HeadingSection(String text, String titlePath) {}
 }

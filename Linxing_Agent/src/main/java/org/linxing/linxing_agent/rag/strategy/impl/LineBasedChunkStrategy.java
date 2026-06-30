@@ -15,6 +15,7 @@ import java.util.Set;
 
 /**
  * 行式分块策略，面向 log/csv/txt 等行式文本，按空行分段落，再对超长段落进行细化拆分
+ * //TODO：为避免一个文档生出太多的chunk，策略应该改为——保障段落不断裂的情况下，从上到下收集并组为不超过一定大小的段作为一个chunk（存在大段落再考虑拆分）
  */
 @Slf4j
 @Component("lineBasedChunkStrategy")

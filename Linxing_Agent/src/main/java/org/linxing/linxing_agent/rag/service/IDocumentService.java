@@ -1,11 +1,8 @@
 package org.linxing.linxing_agent.rag.service;
 
-import org.linxing.linxing_agent.rag.vo.ChunkTreeVO;
 import org.linxing.linxing_agent.rag.vo.DocumentPreviewVO;
 import org.linxing.linxing_agent.rag.vo.DocumentVO;
 import org.linxing.linxing_agent.common.result.PageResult;
-
-import java.util.List;
 
 public interface IDocumentService {
 
@@ -18,6 +15,4 @@ public interface IDocumentService {
     DocumentPreviewVO previewDocument(Integer id, Integer userId);
 
     String getFilePath(Integer id, Integer userId);
-
-    List<ChunkTreeVO> getChunkTree(Integer id, Integer userId);
 }

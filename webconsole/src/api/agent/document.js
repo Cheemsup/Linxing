@@ -19,10 +19,6 @@ export const documentApi = {
     return api.get(`/rag/documents/${id}/preview`)
   },
 
-  getChunkTree(id) {
-    return api.get(`/rag/documents/${id}/chunk-tree`)
-  },
-
   getDownloadUrl(id) {
     return `/api/rag/documents/${id}/download`
   },

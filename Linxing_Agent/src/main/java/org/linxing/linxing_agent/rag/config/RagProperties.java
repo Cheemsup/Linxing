@@ -26,6 +26,11 @@ public class RagProperties {
         private String model = RagParameters.EMBEDDING_MODEL;
         private int chunkSize = RagParameters.CHUNK_SIZE;
         private int chunkOverlap = RagParameters.CHUNK_OVERLAP;
+        /** 最小 chunk 大小，低于此值的相邻同源小块会被合并；设为 0 关闭合并 */
+        //TODO：1、待确定该参数的真正用法；2、这个值太大了
+        private int minChunkSize = RagParameters.MIN_CHUNK_SIZE;
+        /** 标题区块拆分阈值：超长标题区块按句子拆分时的字符上限（如 1000）。仅对 > 此阈值的区块做拆分 */
+        private int chunkThreshold = RagParameters.CHUNK_THRESHOLD;
     }
 
     @Data

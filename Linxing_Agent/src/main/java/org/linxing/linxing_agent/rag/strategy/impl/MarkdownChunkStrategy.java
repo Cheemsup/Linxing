@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * Markdown 分块策略，按标题层级拆分文档，支持 Level 1/2 父子分块和标题路径提取。
- * 总的拆分思路：按标题拆分，一般以标题区块作为chunk单位，超长 section 会被递归为使用句子拆分方式进行拆分并维护父子chunk关系；无标题部分则尝试构建"按换行符——按句子"的优先级拆分方式
+ * 总的拆分思路：按标题拆分，一般以标题区块作为chunk单位，超长 section 会被递归为使用句子拆分方式进行拆分并维护父子chunk关系；无标题部分则尝试构建"按多换行/双换行——按单换行——按句子"的优先级拆分方式
  * 使用"最长chunk长度"作为阈值、使用标题划分层级（最低三级）作为区块划分动作的指导
  */
 @Slf4j
@@ -34,6 +34,9 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
     // 句子分隔符（中英文）
     private final static Pattern SENTENCE_DELIMITER = Pattern.compile(
             "[。！？.!?；;]");
+
+    // 强段落分隔：多换行/双换行（独立语义块），连续任意数量的换行均视为一个强段落边界
+    private static final String STRONG_PARAGRAPH_SEP = "\\n\\s*\\n";
 
     private record HeadingSection(String text, String titlePath) {}
 
@@ -266,7 +269,7 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
     }
 
     /**
-     * 处理无标题文档：三级降级拆分（强段落，双换行符 → 弱段落，单换行符 → 句子）+ 阈值累加。
+     * 处理无标题文档：三级降级拆分（强段落，多换行/双换行 → 弱段落，单换行 → 句子）+ 阈值累加。
      *
      *
      * 拆分后的子块累加到阈值后输出为一个 chunk（无父子层级，都是 Level2）。
@@ -277,8 +280,8 @@ public class MarkdownChunkStrategy implements ChunkStrategy {
             return sections;
         }
 
-        // 1. 按强段落分隔（双换行）拆分
-        String[] strongParagraphs = text.split("\\n\\s*\\n");
+        // 1. 按强段落分隔（多换行/双换行）拆分
+        String[] strongParagraphs = text.split(STRONG_PARAGRAPH_SEP);
 
         StringBuilder buffer = new StringBuilder();
         for (String para : strongParagraphs) {

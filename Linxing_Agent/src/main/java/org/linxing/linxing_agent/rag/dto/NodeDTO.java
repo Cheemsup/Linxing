@@ -81,4 +81,18 @@ public class NodeDTO {
      * 表格列数（适用于 table）
      */
     private Integer colCount;
+
+    /**
+     * 标题路径（如 "第一章 > 第一节"）。
+     * 由 Python 侧结构识别产出，非标题块也带其所属标题路径；
+     * docx/pdf 等结构化文档的 chunk 据此携带 nodeMetadata。
+     */
+    private String titlePath;
+
+    /**
+     * 超长单元的父 Node ID（用于父子 chunk）。
+     * Python 侧对超长 section/段落/方法做二次切分时，拆出的子 Node 标 parentId 指向同源 Level1 父 Node 的 id；
+     * 普通块为 null。
+     */
+    private String parentId;
 }

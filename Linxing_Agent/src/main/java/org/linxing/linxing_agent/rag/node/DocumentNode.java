@@ -78,4 +78,28 @@ public interface DocumentNode {
         Object id = metadata().get("id");
         return id != null ? id.toString() : type().name() + "_" + hashCode();
     }
+
+    /**
+     * 标题路径（如 "第一章 > 第一节"）。
+     * 由 Python 侧结构识别产出并经 NodeConverter 写入 metadata["titlePath"]；
+     * 非标题块也带其所属标题路径；无标题上下文时返回 null。
+     *
+     * @return 标题路径，可能为 null
+     */
+    default String getTitlePath() {
+        Object tp = metadata().get("titlePath");
+        return tp != null ? tp.toString() : null;
+    }
+
+    /**
+     * 超长单元的父 Node ID（用于父子 chunk）。
+     * Python 侧对超长 section/段落/方法做二次切分时，拆出的子 Node 标 parentId 指向同源 Level1 父 Node 的 id；
+     * 普通块为 null。
+     *
+     * @return 父 Node ID，可能为 null
+     */
+    default String getParentId() {
+        Object pid = metadata().get("parentId");
+        return pid != null ? pid.toString() : null;
+    }
 }

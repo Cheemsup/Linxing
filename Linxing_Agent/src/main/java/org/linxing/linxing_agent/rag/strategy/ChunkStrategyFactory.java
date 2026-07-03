@@ -14,7 +14,12 @@ import java.util.List;
 /**
  * 分块策略工厂，根据文件类型和内容特征按优先级自动选择合适的分块策略。
  * 策略选择完全由系统自动完成，用户无需也不应参与分块策略的指定。
+ *
+ * @deprecated 已废弃。所有文件类型已统一走 Node 体系（{@code ChunkPipelineCoordinator.processDocumentFromNodes}），
+ *             旧 {@code strategy.execute} 路径无调用方，结构识别已迁移至 Python 侧 parsers。
+ *             ChunkPipelineCoordinator 已移除对 strategyFactory 的依赖；保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component
 public class ChunkStrategyFactory {
@@ -40,6 +45,7 @@ public class ChunkStrategyFactory {
         this.fallbackStrategy = recursiveChunkStrategy;
     }
 
+    @SuppressWarnings("deprecation")
     public ChunkStrategy getStrategy(ChunkStrategyContext context) {
         for (ChunkStrategy strategy : orderedStrategies) {
             if (strategy.supports(context)) {

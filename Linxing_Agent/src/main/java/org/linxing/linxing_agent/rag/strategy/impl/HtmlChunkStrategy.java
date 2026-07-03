@@ -8,8 +8,7 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -22,7 +21,12 @@ import java.util.List;
 /**
  * HTML 分块策略，使用 Jsoup 解析 DOM 树，按 h1-h6 标题及 section/article 标签拆分。
  * 深度优先遍历确保零内容丢失，自动提取纯文本并构造标题路径。
+ *
+ * @deprecated 已废弃。HTML DOM 遍历已迁移至 Python 侧
+ *             {@code document_analysis_service/parsers/html_parser.py}（beautifulsoup4），
+ *             由 NodeBasedChunkBuilder 装箱。保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component("htmlChunkStrategy")
 public class HtmlChunkStrategy implements ChunkStrategy {

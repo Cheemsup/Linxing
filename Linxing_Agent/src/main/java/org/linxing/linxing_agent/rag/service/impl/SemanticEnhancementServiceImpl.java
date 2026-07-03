@@ -71,8 +71,9 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
                 SemanticContext ctx = semanticContextBuilder.build(nodes, i);
                 enhanceNode(ctx, renderer);//根据Node类型进行模型调用、语义丰富
             } catch (Exception e) {
-                log.warn("Node {} 语义增强失败: {}", node.getId(), e.getMessage());
-                // 增强失败不影响整体流程，Node 会 fallback 到默认 semanticText
+                // 增强彻底失败（重试耗尽或不可重试异常）——Node 会 fallback 到默认 semanticText，
+                // 但这意味着该 Node 的语义描述缺失、向量化质量下降，需 error 级别便于监控告警
+                log.error("Node {} 语义增强失败，将回退到原文参与向量化: {}", node.getId(), e.getMessage(), e);
             }
         }
 

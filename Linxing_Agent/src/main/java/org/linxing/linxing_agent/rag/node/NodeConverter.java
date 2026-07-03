@@ -152,6 +152,14 @@ public class NodeConverter {
             metadata.put("colCount", dto.getColCount());
         }
 
+        // Python 侧结构识别产出的标题路径与父子关系（阶段二协议扩展）
+        if (dto.getTitlePath() != null) {
+            metadata.put("titlePath", dto.getTitlePath());
+        }
+        if (dto.getParentId() != null) {
+            metadata.put("parentId", dto.getParentId());
+        }
+
         return metadata;
     }
 }

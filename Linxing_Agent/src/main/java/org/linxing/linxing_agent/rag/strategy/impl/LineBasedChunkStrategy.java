@@ -3,7 +3,7 @@ package org.linxing.linxing_agent.rag.strategy.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -23,7 +23,12 @@ import java.util.regex.Pattern;
  * 3. 弱段落仍超长 → 按句子拆分并累加
  *
  * 使用阈值累加机制，保障段落不断裂的情况下，从上到下收集并组为不超过阈值的段作为一个 chunk
+ *
+ * @deprecated 已废弃。行式文本三级降级拆分已迁移至 Python 侧
+ *             {@code document_analysis_service/parsers/linebased_parser.py}（标准库 re），
+ *             由 NodeBasedChunkBuilder 装箱。保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component("lineBasedChunkStrategy")
 public class LineBasedChunkStrategy implements ChunkStrategy {
@@ -425,8 +430,8 @@ public class LineBasedChunkStrategy implements ChunkStrategy {
         int chunkOverlap = context.getChunkOverlap() != null ? context.getChunkOverlap() : 50;
         String fullText = context.getFullText();
 
-        org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter refinementPipeline =
-                new org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter(maxChunkSize, chunkOverlap);
+        RecursiveTextSplitter refinementPipeline =
+                new RecursiveTextSplitter(maxChunkSize, chunkOverlap);
 
         List<String> paragraphs = splitByBlankLinesOld(fullText);
         List<ChunkResult> results = new ArrayList<>();

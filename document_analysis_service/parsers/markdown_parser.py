@@ -1,0 +1,1004 @@
+"""
+Markdown 解析器
+
+职责：将 Markdown 文档解析为统一的 Node JSON 序列。
+对应 Java 侧 MarkdownChunkStrategy.splitByHeadings / processNoTitleDocument 等逻辑。
+
+选型决策（reference/TODOS/betterRAG/0702_dealWithOldStrategy.md 第 7.3 节）：
+- 使用 mistune 3（mistune>=3.3.2）做结构识别（heading level、paragraph 边界、list/list_item 边界、
+  code_block fence 边界、table 边界）。
+- mistune 只负责"识别结构边界"，**titlePath 栈推导、超长拆分、parentId 标注、无标题三级降级**
+  仍是本系统手写领域逻辑（用标准库 re）。
+
+核心策略（忠实复刻旧 Java MarkdownChunkStrategy）：
+1. 按标题拆分（只识别 #{1,3} 一二三级），维护标题栈推导 titlePath（格式 "一级 > 二级 > 三级"），清下级
+2. 超长 section（> threshold，默认 1000）按句子拆分（中英文标点 [。！？.!?；;]），标 parentId 指向同源 Level1 单元
+3. 无标题文档三级降级：强段落（多换行/双换行）→ 弱段落（单换行，保持列表项完整）→ 句子，阈值累加
+4. 标题前有 preamble（前置文本）也作为 section
+5. code_block / table 作为原子块不可拆（即使超长也整体输出，不拆句子）
+
+Node JSON 协议（与 Java 侧 NodeDTO 对应）：
+- id: str "n1"... 自管递增
+- type: "heading" | "text" | "code" | "table" | "image" | "formula"
+- text: 文本内容（heading/text/code/formula 用）
+- level: int（heading 用，1-3）
+- language: str（code 用，可 None）
+- html: str（table 用，转 HTML 字符串）
+- titlePath: str（标题路径如 "第一章 > 第一节"，非标题块也带其所属标题路径；无标题上下文时 None）
+- parentId: str 或 None（超长 section 拆出的子 Node，parentId 指向同源 Level1 父 Node 的 id）
+- page: int（Markdown 无分页，固定 1）
+- bbox: None
+"""
+
+import logging
+import re
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+logger = logging.getLogger("docling_analysis_service.parsers.markdown_parser")
+
+try:
+    import mistune
+    # 检查版本：需要 mistune 3.x，旧版（0.x/1.x/2.x）API 不兼容
+    _mistune_version = getattr(mistune, "__version__", "0.0.0")
+    _mistune_major = int(_mistune_version.split(".")[0])
+    if _mistune_major < 3:
+        logger.warning(
+            "mistune 版本过低 (%s)，需要 >=3.3.2，降级为纯正则模式。"
+            "请运行 pip install --upgrade mistune>=3.3.2",
+            _mistune_version,
+        )
+        mistune = None  # type: ignore
+except ImportError:
+    mistune = None  # type: ignore
+
+# 与旧 Java MarkdownChunkStrategy.CHUNK_THRESHOLD 一致
+CHUNK_THRESHOLD = 1000
+
+# 只识别一二三级标题（#{1,3}，与 Java HEADING_PATTERN 一致）
+HEADING_PATTERN = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
+
+# 句子分隔符（中英文，与 Java SENTENCE_DELIMITER 一致）
+SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
+
+# 强段落分隔：多换行/双换行（与 Java STRONG_PARAGRAPH_SEP 一致）
+STRONG_PARAGRAPH_SEP = r"\n\s*\n"
+
+# Markdown 扩展名
+MARKDOWN_EXTENSIONS = {"md", "markdown"}
+
+# mistune table plugin（GFM 表格支持）
+try:
+    from mistune.plugins import plugin_table
+    _TABLE_PLUGIN = plugin_table
+except ImportError:
+    _TABLE_PLUGIN = None  # type: ignore
+
+
+class MarkdownParser:
+    """Markdown 解析器，基于 mistune 3 AST + 手写领域逻辑。
+
+    mistune 产出的 block token 是扁平列表（heading 与其后段落是兄弟），
+    本类用栈推导 titlePath，并处理超长拆分、parentId 标注、无标题三级降级。
+    """
+
+    def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
+        """
+        :param chunk_threshold: 拆分阈值（默认 1000，与旧 Java 一致）
+        """
+        self.threshold = chunk_threshold
+        if mistune is None:
+            logger.warning(
+                "mistune 未安装，MarkdownParser 将降级为纯正则模式（不推荐）。"
+                "请运行 pip install mistune>=3.3.2"
+            )
+        else:
+            logger.info(
+                "MarkdownParser 初始化完成，mistune 版本: %s, 阈值: %d",
+                mistune.__version__ if hasattr(mistune, "__version__") else "unknown",
+                self.threshold,
+            )
+
+    # ============================== 对外入口 ==============================
+
+    def parse(
+        self, file_path: str, document_id: int, user_id: int
+    ) -> List[dict]:
+        """
+        解析 Markdown 文件，返回 Node JSON 列表
+
+        :param file_path: 文件本地路径
+        :param document_id: 文档 ID（保留参数，与 parser.py 风格一致）
+        :param user_id: 用户 ID（保留参数，与 parser.py 风格一致）
+        :return: Node dict 列表，每个 Node 形如
+                 {id, type, text, level, language, html, titlePath, parentId, page, bbox}
+        """
+        file_path = Path(file_path)
+        logger.info("MarkdownParser 开始解析: %s", file_path)
+
+        try:
+            text = self._read_text(file_path)
+        except Exception as e:
+            logger.warning("MarkdownParser 读取文件失败: %s, %s", file_path, e)
+            return []
+
+        if not text or not text.strip():
+            logger.info("MarkdownParser 文件内容为空: %s", file_path)
+            return []
+
+        # 核心解析流程
+        nodes = self._parse_markdown(text)
+
+        logger.info(
+            "MarkdownParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes)
+        )
+        return nodes
+
+    # ============================== 核心解析流程 ==============================
+
+    def _parse_markdown(self, text: str) -> List[dict]:
+        """
+        核心 Markdown 解析流程。
+
+        策略：
+        1. 先检查是否有标题（HEADING_PATTERN）
+        2. 有标题 → 按标题拆分 + titlePath 栈推导 + 超长拆分
+        3. 无标题 → 三级降级拆分（强段落 → 弱段落 → 句子）
+        """
+        results: List[dict] = []
+        if not text:
+            return results
+
+        node_seq = self._make_node_seq()
+
+        # 1. 检查是否有标题
+        heading_matches = list(HEADING_PATTERN.finditer(text))
+
+        if not heading_matches:
+            # 无标题文档：三级降级拆分（与 Java processNoTitleDocument 一致）
+            return self._process_no_title_document(text, node_seq)
+
+        # 2. 有标题：按标题拆分（与 Java splitByHeadings 一致）
+        # 处理第一个标题前的 preamble（前置文本）
+        first_heading_start = heading_matches[0].start()
+        if first_heading_start > 0:
+            preamble = text[:first_heading_start].strip()
+            if preamble:
+                results.append(
+                    self._make_text_node(
+                        next(node_seq), preamble, title_path=None, parent_id=None
+                    )
+                )
+
+        # 只跟踪一二三级标题（最多三层）
+        title_stack: List[Optional[str]] = [None, None, None]  # level 1, 2, 3
+
+        for i, m in enumerate(heading_matches):
+            level = len(m.group(1))  # # 的数量
+            heading_text = m.group(2).strip()
+
+            # 更新标题栈（level 为 1-3）
+            title_stack[level - 1] = heading_text
+            # 清空当前级别以下的标题
+            for j in range(level, 3):
+                title_stack[j] = None
+
+            # 构建 titlePath
+            title_path = self._build_title_path(title_stack)
+
+            # 计算内容范围
+            content_start = m.end()
+            content_end = (
+                heading_matches[i + 1].start() if i + 1 < len(heading_matches) else len(text)
+            )
+            content = text[content_start:content_end].strip()
+
+            # 空标题区块：跳过不生成独立 section，但 titleStack 已记录该标题
+            if not content:
+                continue
+
+            # 构造完整 section（标题行 + 内容）
+            full_section = f"{m.group(0)}\n{content}"
+
+            # 输出 heading Node（标题本身）
+            heading_node = self._make_heading_node(
+                next(node_seq), heading_text, level, title_path=title_path
+            )
+            results.append(heading_node)
+
+            # 处理 section 内容（可能包含 code_block / table / list / paragraph）
+            section_nodes = self._process_section_content(
+                full_section, title_path, node_seq
+            )
+            results.extend(section_nodes)
+
+        return results
+
+    # ============================== 标题区块内容处理 ==============================
+
+    def _process_section_content(
+        self,
+        section_text: str,
+        title_path: Optional[str],
+        node_seq,
+    ) -> List[dict]:
+        """
+        处理标题区块内的内容（可能包含多种 block 类型）。
+
+        策略：
+        1. 用 mistune AST 模式识别 block 边界（paragraph / code_block / table / list）
+        2. 对于每个 block：
+           - code_block / table → 原子块，整体输出一个 Node（不拆分）
+           - paragraph / list → 检查是否超长，超长则拆句子 + parentId
+        """
+        results: List[dict] = []
+
+        if mistune is None:
+            # 降级为纯正则模式（简化处理）
+            return self._process_section_fallback(section_text, title_path, node_seq)
+
+        # 使用 mistune AST 模式解析
+        md = mistune.create_markdown(renderer="ast")
+        if _TABLE_PLUGIN:
+            md.use(_TABLE_PLUGIN)
+
+        try:
+            tokens = md(section_text)
+        except Exception as e:
+            # mistune 解析异常属于非预期失败（输入已通过编码兜底读到），降级为正则模式可保证流程继续，
+            # 但意味着丢失 mistune 的准确结构识别能力，需 error 级别便于排查
+            logger.error("mistune 解析失败，降级为正则模式: %s", e, exc_info=True)
+            return self._process_section_fallback(section_text, title_path, node_seq)
+
+        # 遍历 token 树，提取 block
+        for token in tokens:
+            token_type = token.get("type", "")
+
+            if token_type == "heading":
+                # heading 已在 _parse_markdown 中单独处理，这里跳过
+                continue
+
+            elif token_type == "block_code":
+                # 代码块：原子块，整体输出
+                code_text = token.get("raw", "")
+                if code_text.strip():
+                    # 尝试提取语言信息
+                    language = None
+                    attrs = token.get("attrs", {})
+                    if attrs and "info" in attrs:
+                        language = attrs["info"]
+                    results.append(
+                        self._make_code_node(
+                            next(node_seq),
+                            code_text.strip(),
+                            language=language,
+                            title_path=title_path,
+                            parent_id=None,
+                        )
+                    )
+
+            elif token_type == "table":
+                # 表格：原子块，整体输出
+                table_html = self._render_table_to_html(token)
+                if table_html:
+                    results.append(
+                        self._make_table_node(
+                            next(node_seq),
+                            html=table_html,
+                            title_path=title_path,
+                            parent_id=None,
+                        )
+                    )
+
+            elif token_type == "paragraph":
+                # 段落：检查超长
+                para_text = self._extract_text_from_token(token)
+                if para_text.strip():
+                    if len(para_text) <= self.threshold:
+                        results.append(
+                            self._make_text_node(
+                                next(node_seq),
+                                para_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                    else:
+                        # 超长段落：拆句子 + parentId
+                        parent_id = next(node_seq)
+                        results.append(
+                            self._make_text_node(
+                                parent_id,
+                                para_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                        sub_chunks = self._split_by_sentence_with_threshold(
+                            para_text, self.threshold
+                        )
+                        for sub_text in sub_chunks:
+                            if sub_text.strip():
+                                results.append(
+                                    self._make_text_node(
+                                        next(node_seq),
+                                        sub_text.strip(),
+                                        title_path=title_path,
+                                        parent_id=parent_id,
+                                    )
+                                )
+
+            elif token_type == "list":
+                # 列表：检查整体长度
+                list_text = self._extract_text_from_token(token)
+                if list_text.strip():
+                    if len(list_text) <= self.threshold:
+                        results.append(
+                            self._make_text_node(
+                                next(node_seq),
+                                list_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                    else:
+                        # 超长列表：拆句子 + parentId（列表项整体不拆散）
+                        parent_id = next(node_seq)
+                        results.append(
+                            self._make_text_node(
+                                parent_id,
+                                list_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                        sub_chunks = self._split_by_sentence_with_threshold(
+                            list_text, self.threshold
+                        )
+                        for sub_text in sub_chunks:
+                            if sub_text.strip():
+                                results.append(
+                                    self._make_text_node(
+                                        next(node_seq),
+                                        sub_text.strip(),
+                                        title_path=title_path,
+                                        parent_id=parent_id,
+                                    )
+                                )
+
+            elif token_type == "block_quote":
+                # 引用块：提取文本处理
+                quote_text = self._extract_text_from_token(token)
+                if quote_text.strip():
+                    if len(quote_text) <= self.threshold:
+                        results.append(
+                            self._make_text_node(
+                                next(node_seq),
+                                quote_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                    else:
+                        parent_id = next(node_seq)
+                        results.append(
+                            self._make_text_node(
+                                parent_id,
+                                quote_text.strip(),
+                                title_path=title_path,
+                                parent_id=None,
+                            )
+                        )
+                        sub_chunks = self._split_by_sentence_with_threshold(
+                            quote_text, self.threshold
+                        )
+                        for sub_text in sub_chunks:
+                            if sub_text.strip():
+                                results.append(
+                                    self._make_text_node(
+                                        next(node_seq),
+                                        sub_text.strip(),
+                                        title_path=title_path,
+                                        parent_id=parent_id,
+                                    )
+                                )
+
+            # 其他 block 类型（blank_line / thematic_break 等）忽略
+
+        return results
+
+    # ============================== 无标题文档三级降级 ==============================
+
+    def _process_no_title_document(self, text: str, node_seq) -> List[dict]:
+        """
+        处理无标题文档：三级降级拆分（强段落 → 弱段落 → 句子）+ 阈值累加。
+        （忠实复刻 Java processNoTitleDocument）
+        """
+        results: List[dict] = []
+        if not text:
+            return results
+
+        # 1. 按强段落分隔（多换行/双换行）拆分
+        strong_paragraphs = re.split(STRONG_PARAGRAPH_SEP, text)
+
+        buffer = ""
+        for para in strong_paragraphs:
+            trimmed_para = para.strip()
+            if not trimmed_para:
+                continue
+
+            # 2. 检查段落是否显著超长（> threshold * 1.5）
+            if len(trimmed_para) > self.threshold * 1.5:
+                # 先输出当前 buffer
+                if buffer:
+                    results.append(
+                        self._make_text_node(
+                            next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                        )
+                    )
+                    buffer = ""
+
+                # 超长段落整体作为虚拟父 Node（parentId=None）
+                parent_id = next(node_seq)
+                results.append(
+                    self._make_text_node(
+                        parent_id, trimmed_para.strip(), title_path=None, parent_id=None
+                    )
+                )
+
+                # 三级降级拆分：强段落 → 弱段落 → 句子
+                sub_chunks = self._split_oversized_paragraph(trimmed_para, self.threshold)
+                for sub in sub_chunks:
+                    if sub and sub.strip():
+                        results.append(
+                            self._make_text_node(
+                                next(node_seq), sub.strip(), title_path=None, parent_id=parent_id
+                            )
+                        )
+            else:
+                # 3. 正常段落：累加到阈值
+                add_len = len(trimmed_para) + (2 if buffer else 0)
+                if buffer and len(buffer) + add_len > self.threshold:
+                    # 超过阈值，先输出当前 buffer
+                    results.append(
+                        self._make_text_node(
+                            next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                        )
+                    )
+                    buffer = trimmed_para
+                else:
+                    if buffer:
+                        buffer += "\n\n"
+                    buffer += trimmed_para
+
+        # 输出剩余 buffer
+        if buffer:
+            results.append(
+                self._make_text_node(
+                    next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                )
+            )
+
+        return results
+
+    # ============================== 超长段落拆分 ==============================
+
+    def _split_oversized_paragraph(self, para: str, threshold: int) -> List[str]:
+        """
+        拆分显著超长段落：先尝试按单换行拆分为弱段落，
+        无换行或拆分后仍超长则按句子兜底拆分。
+        （与 Java splitOversizedParagraph 一致）
+        """
+        # 1. 尝试按单换行拆分为弱段落（识别并保持列表项完整性）
+        if "\n" in para:
+            weak_paragraphs = self._split_by_weak_paragraphs(para)
+            # 检查是否所有弱段落都满足阈值
+            all_fit = all(len(p) <= threshold for p in weak_paragraphs)
+            if all_fit:
+                # 累加到阈值后输出
+                return self._accumulate_with_threshold(weak_paragraphs, threshold)
+
+        # 2. 无换行或拆分后仍超长 → 按句子拆分作为兜底
+        return self._split_by_sentence_with_threshold(para, threshold)
+
+    def _split_by_weak_paragraphs(self, para: str) -> List[str]:
+        """
+        按单换行拆分弱段落，识别并保持列表项完整性。
+        连续的列表项（- / * / + / 数字序号）合并为一个区块，不被拆散。
+        （与 Java splitByWeakParagraphs 一致）
+        """
+        weak_paragraphs: List[str] = []
+        lines = para.split("\n")
+
+        block_buffer = ""
+        in_list = False
+
+        for line in lines:
+            trimmed_line = line.strip()
+            is_item = self._is_list_item(trimmed_line)
+
+            if is_item:
+                # 当前行是列表项
+                if not in_list and block_buffer:
+                    # 之前的非列表内容先输出
+                    weak_paragraphs.append(block_buffer.strip())
+                    block_buffer = ""
+                in_list = True
+                if block_buffer:
+                    block_buffer += "\n"
+                block_buffer += line
+            else:
+                # 当前行不是列表项
+                if in_list and trimmed_line:
+                    # 列表结束（遇到非空非列表行），输出列表块
+                    if block_buffer:
+                        weak_paragraphs.append(block_buffer.strip())
+                        block_buffer = ""
+                    in_list = False
+                if not trimmed_line:
+                    # 空行：段落分隔，输出当前块
+                    if block_buffer:
+                        weak_paragraphs.append(block_buffer.strip())
+                        block_buffer = ""
+                    in_list = False
+                else:
+                    # 普通文本行
+                    if block_buffer:
+                        block_buffer += "\n"
+                    block_buffer += line
+
+        # 输出剩余
+        if block_buffer:
+            weak_paragraphs.append(block_buffer.strip())
+
+        return weak_paragraphs
+
+    def _is_list_item(self, line: str) -> bool:
+        """
+        判断一行是否为 Markdown 列表项。
+        支持无序列表（- / * / +）和有序列表（1. / 2. 等数字序号）。
+        （与 Java isListItem 一致）
+        """
+        if not line:
+            return False
+        # 无序列表：- * +
+        if line.startswith("- ") or line.startswith("* ") or line.startswith("+ "):
+            return True
+        # 有序列表：1. 2. 等数字序号
+        if re.match(r"^\d+\.\s+.+", line):
+            return True
+        return False
+
+    # ============================== 阈值累加 ==============================
+
+    def _accumulate_with_threshold(self, chunks: List[str], threshold: int) -> List[str]:
+        """
+        将拆分后的子块累加到阈值后输出。
+        子块之间以单换行连接，累加超过阈值则切出当前块。
+        （与 Java accumulateWithThreshold 一致）
+        """
+        results: List[str] = []
+        if not chunks:
+            return results
+
+        buffer = ""
+        for chunk in chunks:
+            if not chunk or not chunk.strip():
+                continue
+            trimmed = chunk.strip()
+            # 单换行分隔长度为 1
+            add_len = len(trimmed) + (1 if buffer else 0)
+            if buffer and len(buffer) + add_len > threshold:
+                results.append(buffer.strip())
+                buffer = trimmed
+            else:
+                if buffer:
+                    buffer += "\n"
+                buffer += trimmed
+
+        if buffer:
+            results.append(buffer.strip())
+
+        return results
+
+    # ============================== 句子拆分 ==============================
+
+    def _split_by_sentence_with_threshold(self, text: str, threshold: int) -> List[str]:
+        """
+        按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
+        句子是原子单位，不会被截断。
+        （与 Java splitBySentenceWithThreshold 一致）
+        """
+        results: List[str] = []
+        if not text or not text.strip():
+            return results
+
+        sentences = self._split_into_sentences(text)
+
+        buffer = ""
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+            # 检查累加后是否超过阈值
+            add_len = len(sentence)
+            if buffer and len(buffer) + add_len > threshold:
+                # 超过阈值，先输出当前 buffer
+                results.append(buffer.strip())
+                buffer = sentence
+            else:
+                buffer += sentence
+
+        # 输出剩余 buffer
+        if buffer:
+            results.append(buffer.strip())
+
+        return results
+
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """
+        按句子分隔符拆分文本，保留分隔符在句子末尾。
+        （与 Java splitIntoSentences 一致）
+        """
+        sentences: List[str] = []
+        if not text:
+            return sentences
+
+        last_end = 0
+        for m in SENTENCE_DELIMITER.finditer(text):
+            delimiter_end = m.end()
+            sentence = text[last_end:delimiter_end]
+            if sentence.strip():
+                sentences.append(sentence)
+            last_end = delimiter_end
+
+        # 剩余部分（无分隔符的结尾）
+        if last_end < len(text):
+            remaining = text[last_end:]
+            if remaining.strip():
+                sentences.append(remaining)
+
+        return sentences
+
+    # ============================== mistune 辅助方法 ==============================
+
+    def _extract_text_from_token(self, token: Dict[str, Any]) -> str:
+        """
+        从 mistune token 中提取纯文本（递归遍历 children）。
+        """
+        if "raw" in token:
+            return token["raw"]
+
+        children = token.get("children", [])
+        if not children:
+            return ""
+
+        text_parts = []
+        for child in children:
+            child_type = child.get("type", "")
+            if child_type == "text":
+                text_parts.append(child.get("raw", ""))
+            elif "children" in child:
+                text_parts.append(self._extract_text_from_token(child))
+
+        return "".join(text_parts)
+
+    def _render_table_to_html(self, token: Dict[str, Any]) -> Optional[str]:
+        """
+        将 mistune table token 渲染为 HTML 字符串。
+        简化实现：直接使用 mistune 的 HTMLRenderer 渲染 table 部分。
+        """
+        if mistune is None:
+            return None
+
+        try:
+            # 创建一个仅渲染 table 的 mini renderer
+            renderer = mistune.HTMLRenderer()
+            # 调用 renderer.table 方法
+            children = token.get("children", [])
+            if not children:
+                return None
+
+            # 手动拼接 table HTML（简化版）
+            html_parts = ['<table border="1">']
+            for child in children:
+                child_type = child.get("type", "")
+                if child_type == "table_head":
+                    html_parts.append("<thead>")
+                    for row in child.get("children", []):
+                        if row.get("type") == "table_row":
+                            html_parts.append("<tr>")
+                            for cell in row.get("children", []):
+                                if cell.get("type") == "table_cell":
+                                    cell_text = self._extract_text_from_token(cell)
+                                    align = cell.get("attrs", {}).get("align", None)
+                                    align_attr = f' align="{align}"' if align else ""
+                                    html_parts.append(f"<th{align_attr}>{cell_text}</th>")
+                            html_parts.append("</tr>")
+                    html_parts.append("</thead>")
+                elif child_type == "table_body":
+                    html_parts.append("<tbody>")
+                    for row in child.get("children", []):
+                        if row.get("type") == "table_row":
+                            html_parts.append("<tr>")
+                            for cell in row.get("children", []):
+                                if cell.get("type") == "table_cell":
+                                    cell_text = self._extract_text_from_token(cell)
+                                    align = cell.get("attrs", {}).get("align", None)
+                                    align_attr = f' align="{align}"' if align else ""
+                                    html_parts.append(f"<td{align_attr}>{cell_text}</td>")
+                            html_parts.append("</tr>")
+                    html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            return "".join(html_parts)
+        except Exception as e:
+            logger.warning("渲染 table token 失败: %s", e)
+            return None
+
+    # ============================== 降级模式（无 mistune） ==============================
+
+    def _process_section_fallback(
+        self,
+        section_text: str,
+        title_path: Optional[str],
+        node_seq,
+    ) -> List[dict]:
+        """
+        无 mistune 时的降级处理：纯正则模式。
+
+        简化策略：
+        1. 尝试识别代码围栏 ```...```，整体输出为 code Node
+        2. 尝试识别表格（|...|），整体输出为 table Node（转 HTML）
+        3. 剩余文本作为 paragraph，超长拆句子
+        """
+        results: List[dict] = []
+
+        # 1. 识别代码围栏
+        code_fence_pattern = re.compile(r"^```(\w*)\s*\n(.*?)\n```", re.DOTALL | re.MULTILINE)
+        for m in code_fence_pattern.finditer(section_text):
+            language = m.group(1) if m.group(1) else None
+            code_text = m.group(2).strip()
+            if code_text:
+                results.append(
+                    self._make_code_node(
+                        next(node_seq),
+                        code_text,
+                        language=language,
+                        title_path=title_path,
+                        parent_id=None,
+                    )
+                )
+
+        # 移除代码块后的文本
+        remaining_text = code_fence_pattern.sub("", section_text).strip()
+
+        # 2. 识别表格（连续 |...| 行）
+        table_pattern = re.compile(r"(\|.*?\|\n)+", re.MULTILINE)
+        for m in table_pattern.finditer(remaining_text):
+            table_text = m.group(0).strip()
+            if table_text:
+                # 转换为 HTML
+                html = self._table_text_to_html(table_text)
+                if html:
+                    results.append(
+                        self._make_table_node(
+                            next(node_seq),
+                            html=html,
+                            title_path=title_path,
+                            parent_id=None,
+                        )
+                    )
+
+        # 移除表格后的文本
+        remaining_text = table_pattern.sub("", remaining_text).strip()
+
+        # 3. 剩余文本作为 paragraph
+        if remaining_text:
+            if len(remaining_text) <= self.threshold:
+                results.append(
+                    self._make_text_node(
+                        next(node_seq),
+                        remaining_text,
+                        title_path=title_path,
+                        parent_id=None,
+                    )
+                )
+            else:
+                parent_id = next(node_seq)
+                results.append(
+                    self._make_text_node(
+                        parent_id,
+                        remaining_text,
+                        title_path=title_path,
+                        parent_id=None,
+                    )
+                )
+                sub_chunks = self._split_by_sentence_with_threshold(
+                    remaining_text, self.threshold
+                )
+                for sub_text in sub_chunks:
+                    if sub_text.strip():
+                        results.append(
+                            self._make_text_node(
+                                next(node_seq),
+                                sub_text.strip(),
+                                title_path=title_path,
+                                parent_id=parent_id,
+                            )
+                        )
+
+        return results
+
+    def _table_text_to_html(self, table_text: str) -> Optional[str]:
+        """
+        将 Markdown 表格文本转换为 HTML（降级模式用）。
+        """
+        try:
+            lines = [line.strip() for line in table_text.strip().split("\n") if line.strip()]
+            if len(lines) < 2:
+                return None
+
+            # 过滤分隔行（|---|---|）
+            data_lines = [line for line in lines if not re.match(r"^\|[\s\-:]+\|$", line)]
+            if not data_lines:
+                return None
+
+            html_parts = ['<table border="1">']
+            for i, line in enumerate(data_lines):
+                cells = [cell.strip() for cell in line.split("|") if cell.strip()]
+                tag = "th" if i == 0 else "td"
+                row = "<tr>" + "".join(f"<{tag}>{cell}</{tag}>" for cell in cells) + "</tr>"
+                html_parts.append(row)
+            html_parts.append("</table>")
+            return "".join(html_parts)
+        except Exception as e:
+            logger.warning("表格文本转 HTML 失败: %s", e)
+            return None
+
+    # ============================== titlePath 辅助 ==============================
+
+    @staticmethod
+    def _build_title_path(title_stack: List[Optional[str]]) -> Optional[str]:
+        """
+        从标题栈构建 titlePath 字符串（格式 "一级 > 二级 > 三级"）。
+        """
+        parts = [t for t in title_stack if t]
+        if not parts:
+            return None
+        return " > ".join(parts)
+
+    # ============================== Node 构造辅助 ==============================
+
+    @staticmethod
+    def _make_node_seq():
+        """自管递增 Node id 生成器：n1, n2, ..."""
+        i = 0
+        while True:
+            i += 1
+            yield f"n{i}"
+
+    @staticmethod
+    def _make_text_node(
+        node_id: str,
+        text: str,
+        title_path: Optional[str],
+        parent_id: Optional[str],
+    ) -> dict:
+        """构造一个 text Node dict"""
+        return {
+            "id": node_id,
+            "type": "text",
+            "text": text,
+            "level": None,
+            "language": None,
+            "html": None,
+            "titlePath": title_path,
+            "parentId": parent_id,
+            "page": 1,
+            "bbox": None,
+        }
+
+    @staticmethod
+    def _make_heading_node(
+        node_id: str,
+        text: str,
+        level: int,
+        title_path: Optional[str],
+    ) -> dict:
+        """构造一个 heading Node dict"""
+        return {
+            "id": node_id,
+            "type": "heading",
+            "text": text,
+            "level": level,
+            "language": None,
+            "html": None,
+            "titlePath": title_path,
+            "parentId": None,
+            "page": 1,
+            "bbox": None,
+        }
+
+    @staticmethod
+    def _make_code_node(
+        node_id: str,
+        text: str,
+        language: Optional[str],
+        title_path: Optional[str],
+        parent_id: Optional[str],
+    ) -> dict:
+        """构造一个 code Node dict"""
+        return {
+            "id": node_id,
+            "type": "code",
+            "text": text,
+            "level": None,
+            "language": language,
+            "html": None,
+            "titlePath": title_path,
+            "parentId": parent_id,
+            "page": 1,
+            "bbox": None,
+        }
+
+    @staticmethod
+    def _make_table_node(
+        node_id: str,
+        html: str,
+        title_path: Optional[str],
+        parent_id: Optional[str],
+    ) -> dict:
+        """构造一个 table Node dict"""
+        return {
+            "id": node_id,
+            "type": "table",
+            "text": None,
+            "level": None,
+            "language": None,
+            "html": html,
+            "titlePath": title_path,
+            "parentId": parent_id,
+            "page": 1,
+            "bbox": None,
+        }
+
+    # ============================== 文件读取 ==============================
+
+    @staticmethod
+    def _read_text(file_path: Path) -> str:
+        """读取文本文件，优先 UTF-8，失败则尝试常见编码兜底"""
+        encodings = ["utf-8", "utf-8-sig", "gbk", "gb18030", "latin-1"]
+        last_err: Optional[Exception] = None
+        for enc in encodings:
+            try:
+                with open(file_path, "r", encoding=enc) as f:
+                    return f.read()
+            except UnicodeDecodeError as e:
+                last_err = e
+                continue
+        logger.warning(
+            "MarkdownParser 无法以常见编码解码 %s，回退 latin-1: %s",
+            file_path, last_err,
+        )
+        with open(file_path, "r", encoding="latin-1") as f:
+            return f.read()
+
+    # ============================== 内容特征判定（supports 等价） ==============================
+
+    @staticmethod
+    def supports_extension(file_path: str) -> bool:
+        """扩展名判定"""
+        suffix = Path(file_path).suffix.lower().lstrip(".")
+        return suffix in MARKDOWN_EXTENSIONS
+
+    @staticmethod
+    def supports_content(text: str) -> bool:
+        """
+        内容特征判定（与 Java MarkdownChunkStrategy.supports 一致）。
+        供路由层 supports 二次判定使用。
+        """
+        if not text:
+            return False
+        if len(text) >= 200:
+            sample = text[:200]
+            return "# " in sample or "## " in sample or "```" in sample
+        return "# " in text or "## " in text

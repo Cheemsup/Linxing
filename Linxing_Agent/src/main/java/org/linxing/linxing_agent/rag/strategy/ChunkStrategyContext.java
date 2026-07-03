@@ -9,7 +9,10 @@ import java.util.Map;
 
 /**
  * 分块策略上下文，封装文件类型、全文内容、分块参数等信息，供策略选择与执行时使用
+ *
+ * @deprecated 已废弃。仅服务于已废弃的 {@link ChunkStrategy} 旧路径，Node 体系下不再使用。
  */
+@Deprecated
 @Data
 @Builder
 public class ChunkStrategyContext {

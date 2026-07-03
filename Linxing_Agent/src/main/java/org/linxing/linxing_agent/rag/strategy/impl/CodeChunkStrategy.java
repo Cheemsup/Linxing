@@ -3,8 +3,7 @@ package org.linxing.linxing_agent.rag.strategy.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -19,8 +18,12 @@ import java.util.regex.Pattern;
  * 代码分块策略，按类和函数定义拆分源代码文件，生成带有类名/函数名标题路径的代码块。
  * 代码函数/类应尽量保持完整不截断，因此使用更大的 maxChunkSize 且不需要 overlap。
  *
- * TODO：逻辑是——先提取所有的方法作为单独的chunk，剩余的部分再直接打包为一个chunk（在主流的c、c++、java、python中，一个代码文件除了方法就只剩变量声明了）
+ *
+ * @deprecated 已废弃。代码类/函数提取与超长拆分已迁移至 Python 侧
+ *             {@code document_analysis_service/parsers/code_parser.py}（迁移正则），
+ *             由 NodeBasedChunkBuilder 装箱。保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component("codeChunkStrategy")
 public class CodeChunkStrategy implements ChunkStrategy {

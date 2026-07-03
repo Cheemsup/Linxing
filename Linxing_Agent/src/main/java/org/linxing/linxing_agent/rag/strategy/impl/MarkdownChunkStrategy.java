@@ -3,7 +3,7 @@ package org.linxing.linxing_agent.rag.strategy.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -17,7 +17,12 @@ import java.util.regex.Pattern;
  * Markdown 分块策略，按标题层级拆分文档，支持 Level 1/2 父子分块和标题路径提取。
  * 总的拆分思路：按标题拆分，一般以标题区块作为chunk单位，超长 section 会被递归为使用句子拆分方式进行拆分并维护父子chunk关系；无标题部分则尝试构建"按多换行/双换行——按单换行——按句子"的优先级拆分方式
  * 使用"最长chunk长度"作为阈值、使用标题划分层级（最低三级）作为区块划分动作的指导
+ *
+ * @deprecated 已废弃。Markdown 结构识别与超长拆分已迁移至 Python 侧
+ *             {@code document_analysis_service/parsers/markdown_parser.py}（mistune3），
+ *             由 NodeBasedChunkBuilder 装箱。保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component("markdownChunkStrategy")
 public class MarkdownChunkStrategy implements ChunkStrategy {

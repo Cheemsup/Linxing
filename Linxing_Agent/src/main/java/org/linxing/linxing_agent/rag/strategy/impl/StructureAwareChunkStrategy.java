@@ -3,8 +3,7 @@ package org.linxing.linxing_agent.rag.strategy.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.RecursiveTextSplitter;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -15,8 +14,11 @@ import java.util.Set;
 
 /**
  * 结构感知分块策略，面向 docx/pdf 等结构化文档，按段落间隔拆分并细化超长段落
- * //TODO：这是最常见的文档格式，应该仔细考虑如何完成chunk（初步认为应该包括但不限于markdown的策略）。最好的效果是——能够切分出文档的层级结构、能够阅读图片（已有计划）等。初步认定最终最好的效果可能是使用纯大模型操作的chunk服务
+ *
+ * @deprecated 已废弃。docx/pdf 已统一由 Python 侧 DocumentParser 解析为 Node 序列，
+ *             结构识别在 Node 层完成，本策略整体被取代。保留仅供历史参考，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component("structureAwareChunkStrategy")
 public class StructureAwareChunkStrategy implements ChunkStrategy {

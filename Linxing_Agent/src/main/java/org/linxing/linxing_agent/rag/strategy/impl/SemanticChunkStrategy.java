@@ -5,7 +5,7 @@ import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.rag.constant.ChunkType;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
 import org.springframework.stereotype.Component;
@@ -15,8 +15,12 @@ import java.util.List;
 
 /**
  * 语义分块策略，调用 LLM 识别语义边界进行智能分块，仅当用户显式指定时激活，超长文本自动降级为简单均分
+ *
+ * @deprecated 已废弃。supports() 恒返回 false，从未被 ChunkStrategyFactory 选中；
+ *             Node 体系下语义增强由 SemanticEnhancementService 在 Node 层完成，不再走 strategy 路径。
+ *             保留仅供历史参考，后续应删除。
  */
-//TODO：后续考虑扩展这样一个agent服务：上传文件、要求大模型直接阅读全文、根据模型理解来直接指定如何chunk，并调用相应的tool进行向量化和持久化
+@Deprecated
 @Slf4j
 @Component("semanticChunkStrategy")
 public class SemanticChunkStrategy implements ChunkStrategy {

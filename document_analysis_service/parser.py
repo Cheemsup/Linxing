@@ -29,6 +29,13 @@ from PIL import Image
 logger = logging.getLogger("docling_analysis_service.parser")
 
 
+def _build_title_path(title_stack: List[tuple]) -> Optional[str]:
+    """根据标题栈构建 titlePath（"一级 > 二级"），栈空返回 None。"""
+    if not title_stack:
+        return None
+    return " > ".join(title for _, title in title_stack)
+
+
 class DocumentParser:
     """文档解析器，基于 PyMuPDF + pdfplumber"""
 
@@ -62,6 +69,12 @@ class DocumentParser:
 
         logger.info("开始解析文档: %s (type=%s)", file_path, document_type)
 
+        # 非结构化文档（md/html/code/linebased）交由 routers 路由分发，
+        # 由对应 Parser 完成结构识别 + 超长拆分 + titlePath/parentId 标注。
+        if document_type not in ("pdf", "docx", "xlsx", "unknown"):
+            from parsers.router import parse as router_parse
+            return router_parse(file_path, document_id, user_id)
+
         # 图片输出目录: storePath/chunk_images/{userId}/{docId}/
         image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
         image_output_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +103,9 @@ class DocumentParser:
         nodes = []
         node_index = 0
 
+        # 标题栈：跨页维护 PDF 的标题层级，推导 titlePath（与 docx parser 一致）
+        title_stack: List[tuple] = []
+
         # PyMuPDF 打开文档
         doc = fitz.open(str(file_path))
         total_pages = doc.page_count
@@ -103,7 +119,8 @@ class DocumentParser:
 
                 # 1. 提取图片
                 image_nodes = self._extract_images_from_page(
-                    page, page_num + 1, image_output_dir, user_id, document_id, node_index
+                    page, page_num + 1, image_output_dir, user_id, document_id, node_index,
+                    title_stack,
                 )
                 for node in image_nodes:
                     nodes.append(node)
@@ -112,7 +129,7 @@ class DocumentParser:
                 # 2. 提取表格（pdfplumber）
                 if plumber_page:
                     table_nodes = self._extract_tables_from_page(
-                        plumber_page, page_num + 1, node_index
+                        plumber_page, page_num + 1, node_index, title_stack,
                     )
                     for node in table_nodes:
                         nodes.append(node)
@@ -120,7 +137,7 @@ class DocumentParser:
 
                 # 3. 提取文本块（PyMuPDF，按阅读顺序）
                 text_nodes = self._extract_text_blocks_from_page(
-                    page, page_num + 1, node_index
+                    page, page_num + 1, node_index, title_stack,
                 )
                 for node in text_nodes:
                     nodes.append(node)
@@ -137,6 +154,7 @@ class DocumentParser:
         user_id: int,
         document_id: int,
         start_index: int,
+        title_stack: List[tuple],
     ) -> List[dict]:
         """从 PDF 页面提取图片"""
         nodes = []
@@ -189,6 +207,7 @@ class DocumentParser:
                     "id": f"n{start_index + img_index + 1}",
                     "type": "image",
                     "imagePath": relative_url,
+                    "titlePath": _build_title_path(title_stack),
                     "page": page_num,
                     "bbox": bbox,
                     "width": width,
@@ -207,6 +226,7 @@ class DocumentParser:
         page: pdfplumber.page.Page,
         page_num: int,
         start_index: int,
+        title_stack: List[tuple],
     ) -> List[dict]:
         """使用 pdfplumber 提取表格"""
         nodes = []
@@ -236,6 +256,7 @@ class DocumentParser:
                     "html": html,
                     "rowCount": row_count,
                     "colCount": col_count,
+                    "titlePath": _build_title_path(title_stack),
                     "page": page_num,
                     "bbox": bbox,
                 })
@@ -251,6 +272,7 @@ class DocumentParser:
         page: fitz.Page,
         page_num: int,
         start_index: int,
+        title_stack: List[tuple],
     ) -> List[dict]:
         """提取文本块，基于字体大小识别标题和正文"""
         nodes = []
@@ -358,6 +380,10 @@ class DocumentParser:
         node_index = 0
         image_counter = 1
 
+        # 标题栈：维护 docx 的标题层级，推导 titlePath（与 markdown/html parser 一致）
+        # [(level, title), ...]，遇新标题时弹出 level >= 当前的，保留上级
+        title_stack: List[tuple] = []
+
         # 建立段落/表格元素到对象的快速映射
         paragraph_map = {id(p._element): p for p in doc.paragraphs}
         table_map = {id(t._element): t for t in doc.tables}
@@ -394,6 +420,7 @@ class DocumentParser:
                         "id": f"n{node_index + 1}",
                         "type": "image",
                         "imagePath": relative_url,
+                        "titlePath": _build_title_path(title_stack),
                         "page": 1,
                         "bbox": None,
                     })
@@ -412,12 +439,21 @@ class DocumentParser:
                     except ValueError:
                         level = 1
 
+                # 当前 titlePath（push 前的栈状态对应当前块所属标题路径）
+                current_title_path = _build_title_path(title_stack)
+
                 if is_heading:
+                    # 更新标题栈：弹出 level >= 当前的，压入当前标题
+                    while title_stack and title_stack[-1][0] >= level:
+                        title_stack.pop()
+                    title_stack.append((level, text))
+
                     nodes.append({
                         "id": f"n{node_index + 1}",
                         "type": "heading",
                         "text": text,
                         "level": level,
+                        "titlePath": _build_title_path(title_stack),
                         "page": 1,
                         "bbox": None,
                     })
@@ -430,6 +466,7 @@ class DocumentParser:
                         "type": "code" if is_code else "text",
                         "text": text,
                         "language": language,
+                        "titlePath": current_title_path,
                         "page": 1,
                         "bbox": None,
                     })
@@ -448,6 +485,7 @@ class DocumentParser:
                     "html": html,
                     "rowCount": row_count,
                     "colCount": col_count,
+                    "titlePath": _build_title_path(title_stack),
                     "page": 1,
                     "bbox": None,
                 })

@@ -80,12 +80,21 @@ async def parse(
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    # 校验文件类型
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in (".pdf", ".docx", ".doc", ".xlsx"):
+    # 校验文件类型：结构化文档 + 阶段二新增的 md/html/code/linebased
+    # 实际类型判定与分发由 DocumentParser → parsers.router 完成
+    suffix = Path(file.filename).suffix.lower().lstrip(".")
+    supported = {
+        "pdf", "docx", "doc", "xlsx",  # 结构化文档（DocumentParser）
+        "md", "markdown",  # Markdown（mistune3）
+        "html", "htm",  # HTML（beautifulsoup4）
+        "java", "py", "js", "ts", "go", "rs", "c", "cpp", "cs", "kt",
+        "rb", "php", "swift", "scala", "hs", "lua", "r", "sh", "bash", "sql",  # Code
+        "log", "csv", "tsv", "txt",  # LineBased
+    }
+    if suffix not in supported:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的文件类型: {suffix}，仅支持 PDF/DOCX/XLSX",
+            detail=f"不支持的文件类型: .{suffix}",
         )
 
     logger.info(
@@ -99,8 +108,10 @@ async def parse(
     tmp_path = None
     try:
         content = await file.read()
+        # NamedTemporaryFile 的 suffix 不会自动补点，必须显式带上 "."，
+        # 否则文件名形如 doc_xxxxxdocx（无点分隔），后续 Path.suffix 解析为空 → type=unknown
         with tempfile.NamedTemporaryFile(
-            delete=False, suffix=suffix, prefix="doc_"
+            delete=False, suffix=f".{suffix}", prefix="doc_"
         ) as tmp:
             tmp.write(content)
             tmp_path = tmp.name

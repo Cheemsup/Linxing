@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.strategy;
+package org.linxing.linxing_agent.rag.entity;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

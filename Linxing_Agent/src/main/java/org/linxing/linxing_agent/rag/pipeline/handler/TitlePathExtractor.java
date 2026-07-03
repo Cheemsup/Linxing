@@ -14,7 +14,12 @@ import java.util.regex.Pattern;
  * 标题路径提取器（Order=1），当策略层未设置 titlePath 时，从当前 Chunk 自身的文本中提取标题回填。
  * 只对无结构感知策略（StructureAware、LineBased、Recursive、Semantic）产生的 chunk 生效，
  * 结构化策略（Markdown、HTML、Code）已在策略层完成标题提取，此处会跳过。
+ *
+ * @deprecated 已废弃。Node 体系下 titlePath 由 Python 侧 parsers 产出并经 NodeConverter 写入 Node metadata，
+ *             NodeBasedChunkBuilder.buildChunkFromNodes 直接取首个 Node 的 titlePath，不再需要责任链回填。
+ *             保留仅供已废弃的旧 strategy 路径产生的 chunk 使用，后续应删除。
  */
+@Deprecated
 @Slf4j
 @Component
 @Order(1)

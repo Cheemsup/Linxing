@@ -12,7 +12,7 @@ import org.linxing.linxing_agent.rag.node.SemanticContextBuilder;
 import org.linxing.linxing_agent.rag.node.SemanticEnhancementPrompts;
 import org.linxing.linxing_agent.rag.service.DocumentAnalysisFacade;
 import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
-import org.linxing.linxing_agent.rag.strategy.ChunkResult;
+import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 

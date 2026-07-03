@@ -2,8 +2,6 @@
 
 基于 [Docling](https://github.com/docling-project/docling) 的文档解析服务，输出有序、原子化的 Node JSON 序列，供 Java 侧 RAG 系统消费。
 
-> **设计文档**：`reference/TODOS/betterRAG/0701_addPython.md`
-
 ## 职责
 
 - **输入**：PDF / DOCX / XLSX 文件

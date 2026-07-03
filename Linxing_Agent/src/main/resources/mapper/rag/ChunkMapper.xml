@@ -17,22 +17,25 @@
         <result column="is_searchable" property="isSearchable"/>
         <result column="ts_content" property="tsContent"/>
         <result column="sort_order" property="sortOrder"/>
+        <result column="node_metadata" property="nodeMetadata"
+                typeHandler="org.linxing.linxing_agent.agent.handler.JsonListTypeHandler"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <sql id="BaseColumnList">
         id, user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
         chunk_type, title_path, context_prefix, source_strategy,
-        is_searchable, ts_content, sort_order, created_at
+        is_searchable, ts_content, sort_order, node_metadata, created_at
     </sql>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO chunks (user_id, document_id, parent_chunk_id, chunk_level, chunk_text,
                             chunk_type, title_path, context_prefix, source_strategy,
-                            is_searchable, sort_order)
+                            is_searchable, sort_order, node_metadata)
         VALUES (#{userId}, #{documentId}, #{parentChunkId}, #{chunkLevel}, #{chunkText},
                 #{chunkType}, #{titlePath}, #{contextPrefix}, #{sourceStrategy},
-                #{isSearchable}, #{sortOrder})
+                #{isSearchable}, #{sortOrder},
+                #{nodeMetadata, typeHandler=org.linxing.linxing_agent.agent.handler.JsonListTypeHandler})
     </insert>
 
     <select id="findById" resultMap="BaseResultMap">

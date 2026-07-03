@@ -24,13 +24,18 @@ public class FullTextIndexer implements ChunkProcessingHandler {
     @Override
     public boolean handle(ChunkProcessingContext context) {
         Chunk chunk = context.getChunk();
-        String chunkText = chunk.getChunkText();
+        // 优先使用 indexText（Index Render，含 VLM/LLM 语义增强结果），缺失时回退 chunkText
+        String indexText = chunk.getIndexText();
+        boolean useIndexText = indexText != null && !indexText.isEmpty();
+        String text = useIndexText ? indexText : chunk.getChunkText();
 
-        if (chunkText != null && !chunkText.isEmpty()) {
-            String segmented = ChineseSegmenter.segment(chunkText);
+        if (text != null && !text.isEmpty()) {
+            String segmented = ChineseSegmenter.segment(text);
             chunk.setTsContent(segmented);
-            log.debug("Chunk {} 全文索引预处理完成，原始 {} 字符，分词后 {} 字符",
-                    chunk.getId(), chunkText.length(), segmented.length());
+            log.debug("Chunk {} 全文索引预处理完成（{}），原始 {} 字符，分词后 {} 字符",
+                    chunk.getId(),
+                    useIndexText ? "indexText" : "chunkText",
+                    text.length(), segmented.length());
         }
 
         return true;

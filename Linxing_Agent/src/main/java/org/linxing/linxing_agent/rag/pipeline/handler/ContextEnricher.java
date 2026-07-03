@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
 
 /**
  * 上下文补充器（Order=2），对 context_weak 类型的短文本 Chunk 调用 LLM 生成背景描述，增强检索语义。
+ *
+ * TODO：改用Node体系后，此责任链节点可能需要废弃掉
  */
 @Slf4j
 @Component
@@ -50,7 +52,8 @@ public class ContextEnricher implements ChunkProcessingHandler {
             return true;
         }
 
-        String chunkText = chunk.getChunkText();
+        // 优先使用 indexText（Index Render，含语义增强结果），与 fullDocumentText 同源，邻近定位才能成功
+        String chunkText = isNotBlank(chunk.getIndexText()) ? chunk.getIndexText() : chunk.getChunkText();
         if (chunkText == null || chunkText.isBlank()) {
             return true;
         }

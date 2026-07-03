@@ -96,8 +96,10 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
         }
     }
 
-    // 拼装向量化文本: contextPrefix + titlePath + chunkText
+    // 拼装向量化文本: contextPrefix + titlePath + indexText（Display Render 时回退 chunkText）
     // contextPrefix 由 LLM 对弱上下文片段补充的背景描述，titlePath 为标题路径，共同增强语义密度
+    // Node-Based 架构下 indexText 为各 Node 的 semanticText 拼接（含 VLM 图片描述/LLM 代码解释/表格总结），
+    // 确保语义增强结果真正参与向量化；传统策略 Chunk 无 indexText，回退使用 chunkText
     private String buildEmbeddingText(Chunk chunk) {
         StringBuilder sb = new StringBuilder();
         if (chunk.getContextPrefix() != null && !chunk.getContextPrefix().isEmpty()) {
@@ -106,8 +108,22 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
         if (chunk.getTitlePath() != null && !chunk.getTitlePath().isEmpty()) {
             sb.append(chunk.getTitlePath()).append(" ");
         }
-        sb.append(chunk.getChunkText());
+        sb.append(resolveIndexText(chunk));
         return sb.toString();
+    }
+
+    /**
+     * 解析用于向量化的文本（Index Render）。
+     * Node-Based Chunk 优先使用 indexText（semanticText 拼接，含语义增强结果）；
+     * 传统策略 Chunk 无 indexText，回退使用 chunkText（Display Render）。
+     */
+    private String resolveIndexText(Chunk chunk) {
+        String indexText = chunk.getIndexText();
+        if (indexText != null && !indexText.isBlank()) {
+            return indexText;
+        }
+        String chunkText = chunk.getChunkText();
+        return chunkText != null ? chunkText : "";
     }
 
     // 构造向量记录的元数据 JSON，便于检索时还原上下文信息（类型、路径、来源文件等）

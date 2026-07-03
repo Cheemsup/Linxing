@@ -8,18 +8,23 @@ import org.springframework.context.annotation.Configuration;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * TODO：后续考虑将这些所有的配置项都移入application.yaml（以及dev）
+ */
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "rag")
 public class RagProperties {
 
-    private String storePath;
+    private String storePath;//上传文档/被解析出的图片的存储位置
     private Embedding embedding = new Embedding();
     private VectorStore vectorStore = new VectorStore();
     private Llm llm = new Llm();
     private Search search = new Search();
     private Reranker reranker = new Reranker();
     private Cache cache = new Cache();
+    private PythonService pythonService = new PythonService();
+    private SemanticEnhancement semanticEnhancement = new SemanticEnhancement();
 
     @Data
     public static class Embedding {
@@ -95,5 +100,44 @@ public class RagProperties {
         private double threshold;
         private int quotaPerUser;
         private String quantization;
+    }
+
+    /**
+     * Python 文档解析服务配置，对应 document_analysis_service（Docling）
+     */
+    @Data
+    public static class PythonService {
+        /** 服务 URL，默认本地部署 */
+        private String url = "http://localhost:8000";
+        /** 请求超时秒数（大文件解析耗时较长） */
+        private int timeoutSeconds = 120;
+        /** 是否启用 Python 服务 */
+        private boolean enabled = true;
+        /** 图片存储根目录（应与 Python 侧 IMAGE_STORE_DIR 一致，默认使用 storePath 下的 chunk_images） */
+        private String imageStoreDir;
+        /** Python 解释器路径（可选，用于指定python运行环境） */
+        private String pythonPath;
+    }
+
+    /**
+     * SemanticEnhancementService语义增强配置
+     */
+    @Data
+    public static class SemanticEnhancement {
+        private Context context = new Context();
+
+        /**
+         * 邻居上下文配置
+         */
+        @Data
+        public static class Context {
+            /** 前置邻居数量（默认 2） */
+            private int previousNodes = 2;
+            /** 后置邻居数量（默认 2） */
+            private int nextNodes = 2;
+            /** 单个邻居节点文本渲染的字符上限（超出截断，0 表示不截断） */
+            //TODO：该参数未被使用，后续可作为增强参数，可选
+            private int maxNeighborChars = 200;
+        }
     }
 }

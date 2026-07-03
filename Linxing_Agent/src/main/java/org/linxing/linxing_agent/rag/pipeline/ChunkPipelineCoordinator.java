@@ -14,7 +14,10 @@ import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
 import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
+import org.linxing.linxing_agent.rag.node.NodeBasedChunkBuilder;
 import org.linxing.linxing_agent.rag.pipeline.handler.EmbeddingPersist;
+import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
 import org.linxing.linxing_agent.rag.strategy.ChunkResult;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategy;
 import org.linxing.linxing_agent.rag.strategy.ChunkStrategyContext;
@@ -45,6 +48,8 @@ public class ChunkPipelineCoordinator {
     private final DocumentMapper documentMapper;
     private final ActivityLogMapper activityLogMapper;
     private final RagProperties ragProperties;
+    private final NodeBasedChunkBuilder nodeBasedChunkBuilder;
+    private final SemanticEnhancementService semanticEnhancementService;
 
     public ChunkPipelineCoordinator(
             ChunkStrategyFactory strategyFactory,
@@ -54,7 +59,9 @@ public class ChunkPipelineCoordinator {
             EmbeddingMapper embeddingMapper,
             DocumentMapper documentMapper,
             ActivityLogMapper activityLogMapper,
-            RagProperties ragProperties) {
+            RagProperties ragProperties,
+            NodeBasedChunkBuilder nodeBasedChunkBuilder,
+            SemanticEnhancementService semanticEnhancementService) {
         this.strategyFactory = strategyFactory;
         this.pipeline = pipeline;
         this.embeddingPersist = embeddingPersist;
@@ -63,8 +70,140 @@ public class ChunkPipelineCoordinator {
         this.documentMapper = documentMapper;
         this.activityLogMapper = activityLogMapper;
         this.ragProperties = ragProperties;
+        this.nodeBasedChunkBuilder = nodeBasedChunkBuilder;
+        this.semanticEnhancementService = semanticEnhancementService;
     }
 
+    /**
+     * 基于 Node 序列处理文档（Node-Based RAG 入口）。
+     * 用于调用 Python 文档解析服务后，将生成的 Node 序列转换为 Chunk。
+     *
+     * 流程：
+     * 1. 语义增强（VLM/LLM）填充 Node.semanticText
+     * 2. 使用 NodeBasedChunkBuilder 将 Node 序列切分为 ChunkResult
+     * 3. 按 parentChunkId 构建层级关系（目前简化为所有 Chunk 为 Level 2，相比先前的旧版本，暂时无法构建出层级chunk）
+     * 4. 执行责任链后处理（标题提取、tsContent、向量化等）
+     * 5. 持久化到数据库
+     *
+     * @param doc  文档记录
+     * @param nodes Node 序列（按阅读顺序）
+     * @return 生成的 Chunk 数量
+     */
+    @Transactional
+    public int processDocumentFromNodes(DocRecord doc, List<DocumentNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            documentMapper.updateStatus(doc.getId(), DocumentStatus.FAILED);
+            log.warn("文档 {} Node 序列为空", doc.getId());
+            return 0;
+        }
+
+        // 语义增强：对 IMAGE/CODE/TABLE 等需要的节点调用 VLM/LLM 生成 semanticText（增强失败会fallback到默认semanticText）
+        log.info("文档 {} 开始语义增强，共 {} 个 Node", doc.getId(), nodes.size());
+        semanticEnhancementService.enhance(nodes);
+
+        int maxChunkSize = ragProperties.getEmbedding().getChunkSize();
+
+        // NodeBasedChunkBuilder 将各个 Node 按照文档顺序排好以及组合，最终得到经由了Node组合的chunk列表
+        List<ChunkResult> chunkResults = nodeBasedChunkBuilder.build(nodes, maxChunkSize);
+
+        if (chunkResults.isEmpty()) {
+            documentMapper.updateStatus(doc.getId(), DocumentStatus.FAILED);
+            log.warn("文档 {} 基于 Node 切结果为空", doc.getId());
+            return 0;
+        }
+
+        // 为所有 ChunkResult 分配 sortOrder（按 doc 解析顺序）
+        //TODO：doc的解析顺序？那么pdf呢？
+        Map<Integer, Integer> resultIndexToSortOrder = new LinkedHashMap<>();
+        for (int i = 0; i < chunkResults.size(); i++) {
+            resultIndexToSortOrder.put(i, i + 1);
+        }
+
+        //获取文档的 fullText（用于 TitlePath 提取、tsContent 设置）
+        String fullText = nodeBasedChunkBuilder.renderForIndex(nodes);
+
+        //按 sortOrder 顺序插入 Chunk（暂不考虑 parentChunkId，所有 Chunk 为 Level 2）
+        //TODO：引入父子chunk后需要改造
+        List<Chunk> allChunks = new ArrayList<>();
+        for (int i = 0; i < chunkResults.size(); i++) {
+            ChunkResult r = chunkResults.get(i);
+            Chunk chunk = buildChunk(r, doc, null, resultIndexToSortOrder.get(i));
+            chunkMapper.insert(chunk);
+            allChunks.add(chunk);
+        }
+
+        // 对每个 Chunk 执行责任链后处理（标题提取、向量化等）
+        for (Chunk chunk : allChunks) {
+            ChunkProcessingContext pCtx = ChunkProcessingContext.builder()
+                    .chunk(chunk)
+                    .document(doc)
+                    .fullDocumentText(fullText)
+                    .shouldPersist(true)
+                    .build();
+            pipeline.execute(pCtx); // 责任链方式执行分块向量化等后续处理
+            chunkMapper.update(chunk);
+        }
+
+        //刷新嵌入数据
+        embeddingPersist.flush();
+
+        //更新文档状态
+        doc.setStatus(DocumentStatus.COMPLETED);
+        doc.setChunkStrategy("NodeBasedChunkBuilder");
+        documentMapper.update(doc);
+
+        //记录操作日志
+        activityLogMapper.insert(ActivityLog.builder()
+                .userId(doc.getUserId())
+                .actionType(OperationType.ACTION_TYPE_UPLOAD)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
+                .targetId(String.valueOf(doc.getId()))
+                .details("{\"chunks\":" + allChunks.size()
+                        + ",\"fileName\":\"" + escapeJson(doc.getFileName())
+                        + "\",\"strategy\":\"NodeBasedChunkBuilder\"}")
+                .createdAt(OffsetDateTime.now())
+                .build());
+
+        // 记录处理完成日志
+        log.info("文档 {}（Node-Based）处理完成，生成 {} 个chunk", doc.getId(), allChunks.size());
+
+        return allChunks.size();
+    }
+
+    @Transactional
+    public void deleteByDocumentId(Integer userId, Integer documentId) {
+        // 查询文档下的所有分块
+        List<Chunk> chunks = chunkMapper.findByDocumentId(documentId);
+        if (!chunks.isEmpty()) {
+            // 提取分块ID列表
+            List<Integer> chunkIds = chunks.stream().map(Chunk::getId).toList();
+            // 删除分块关联的嵌入数据
+            embeddingMapper.deleteByChunkIds(chunkIds);
+            // 删除文档下的所有分块
+            chunkMapper.deleteByDocumentId(documentId);
+        }
+        // 删除文档记录
+        documentMapper.deleteById(documentId);
+
+        // 记录删除操作日志
+        activityLogMapper.insert(ActivityLog.builder()
+                .userId(userId)
+                .actionType(OperationType.ACTION_TYPE_DELETE)
+                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
+                .targetId(String.valueOf(documentId))
+                .createdAt(OffsetDateTime.now())
+                .build());
+    }
+
+    /**
+     * 旧版本的处理流水线入口，先根据一定规则选出策略执行器、然后通过各自的实现类完成解析
+     *
+     * TODO：考虑是否全盘转向Node体系的处理方式、真正需要将本方法废弃
+     * @param doc
+     * @param fullText
+     * @param langChainDoc
+     * @return
+     */
     @Transactional
     public int processDocument(DocRecord doc, String fullText, Document langChainDoc) {
         ChunkStrategyContext ctx = ChunkStrategyContext.builder()
@@ -169,30 +308,6 @@ public class ChunkPipelineCoordinator {
         return allChunks.size();
     }
 
-    @Transactional
-    public void deleteByDocumentId(Integer userId, Integer documentId) {
-        // 查询文档下的所有分块
-        List<Chunk> chunks = chunkMapper.findByDocumentId(documentId);
-        if (!chunks.isEmpty()) {
-            // 提取分块ID列表
-            List<Integer> chunkIds = chunks.stream().map(Chunk::getId).toList();
-            // 删除分块关联的嵌入数据
-            embeddingMapper.deleteByChunkIds(chunkIds);
-            // 删除文档下的所有分块
-            chunkMapper.deleteByDocumentId(documentId);
-        }
-        // 删除文档记录
-        documentMapper.deleteById(documentId);
-
-        // 记录删除操作日志
-        activityLogMapper.insert(ActivityLog.builder()
-                .userId(userId)
-                .actionType(OperationType.ACTION_TYPE_DELETE)
-                .targetType(RagParameters.TARGET_TYPE_DOCUMENT)
-                .targetId(String.valueOf(documentId))
-                .createdAt(OffsetDateTime.now())
-                .build());
-    }
 
     /**
      * 合并相邻的过小 Level2 chunk，减少碎块数量与 context_weak 背景增强调用。
@@ -319,6 +434,7 @@ public class ChunkPipelineCoordinator {
                 .userId(doc.getUserId())
                 .documentId(doc.getId())
                 .chunkText(r.getChunkText())
+                .indexText(r.getIndexText())
                 .parentChunkId(parentDbId)
                 .chunkLevel(r.getChunkLevel() != null ? r.getChunkLevel() : RagParameters.CHUNK_LEVEL_2)
                 .chunkType(r.getChunkType() != null ? r.getChunkType() : ChunkType.GENERAL)
@@ -326,6 +442,7 @@ public class ChunkPipelineCoordinator {
                 .sourceStrategy(r.getSourceStrategy())
                 .isSearchable(r.getChunkLevel() == null || r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2)
                 .sortOrder(sortOrder)
+                .nodes(r.getNodes())
                 .createdAt(OffsetDateTime.now())
                 .build();
     }

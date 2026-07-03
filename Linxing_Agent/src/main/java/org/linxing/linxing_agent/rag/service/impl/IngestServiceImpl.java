@@ -1,10 +1,5 @@
 package org.linxing.linxing_agent.rag.service.impl;
 
-import dev.langchain4j.data.document.Document;
-import dev.langchain4j.data.document.DocumentParser;
-import dev.langchain4j.data.document.loader.FileSystemDocumentLoader;
-import dev.langchain4j.data.document.parser.TextDocumentParser;
-import dev.langchain4j.data.document.parser.apache.poi.ApachePoiDocumentParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.service.impl.SemanticCacheServiceImpl;
@@ -13,7 +8,9 @@ import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.dto.IngestResponse;
 import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.pipeline.ChunkPipelineCoordinator;
+import org.linxing.linxing_agent.rag.service.DocumentAnalysisFacade;
 import org.linxing.linxing_agent.rag.service.IIngestService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -37,6 +35,7 @@ public class IngestServiceImpl implements IIngestService {
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
     private final SemanticCacheServiceImpl semanticCacheService;
+    private final DocumentAnalysisFacade documentAnalysisFacade;
 
     @Override
     @Transactional
@@ -71,13 +70,15 @@ public class IngestServiceImpl implements IIngestService {
             documentMapper.insert(docRecord);//插入原始文件元数据记录
             log.info("文档记录已入库，documentId: {}", docRecord.getId());
 
-            DocumentParser parser = createParser(fileType);
-            Document document = FileSystemDocumentLoader.loadDocument(storedFile, parser);
-            document.metadata().put("file_name", originalFilename);
-            document.metadata().put("stored_path", storedFile.toString());
+            // 调用 Python 文档分析服务，获取有序、原子化的 Node 序列（同时java版本作为兜底）
+            List<DocumentNode> nodes = documentAnalysisFacade.analyze(
+                    storedFile, docRecord.getId(), userId);
+            log.info("文档 {} 解析完成，获得 {} 个 Node", docRecord.getId(), nodes.size());
 
-            int chunksCount = chunkPipelineCoordinator.processDocument(docRecord, document.text(), document);//根据策略选择器+责任链，对文档进行切分、向量化和持久化
+            // 基于 Node 序列进行切分、向量化和持久化
+            int chunksCount = chunkPipelineCoordinator.processDocumentFromNodes(docRecord, nodes);
 
+            //文档更新完毕，清除对于chunk的缓存
             semanticCacheService.clearUserCache(userId);
 
             return IngestResponse.builder()
@@ -147,14 +148,6 @@ public class IngestServiceImpl implements IIngestService {
             case "csv" -> "csv";
             case "html", "htm" -> "html";
             default -> extension;
-        };
-    }
-
-    //根据文件类型创建对应的文档解析器
-    private DocumentParser createParser(String fileType) {
-        return switch (fileType) {
-            case "docx", "xlsx" -> new ApachePoiDocumentParser();
-            default -> new TextDocumentParser();
         };
     }
 }

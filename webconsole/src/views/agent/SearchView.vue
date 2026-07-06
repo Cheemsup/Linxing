@@ -68,7 +68,7 @@
           <span v-if="item.titlePath" class="result-titlepath">{{ item.titlePath }}</span>
         </div>
         <div class="result-body">
-          <p class="result-text">{{ item.chunkText }}</p>
+          <RichChunkText :chunk-text="item.chunkText" :node-metadata="item.nodeMetadata" />
         </div>
       </div>
     </div>
@@ -77,9 +77,11 @@
 
 <script>
 import { searchApi } from '@/api/agent/search'
+import RichChunkText from '@/components/agent/RichChunkText.vue'
 
 export default {
   name: 'SearchView',
+  components: { RichChunkText },
   data() {
     return {
       query: '',

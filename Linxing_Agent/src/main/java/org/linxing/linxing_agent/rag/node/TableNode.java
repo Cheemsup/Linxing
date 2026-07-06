@@ -36,9 +36,8 @@ public class TableNode implements DocumentNode {
 
     @Override
     public String originalContent() {
-        // 返回占位符格式，用于 Display Render
-        String id = getId();
-        return "[" + id + "]";
+        // 前端通过正则 [[LINXING:TABLE:id]] 定位表格插入位置，再用 nodeId 关联 nodeMetadata 中的 html 还原显示。
+        return "[[LINXING:TABLE:" + getId() + "]]";
     }
 
     @Override

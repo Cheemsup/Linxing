@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.Map;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -22,6 +25,12 @@ public class SearchResult {
     private String chunkType;
 
     private String chunkText;
+
+    /**
+     * Node 元信息
+     * 前端用 nodeId 关联此处的 imagePath/code/html/formula 等还原图片/代码/表格/公式的原文形态。
+     */
+    private List<Map<String, Object>> nodeMetadata;
 
     private double score;
 }

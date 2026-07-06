@@ -15,6 +15,7 @@ import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.node.NodeBasedChunkBuilder;
+import org.linxing.linxing_agent.rag.node.NodeType;
 import org.linxing.linxing_agent.rag.pipeline.handler.EmbeddingPersist;
 import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
 import org.linxing.linxing_agent.rag.entity.ChunkResult;
@@ -23,10 +24,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 分块管线服务，协调整个文档分块流程：Node 装箱完成 chunk→责任链后处理（分类、标题提取、向量化等）。
@@ -353,6 +356,13 @@ public class ChunkPipelineCoordinator {
     private record IndexedResult(int oldIdx, ChunkResult result) {
     }
 
+    /**
+     * "原文形态非纯文本"的 Node 类型集合：这些 Node 在 chunkText 中以占位符出现，
+     * 前端需通过 nodeMetadata 还原原文形态，因此需进入 nodeMetadata 数组。
+     */
+    private static final Set<NodeType> RICH_NODE_TYPES = EnumSet.of(
+            NodeType.IMAGE, NodeType.CODE, NodeType.TABLE, NodeType.FORMULA);
+
     private Chunk buildChunk(ChunkResult r, DocRecord doc, Integer parentDbId, int sortOrder) {
         return Chunk.builder()
                 .userId(doc.getUserId())
@@ -367,8 +377,46 @@ public class ChunkPipelineCoordinator {
                 .isSearchable(r.getChunkLevel() == null || r.getChunkLevel() == RagParameters.CHUNK_LEVEL_2)
                 .sortOrder(sortOrder)
                 .nodes(r.getNodes())
+                .nodeMetadata(buildNodeMetadata(r.getNodes()))
                 .createdAt(OffsetDateTime.now())
                 .build();
+    }
+
+    /**
+     * 从 Node 序列构建 nodeMetadata（持久化到 chunks.node_metadata，前端据此还原图片/代码/表格原文形态）。
+     *
+     * 仅收集"原文形态非纯文本"的 Node（IMAGE/CODE/TABLE/FORMULA）——它们在 chunkText 中以占位符`[[LINXING:TYPE:nodeId]]` 出现，前端用 nodeId 关联此处的实际内容。
+     * 纯文本 Node（TEXT/HEADING）在 chunkText 中已是原文，无需还原，不入列。
+     *
+     * 收集字段以各 Node 的 metadata() 为准（已确保 imagePath/caption/code/language/html/formula 等写入），
+     * 并补充 id 与 type 两个定位字段。
+     */
+    private List<Map<String, Object>> buildNodeMetadata(List<DocumentNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> result = new ArrayList<>(nodes.size());
+        for (DocumentNode node : nodes) {
+            NodeType type = node.type();
+            if (!RICH_NODE_TYPES.contains(type)) {
+                continue;
+            }
+            Map<String, Object> meta = node.metadata();
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", node.getId());
+            entry.put("type", type.name().toLowerCase());
+            // 把 metadata 中的还原图心字段拷贝过来（imagePath/caption/code/language/html/formula 等）
+            for (Map.Entry<String, Object> e : meta.entrySet()) {
+                String k = e.getKey();
+                // 跳过内部使用的辅助字段（titlePath/parentId 已在 chunk 级字段表达）
+                if ("titlePath".equals(k) || "parentId".equals(k)) {
+                    continue;
+                }
+                entry.putIfAbsent(k, e.getValue());
+            }
+            result.add(entry);
+        }
+        return result;
     }
 
     private static String escapeJson(String s) {

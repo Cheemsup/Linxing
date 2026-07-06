@@ -51,6 +51,7 @@ public class SearchController {
                 .titlePath(r.getTitlePath())
                 .chunkType(r.getChunkType())
                 .chunkText(r.getChunkText())
+                .nodeMetadata(r.getNodeMetadata())
                 .score(Math.round(r.getScore() * 10000.0) / 10000.0)
                 .build();
     }

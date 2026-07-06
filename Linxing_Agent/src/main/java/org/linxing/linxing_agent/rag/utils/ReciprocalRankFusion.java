@@ -50,7 +50,8 @@ public class ReciprocalRankFusion {
                 VectorSearchResult vsr = new VectorSearchResult(
                         null, r.bm25Score(), null, null,
                         r.chunkId(), r.documentId(), r.fileName(),
-                        r.chunkType(), r.titlePath(), r.chunkText(), r.parentChunkId()
+                        r.chunkType(), r.titlePath(), r.chunkText(), r.parentChunkId(),
+                        r.nodeMetadata()
                 );
                 fusedMap.put(chunkId, new FusedEntry(vsr, score));
             }

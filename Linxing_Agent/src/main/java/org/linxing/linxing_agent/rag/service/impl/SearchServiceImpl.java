@@ -17,6 +17,8 @@ import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.rag.utils.Reranker;
 import org.linxing.linxing_agent.rag.utils.VectorUtils;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JavaType;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,6 +31,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class SearchServiceImpl implements ISearchService {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final JavaType NODE_META_LIST_TYPE = OBJECT_MAPPER.getTypeFactory()
+            .constructCollectionType(List.class, Map.class);
 
     private final EmbeddingModel embeddingModel;
     private final EmbeddingMapper embeddingMapper;
@@ -100,10 +106,44 @@ public class SearchServiceImpl implements ISearchService {
                         .titlePath(r.titlePath())
                         .chunkType(r.chunkType())
                         .chunkText(r.chunkText())
+                        .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
                         .score(r.score() != null ? r.score() : 0.0)
                         .build())
                 .sorted(Comparator.comparingDouble(SearchResult::getScore).reversed())
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 将 node_metadata JSONB 列返回的原始文本解析为 List&lt;Map&gt;。
+     * 解析失败或为空时返回空列表（前端对孤儿占位符原样输出，不报错）。
+     */
+    private List<Map<String, Object>> parseNodeMetadata(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<Map<String, Object>> parsed = OBJECT_MAPPER.readValue(json, NODE_META_LIST_TYPE);
+            return parsed != null ? parsed : List.of();
+        } catch (Exception e) {
+            log.warn("解析 nodeMetadata 失败，回退为空列表: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 将父块 Chunk.nodeMetadata（List&lt;Map&gt;）序列化为字符串，统一走 VectorSearchResult.nodeMetadata(String) 通道，
+     * 再由上层 parseNodeMetadata 还原。父块来自 findByIds（已用 JsonListTypeHandler 还原为 List）。
+     */
+    private String serializeNodeMetadata(List<Map<String, Object>> nodeMetadata) {
+        if (nodeMetadata == null || nodeMetadata.isEmpty()) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(nodeMetadata);
+        } catch (Exception e) {
+            log.warn("序列化父块 nodeMetadata 失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     //small2big检索，将存在parent块的chunk再进行一次父块检索，作为最终返回的chunk
@@ -141,7 +181,8 @@ public class SearchServiceImpl implements ISearchService {
                             parent.getChunkType() != null ? parent.getChunkType() : r.chunkType(),
                             parent.getTitlePath() != null ? parent.getTitlePath() : r.titlePath(),
                             parent.getChunkText(),
-                            null
+                            null,
+                            serializeNodeMetadata(parent.getNodeMetadata())
                     ));
                 }
             } else {

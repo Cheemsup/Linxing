@@ -35,6 +35,7 @@ public class ChunkServiceImpl implements IChunkService {
         ChunkContextVO.ChunkContextVOBuilder builder = ChunkContextVO.builder()
                 .chunkId(chunk.getId())
                 .chunkText(chunk.getChunkText())
+                .nodeMetadata(chunk.getNodeMetadata() != null ? chunk.getNodeMetadata() : List.of())
                 .documentId(doc.getId())
                 .fileName(doc.getFileName());
 
@@ -45,6 +46,7 @@ public class ChunkServiceImpl implements IChunkService {
                         .chunkId(parent.getId())
                         .titlePath(parent.getTitlePath())
                         .chunkText(parent.getChunkText())
+                        .nodeMetadata(parent.getNodeMetadata() != null ? parent.getNodeMetadata() : List.of())
                         .build());
 
                 List<Chunk> siblings = chunkMapper.findSiblingsByParentChunkId(chunk.getParentChunkId());

@@ -24,14 +24,24 @@
             {{ context.parentChunk.titlePath }}
           </span>
         </div>
-        <div class="section-body parent-body">{{ context.parentChunk.chunkText }}</div>
+        <div class="section-body parent-body">
+          <RichChunkText
+            :chunk-text="context.parentChunk.chunkText"
+            :node-metadata="context.parentChunk.nodeMetadata || []"
+          />
+        </div>
       </div>
 
       <div class="context-section current-section">
         <div class="section-header">
           <span class="section-label current-label">当前内容</span>
         </div>
-        <div class="section-body current-body">{{ context.chunkText }}</div>
+        <div class="section-body current-body">
+          <RichChunkText
+            :chunk-text="context.chunkText"
+            :node-metadata="context.nodeMetadata || []"
+          />
+        </div>
       </div>
 
       <div v-if="context.siblingChunks && context.siblingChunks.length > 0" class="context-section sibling-section">
@@ -54,9 +64,11 @@
 
 <script>
 import { chunkApi } from '@/api/agent/chunk'
+import RichChunkText from '@/components/agent/RichChunkText.vue'
 
 export default {
   name: 'ChunkContextPanel',
+  components: { RichChunkText },
   emits: ['close', 'navigate'],
   data() {
     return {

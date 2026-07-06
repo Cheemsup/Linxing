@@ -27,7 +27,8 @@
                c.chunk_type             AS chunkType,
                c.title_path             AS titlePath,
                c.chunk_text             AS chunkText,
-               c.parent_chunk_id        AS parentChunkId
+               c.parent_chunk_id        AS parentChunkId,
+               c.node_metadata::text    AS nodeMetadata
         FROM embeddings e
                  LEFT JOIN chunks c ON e.chunk_id = c.id
                  LEFT JOIN documents d ON e.document_id = d.id

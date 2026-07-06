@@ -35,9 +35,8 @@ public class FormulaNode implements DocumentNode {
 
     @Override
     public String originalContent() {
-        // 返回占位符格式，用于 Display Render
-        String id = getId();
-        return "[" + id + "]";
+        // 前端通过正则 [[LINXING:FORMULA:id]] 定位公式插入位置，再用 nodeId 关联 nodeMetadata 中的 formula 还原显示。
+        return "[[LINXING:FORMULA:" + getId() + "]]";
     }
 
     @Override

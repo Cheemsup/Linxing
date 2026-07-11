@@ -1,8 +1,7 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.rag.parse;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.dto.ParseResult;
-import org.linxing.linxing_agent.rag.service.DocumentAnalysisService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;

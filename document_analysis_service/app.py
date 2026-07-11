@@ -5,9 +5,6 @@ FastAPI 入口模块
     POST /parse
     请求: multipart/form-data, 字段 file + documentId + userId
     响应: {"documentType": "pdf", "nodes": [...]}
-
-启动方式:
-    uvicorn app:app --host 0.0.0.0 --port 8000
 """
 
 import os
@@ -21,11 +18,9 @@ from fastapi.responses import JSONResponse
 from config import (
     HOST,
     PORT,
-    IMAGE_STORE_DIR,
-    IMAGE_URL_PREFIX,
     LOG_LEVEL,
 )
-from parser import DocumentParser
+from parsers.router import parse as router_parse
 
 # 日志配置
 logging.basicConfig(
@@ -39,22 +34,6 @@ app = FastAPI(
     description="基于 PyMuPDF + pdfplumber 的文档解析服务，输出有序、原子化的 Node JSON",
     version="1.0.0",
 )
-
-# 全局解析器实例
-_parser: DocumentParser = None
-
-
-def get_parser() -> DocumentParser:
-    """懒加载全局 DocumentParser 单例"""
-    global _parser
-    if _parser is None:
-        logger.info("初始化 DocumentParser...")
-        _parser = DocumentParser(
-            image_store_dir=IMAGE_STORE_DIR,
-            image_url_prefix=IMAGE_URL_PREFIX,
-        )
-        logger.info("DocumentParser 初始化完成")
-    return _parser
 
 
 @app.get("/health")
@@ -72,7 +51,7 @@ async def parse(
     """
     解析上传的文档，返回 Node JSON 序列
 
-    :param file: 文档文件（PDF/DOCX）
+    :param file: 文档文件
     :param documentId: 文档 ID，用于图片目录隔离
     :param userId: 用户 ID，用于图片目录隔离
     :return: 统一 Node JSON
@@ -80,11 +59,10 @@ async def parse(
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    # 校验文件类型：结构化文档 + 阶段二新增的 md/html/code/linebased
-    # 实际类型判定与分发由 DocumentParser → parsers.router 完成
+    # 校验文件类型，实际类型判定与分发由 parsers.router 完成
     suffix = Path(file.filename).suffix.lower().lstrip(".")
     supported = {
-        "pdf", "docx", "doc", "xlsx",  # 结构化文档（DocumentParser）
+        "pdf", "docx", "doc", "xlsx",  # 结构化文档
         "md", "markdown",  # Markdown（mistune3）
         "html", "htm",  # HTML（beautifulsoup4）
         "java", "py", "js", "ts", "go", "rs", "c", "cpp", "cs", "kt",
@@ -108,17 +86,14 @@ async def parse(
     tmp_path = None
     try:
         content = await file.read()
-        # NamedTemporaryFile 的 suffix 不会自动补点，必须显式带上 "."，
-        # 否则文件名形如 doc_xxxxxdocx（无点分隔），后续 Path.suffix 解析为空 → type=unknown
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=f".{suffix}", prefix="doc_"
         ) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        # 调用解析器
-        parser = get_parser()
-        result = parser.parse(tmp_path, documentId, userId)
+        # 调用解析器（router 统一派发，pdf/docx 单例在首次解析时懒加载注入图片目录）
+        result = router_parse(tmp_path, documentId, userId)
 
         logger.info(
             "解析完成: file=%s, nodes=%d",

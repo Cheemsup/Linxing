@@ -1,7 +1,8 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.enhancement;
 
 import lombok.RequiredArgsConstructor;
 import org.linxing.linxing_agent.rag.config.RagProperties;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;

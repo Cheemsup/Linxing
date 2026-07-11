@@ -13,7 +13,7 @@ import org.linxing.linxing_agent.rag.vo.DocumentVO;
 import org.linxing.linxing_agent.common.result.PageResult;
 import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
-import org.linxing.linxing_agent.rag.pipeline.ChunkPipelineCoordinator;
+import org.linxing.linxing_agent.rag.pipeline.ChunkIngestCoordinator;
 import org.linxing.linxing_agent.rag.service.IDocumentService;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 public class DocumentServiceImpl implements IDocumentService {
 
     private final DocumentMapper documentMapper;
-    private final ChunkPipelineCoordinator chunkPipelineCoordinator;
+    private final ChunkIngestCoordinator chunkIngestCoordinator;
     private final StringRedisTemplate stringRedisTemplate;
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
@@ -75,7 +75,7 @@ public class DocumentServiceImpl implements IDocumentService {
             throw new IllegalArgumentException("无权删除该文档");
         }
 
-        chunkPipelineCoordinator.deleteByDocumentId(userId, id);
+        chunkIngestCoordinator.deleteByDocumentId(userId, id);
 
         evictPreviewCache(id);
 

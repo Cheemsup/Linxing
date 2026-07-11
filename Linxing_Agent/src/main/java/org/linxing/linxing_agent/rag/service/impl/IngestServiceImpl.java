@@ -9,8 +9,8 @@ import org.linxing.linxing_agent.rag.dto.IngestResponse;
 import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
-import org.linxing.linxing_agent.rag.pipeline.ChunkPipelineCoordinator;
-import org.linxing.linxing_agent.rag.service.DocumentAnalysisFacade;
+import org.linxing.linxing_agent.rag.pipeline.ChunkIngestCoordinator;
+import org.linxing.linxing_agent.rag.parse.DocumentAnalysisFacade;
 import org.linxing.linxing_agent.rag.service.IIngestService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +31,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class IngestServiceImpl implements IIngestService {
 
-    private final ChunkPipelineCoordinator chunkPipelineCoordinator;
+    private final ChunkIngestCoordinator chunkIngestCoordinator;
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
     private final SemanticCacheServiceImpl semanticCacheService;
@@ -76,7 +76,7 @@ public class IngestServiceImpl implements IIngestService {
             log.info("文档 {} 解析完成，获得 {} 个 Node", docRecord.getId(), nodes.size());
 
             // 基于 Node 序列进行切分、向量化和持久化
-            int chunksCount = chunkPipelineCoordinator.processDocumentFromNodes(docRecord, nodes);
+            int chunksCount = chunkIngestCoordinator.processDocumentFromNodes(docRecord, nodes);
 
             //文档更新完毕，清除对于chunk的缓存
             semanticCacheService.clearUserCache(userId);

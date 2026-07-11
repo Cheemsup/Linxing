@@ -19,7 +19,7 @@ import java.util.List;
 public class ParseResult {
 
     /**
-     * 文档类型（pdf、docx 等）
+     * 文档类型
      */
     private String documentType;
 

@@ -10,7 +10,10 @@ import java.util.List;
  * 职责：基于 Chunk 内的 Node 序列生成不同用途的文本，实现 Display 与 Index 解耦。
  * - Display Render：用于前端展示，保留原文形态（图片/代码/表格以占位符表示）
  * - Index Render：用于 Embedding + BM25，使用语义增强文本（VLM 描述、LLM 解释等）
+ *
+ * 本接口已废弃
  */
+@Deprecated
 public interface ChunkRenderer {
 
     /**

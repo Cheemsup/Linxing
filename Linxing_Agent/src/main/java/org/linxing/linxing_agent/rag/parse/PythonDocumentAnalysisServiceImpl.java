@@ -1,9 +1,8 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.rag.parse;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.dto.ParseResult;
-import org.linxing.linxing_agent.rag.service.DocumentAnalysisService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;

@@ -8,8 +8,7 @@ import java.util.List;
 /**
  * 展示渲染器（Display Render），用于前端展示。
  *
- * 输出格式：保留原文形态，图片/代码/表格以占位符表示（如 [IMG_1]、[CODE_2]、[TABLE_3]），
- * 前端通过 nodeMetadata 字段将占位符还原为实际图片/代码/表格。
+ * 输出格式：保留原文形态，图片/代码/表格以占位符表示（如 [IMG_1]、[CODE_2]、[TABLE_3]），前端通过 nodeMetadata 字段将占位符还原为实际图片/代码/表格。
  *
  * 各 Node 类型的 originalContent() 已实现差异化输出：
  * - TEXT/HEADING: 返回文本原文
@@ -23,7 +22,10 @@ import java.util.List;
  * 配置步骤如下...
  *
  * [CODE_1]
+ *
+ * 本类已废弃
  */
+@Deprecated
 @Component
 public class DisplayRenderer implements ChunkRenderer {
 

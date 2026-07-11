@@ -1,6 +1,7 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.enhancement;
 
 import lombok.Getter;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
 
 import java.util.Collections;
 import java.util.List;

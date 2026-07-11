@@ -1,4 +1,9 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.enhancement;
+
+import org.linxing.linxing_agent.rag.node.CodeNode;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
+import org.linxing.linxing_agent.rag.node.ImageNode;
+import org.linxing.linxing_agent.rag.node.TableNode;
 
 /**
  * 语义增强 Prompt 模板。

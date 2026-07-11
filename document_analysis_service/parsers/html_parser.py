@@ -2,14 +2,13 @@
 HTML 解析器
 
 职责：将 HTML 文档解析为统一的 Node JSON 序列。
-对应 Java 侧 HtmlChunkStrategy.walkDom / flushBuffer / fallbackSplit 等逻辑。
 
-选型决策（reference/TODOS/betterRAG/0702_dealWithOldStrategy.md 第 7.3 节）：
+选型决策：
 - 使用 beautifulsoup4（>=4.15.0），默认 html.parser 后端，不引入 lxml。
-- bs4 负责 DOM 遍历与 script/style 过滤；titlePath 栈推导、超长拆分、parentId 标注
+- bs4 负责 DOM 遍历与 script/style 过滤；titlePath 栈推导、超长拆分、groupId 标注
   仍是本系统手写领域逻辑（标准库 re）。
 
-核心策略（忠实复刻旧 Java HtmlChunkStrategy）：
+核心策略（复刻旧 Java HtmlChunkStrategy）：
 1. BeautifulSoup 解析 DOM，decompose() 掉 script/style/noscript/head/meta/link
 2. 从 body（无 body 用整棵 soup）深度优先遍历：
    - h1-h6：先 flushBuffer 输出累积文本为 block，再更新标题栈
@@ -18,8 +17,7 @@ HTML 解析器
    - table：flushBuffer，作为原子块输出 type="table" 的 block（html 字段），不递归
    - 其他元素：递归遍历，文本节点累加到 buffer
 3. flushBuffer：buffer trim 非空输出为 block，titlePath = 标题栈 join " > "（空则 None）
-4. 超长 block（> CHUNK_THRESHOLD=1000）：先输出父 Node（parentId=None，text=整块），
-   再按句子 [。！？.!?；;] 拆分累加到阈值，每个子 Node parentId=父id
+4. 超长 block（> CHUNK_THRESHOLD=1000）：内部按句子 [。！？.!?；;] 拆分累加到阈值为多个小 Node，共享同一 groupId（同源整块），不再输出整块超长镜像父 Node
 5. 若解析后只有 0-1 个块，fallback：取纯文本 soup.get_text()，按段落/句子拆分
 
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
@@ -27,7 +25,7 @@ Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - type: "text"（HTML 块统一为 text；table 转 html 字段并 type="table"）
 - text: 块文本（table 时为 None）
 - titlePath: str 标题路径，无则 None
-- parentId: str 或 None（超长块拆出的子 Node 指向同源父 Node id；普通块 None）
+- groupId: str 或 None（超长 block 内部拆出的小 Node 共享同一 groupId；普通块 None）
 - page: 1
 - bbox: None
 - language: None
@@ -43,10 +41,8 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 logger = logging.getLogger("docling_analysis_service.parsers.html_parser")
 
-# 与旧 Java HtmlChunkStrategy.DEFAULT_MAX_CHUNK_SIZE 一致
 CHUNK_THRESHOLD = 1000
 
-# 句子分隔符（中英文，与 Java SENTENCE_DELIMITER 一致）
 SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
 
 # 强段落分隔：多换行/双换行（fallback 用）
@@ -55,14 +51,13 @@ STRONG_PARAGRAPH_SEP = r"\n\s*\n"
 # HTML 扩展名
 HTML_EXTENSIONS = {"html", "htm"}
 
-# 需要在遍历前移除的标签（与 Java doc.select(...).remove 一致）
 _STRIP_TAGS = ("script", "style", "noscript", "head", "meta", "link")
 
 
 class HtmlParser:
     """HTML 解析器，基于 BeautifulSoup + 手写领域逻辑。
 
-    bs4 负责 DOM 遍历与脚本过滤；标题栈、超长拆分、parentId 标注为本系统手写逻辑。
+    bs4 负责 DOM 遍历与脚本过滤；标题栈、超长拆分、groupId 标注为本系统手写逻辑。
     """
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
@@ -75,7 +70,7 @@ class HtmlParser:
     # ============================== 对外入口 ==============================
 
     def parse(
-        self, file_path: str, document_id: int, user_id: int
+        self, file_path: str, document_id: int, user_id: int ##document_id、user_id貌似并没有被使用到
     ) -> List[dict]:
         """
         解析 HTML 文件，返回 Node JSON 列表
@@ -84,7 +79,7 @@ class HtmlParser:
         :param document_id: 文档 ID（保留参数，与 parser.py 风格一致）
         :param user_id: 用户 ID（保留参数，与 parser.py 风格一致）
         :return: Node dict 列表，每个 Node 形如
-                 {id, type, text, titlePath, parentId, page, bbox, language, html}
+                 {id, type, text, titlePath, groupId, page, bbox, language, html}
         """
         file_path = Path(file_path)
         logger.info("HtmlParser 开始解析: %s", file_path)
@@ -117,11 +112,11 @@ class HtmlParser:
         1. BeautifulSoup 解析，decompose 掉 script/style/noscript/head/meta/link
         2. 从 body（无 body 用 soup）深度优先遍历，产出 blocks
         3. 若 blocks <= 1，fallback 取纯文本按段落/句子拆分
-        4. blocks → Node（超长 block 拆句子 + parentId）
+        4. blocks → Node（超长 block 内部拆句子 + 共享 groupId）
         """
         soup = BeautifulSoup(text, "html.parser")
 
-        # 移除 script/style/noscript/head/meta/link（与 Java doc.select(...).remove 一致）
+        # 移除 script/style/noscript/head/meta/link
         for bad in soup.find_all(list(_STRIP_TAGS)):
             bad.decompose()
 
@@ -259,9 +254,8 @@ class HtmlParser:
         将 blocks 转换为 Node JSON 列表。
 
         - table block → table Node（原子，不拆分）
-        - text block ≤ threshold → 单个 text Node（parentId=None）
-        - text block > threshold → 父 text Node（parentId=None，text=整块）
-          + 按句子拆分的子 text Node（parentId=父id）
+        - text block ≤ threshold → 单个 text Node（groupId=None）
+        - text block > threshold → 内部按句子拆为多个小 text Node，共享同一 groupId（同源整块，不再输出整块超长镜像父 Node）
         """
         results: List[dict] = []
         for block in blocks:
@@ -275,7 +269,7 @@ class HtmlParser:
                         next(node_seq),
                         html=block.get("html") or "",
                         title_path=title_path,
-                        parent_id=None,
+                        group_id=None,
                     )
                 )
                 continue
@@ -288,17 +282,12 @@ class HtmlParser:
                 # 普通块
                 results.append(
                     self._make_text_node(
-                        next(node_seq), text, title_path=title_path, parent_id=None
+                        next(node_seq), text, title_path=title_path, group_id=None
                     )
                 )
             else:
-                # 超长块：先输出父 Node（同源 Level1），再按句子拆出子 Node
-                parent_id = next(node_seq)
-                results.append(
-                    self._make_text_node(
-                        parent_id, text, title_path=title_path, parent_id=None
-                    )
-                )
+                # 超长块：内部拆句子为多个小 Node，共享同一 groupId
+                group_id = next(node_seq)
                 sub_chunks = self._split_by_sentence_with_threshold(
                     text, self.threshold
                 )
@@ -310,7 +299,7 @@ class HtmlParser:
                                 next(node_seq),
                                 sub_text,
                                 title_path=title_path,
-                                parent_id=parent_id,
+                                group_id=group_id,
                             )
                         )
 
@@ -451,15 +440,16 @@ class HtmlParser:
 
     @staticmethod
     def _make_text_node(
-        node_id: str, text: str, title_path: Optional[str], parent_id: Optional[str]
+        node_id: str, text: str, title_path: Optional[str], group_id: Optional[str]
     ) -> dict:
-        """构造一个 text Node dict（与 Java 侧 NodeDTO 协议对应）"""
+        """构造一个 text Node dict（与 Java 侧 NodeDTO 协议对应）。
+        group_id 非空表示同源整块拆出的子 Node（共享同 groupId），普通块 None。"""
         return {
             "id": node_id,
             "type": "text",
             "text": text,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
             "language": None,
@@ -468,15 +458,16 @@ class HtmlParser:
 
     @staticmethod
     def _make_table_node(
-        node_id: str, html: str, title_path: Optional[str], parent_id: Optional[str]
+        node_id: str, html: str, title_path: Optional[str], group_id: Optional[str]
     ) -> dict:
-        """构造一个 table Node dict（html 字段存放 HTML 字符串）"""
+        """构造一个 table Node dict（html 字段存放 HTML 字符串）。
+        group_id 非空表示同源整块拆出的子 Node，普通块 None。"""
         return {
             "id": node_id,
             "type": "table",
             "text": None,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
             "language": None,

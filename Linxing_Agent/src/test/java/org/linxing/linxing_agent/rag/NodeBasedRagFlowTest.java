@@ -4,14 +4,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
-import org.linxing.linxing_agent.rag.node.NeighborNodeRenderer;
-import org.linxing.linxing_agent.rag.node.NodeBasedChunkBuilder;
+import org.linxing.linxing_agent.rag.enhancement.NeighborNodeRenderer;
+import org.linxing.linxing_agent.rag.chunk.NodeBasedChunkBuilder;
 import org.linxing.linxing_agent.rag.node.NodeType;
-import org.linxing.linxing_agent.rag.node.SemanticContext;
-import org.linxing.linxing_agent.rag.node.SemanticContextBuilder;
-import org.linxing.linxing_agent.rag.node.SemanticEnhancementPrompts;
-import org.linxing.linxing_agent.rag.service.DocumentAnalysisFacade;
-import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
+import org.linxing.linxing_agent.rag.enhancement.SemanticContext;
+import org.linxing.linxing_agent.rag.enhancement.SemanticContextBuilder;
+import org.linxing.linxing_agent.rag.enhancement.SemanticEnhancementPrompts;
+import org.linxing.linxing_agent.rag.parse.DocumentAnalysisFacade;
+import org.linxing.linxing_agent.rag.enhancement.SemanticEnhancementService;
 import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * 测试目标：验证系统的动作是否符合预期，沿数据流打印各阶段中间状态：
  *   docx 文件 ──DocumentAnalysisFacade──▶ Node 序列 ──NodeBasedChunkBuilder──▶ Chunk 序列
  *
- * 测试文件：reference/TODOS/betterRAG/testFiles/TCP笔记.docx
+ s * 测试文件：reference/TODOS/betterRAG/testFiles/TCP笔记.docx
  *
  * 前置条件（运行时需满足，编写时不启动验证）：
  *   - Spring 上下文可启动（PostgreSQL / Redis / pgvector 等依赖就绪，dev profile）
@@ -110,7 +110,7 @@ class NodeBasedRagFlowTest {
      * 定位测试文件。兼容从项目根目录或 Linxing_Agent 模块目录启动测试两种场景。
      */
     private Path locateTestFile() {
-        String relPath = "reference/TODOS/betterRAG/testFiles/TCP笔记.docx";
+        String relPath = "reference/TODOS/betterRAG/testFiles/Redis.docx";
         // 候选工作目录：项目根 / 模块根
         Path fromRoot = Paths.get(relPath);
         Path fromModule = Paths.get("..", relPath.replace("/", java.io.File.separator));

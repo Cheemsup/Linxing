@@ -3,14 +3,12 @@ package org.linxing.linxing_agent.rag.node;
 import java.util.Map;
 
 /**
- * DocumentNode 统一接口，是 Node-Based RAG 架构的核心抽象。
- *
- * Parser 不再输出纯字符串，而是输出 DocumentNode 序列。
+ * DocumentNode 统一接口， Node-Based RAG 架构的核心抽象。
+ * 体系的语义增强、chunk组合等都基于Node作为单位
  * 每个 Node 都有明确的类型、原始内容、语义增强文本和元数据。
  *
  * 核心原则：
- * - Node 是 Pipeline 的一等公民
- * - 图片/代码/表格作为原子单位，永不被切断
+ * - Node是原子单位，不被分割以保持图片、table、段落等的语义完整性
  * - semanticText 用于检索（Embedding + BM25）
  * - originalContent 用于前端展示（Display Render）
  * 
@@ -92,14 +90,15 @@ public interface DocumentNode {
     }
 
     /**
-     * 超长单元的父 Node ID（用于父子 chunk）。
-     * Python 侧对超长 section/段落/方法做二次切分时，拆出的子 Node 标 parentId 指向同源 Level1 父 Node 的 id；
-     * 普通块为 null。
+     * 所属组 ID（用于父子 chunk）。
+     * Python 侧对超长 unit 在内部拆为多个小 Node 时，这些子 Node 共享同一个 groupId（标识同源整块）；
+     * 普通（未拆分）Node 为 null。Java 侧据 groupId 把同组 Node 优先组装在一起，并合成不可检索的
+     * Level1 父块，与拆出的多个 Level2 子块建立父子关系。
      *
-     * @return 父 Node ID，可能为 null
+     * @return 组 ID，可能为 null
      */
-    default String getParentId() {
-        Object pid = metadata().get("parentId");
-        return pid != null ? pid.toString() : null;
+    default String getGroupId() {
+        Object gid = metadata().get("groupId");
+        return gid != null ? gid.toString() : null;
     }
 }

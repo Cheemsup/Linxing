@@ -8,8 +8,7 @@ import java.util.List;
 /**
  * 索引渲染器（Index Render），用于 Embedding + BM25 向量化。
  *
- * 输出格式：所有 Node 都使用 semanticText（语义增强文本），
- * 图片用 VLM 描述、代码用 LLM 解释、表格用 LLM 总结，确保可被语义检索。
+ * 输出格式：所有 Node 都使用 semanticText（语义增强文本），图片用 VLM 描述、代码用 LLM 解释、表格用 LLM 总结，确保可被语义检索。
  *
  * 输出示例：
  * 介绍 Redis 主从复制架构...
@@ -19,7 +18,10 @@ import java.util.List;
  * 配置步骤如下...
  *
  * 该代码初始化 Redis 连接池，设置最大连接数和超时参数...
+ *
+ * 本类已废弃
  */
+@Deprecated
 @Component
 public class IndexRenderer implements ChunkRenderer {
 

@@ -1,28 +1,33 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.chunk;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.RagParameters;
 import org.linxing.linxing_agent.rag.entity.ChunkResult;
+import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 /**
  * 基于 Node 序列的 Chunk 构建器，得到最终的经由了Node组合的chunk列表。
  *
  * 核心原则：
- * - Node 永不可拆分：图片、代码、表格作为原子单位
+ * - Node 永不可拆分：图片、代码、表格作为原子单位（Python 侧已对超长文本做语义切分产生多个小 Node，Java 不再切分）
  * - Chunk 是 Node 的组合
  * - 按 semanticText 的 Token 估算累加，达到阈值切出 Chunk
  *
- * 父子装配（阶段三）：Python 侧对超长 section/段落/方法做二次切分时，拆出的子 Node 标 parentId 指向同源
- * Level1 父 Node 的 id。本构建器按 parentId 聚合：
- * - 有子 Node 的父 Node → 镜像为 Level1 父块（不参与检索，isSearchable=false）+ Level2 子块（子 Node 装箱）
- * - 无 parentId 的普通 Node → 走原有 token 装箱，产出 Level2 块
- * parentChunkId 引用机制复用 ChunkPipelineCoordinator 的 resultIndex→dbId 映射，此处用结果列表索引表达父子关系。
+ * 父子装配（基于 groupId）：
+ * Python 侧对超长 unit 不再返回整块超长 Node，而是在内部拆为多个小 Node，这些子 Node 共享同一个 groupId
+ * （标识「同源整块」），普通 Node 的 groupId 为 null。本构建器按 groupId 聚相邻 Node：
+ * - 有 groupId 的相邻 Node 同属一组 → 优先组装在一起：合成一个 Level1 父块（同组 Node 拼接≈原整块，不参与检索，
+ *   isSearchable=false）+ 一个或多个 Level2 子块（同组 Node 按 token 装箱，可检索），子块经 parentChunkId 指向父块。
+ * - 隔离性：有 groupId 的 Node 与无 groupId 的 Node 之间不拼接；不同 groupId 之间不拼接。
+ *   即进入/离开组时先 flush 当前普通累加块；组装组前也 flush。
+ * - 无 groupId 的普通 Node → 走 token 装箱，产出 Level2 块。
+ *
+ * parentChunkId 引用机制复用 ChunkIngestCoordinator 的 resultIndex→dbId 映射，此处用结果列表索引表达父子关系。
  */
 @Slf4j
 @Component
@@ -41,7 +46,7 @@ public class NodeBasedChunkBuilder {
     /**
      * 从顺序的Node中构建 ChunkResult 序列。
      *
-     * @param nodes      Node 序列（按阅读顺序）
+     * @param nodes      Node 序列（按阅读顺序，同 groupId 的 Node 在序列中相邻）
      * @param maxTokens  单个 Chunk 的最大 Token 数
      * @return ChunkResult 序列
      */
@@ -50,52 +55,45 @@ public class NodeBasedChunkBuilder {
             return List.of();
         }
 
-        // 1. 按 parentId 聚合：parentId → 子 Node 列表（保持原顺序）
-        //    有 parentId 的 Node 视为"子 Node"，其 parentId 指向同源父 Node 的 id
-        Map<String, List<DocumentNode>> childrenByParentId = new LinkedHashMap<>();
-        for (DocumentNode node : nodes) {
-            String parentId = node.getParentId();
-            if (parentId != null && !parentId.isEmpty()) {
-                childrenByParentId
-                        .computeIfAbsent(parentId, k -> new ArrayList<>())
-                        .add(node);
-            }
-        }
-
         List<ChunkResult> results = new ArrayList<>();
+        // 当前普通（无 groupId）累加块
         List<DocumentNode> currentNodes = new ArrayList<>();
         int currentTokens = 0;
 
-        for (DocumentNode node : nodes) {
-            // 子 Node 不参与普通装箱（由父 Node 的父子装配路径统一处理）
-            if (node.getParentId() != null && !node.getParentId().isEmpty()) {
-                continue;
-            }
+        int i = 0;
+        while (i < nodes.size()) {
+            DocumentNode node = nodes.get(i);
+            String groupId = node.getGroupId();
 
-            // 父 Node（有子 Node 挂靠）：先 flush 当前累积的普通 Chunk，再做父子装配
-            if (childrenByParentId.containsKey(node.getId())) {
+            if (groupId != null && !groupId.isEmpty()) {
+                // 进入组：先 flush 当前普通累加块（隔离：有组与无组/上一组之间不拼接）
                 if (!currentNodes.isEmpty()) {
                     results.add(buildChunkFromNodes(currentNodes));
                     currentNodes = new ArrayList<>();
                     currentTokens = 0;
                 }
-                assembleParentWithChildren(node, childrenByParentId.get(node.getId()),
-                        maxTokens, results);
+                // 收集连续、同 groupId 的子 Node（Python 保证同组相邻）
+                List<DocumentNode> groupNodes = new ArrayList<>();
+                while (i < nodes.size()
+                        && Objects.equals(nodes.get(i).getGroupId(), groupId)) {
+                    groupNodes.add(nodes.get(i));
+                    i++;
+                }
+                assembleGroupIdMember(groupNodes, maxTokens, results);
                 continue;
             }
 
             int nodeTokens = estimateTokens(node);
 
-            // 单个 Node 超过阈值：独立成块
+            // 单个 Node 超过阈值：独立成块（无父子关系，作为 Level2）
             if (nodeTokens > maxTokens) {
-                // 先输出当前累积的 Chunk
                 if (!currentNodes.isEmpty()) {
                     results.add(buildChunkFromNodes(currentNodes));
                     currentNodes = new ArrayList<>();
                     currentTokens = 0;
                 }
-                // 超大 Node 独立成块（无父子关系，作为 Level2）
                 results.add(buildChunkFromNodes(List.of(node)));
+                i++;
                 continue;
             }
 
@@ -108,9 +106,10 @@ public class NodeBasedChunkBuilder {
 
             currentNodes.add(node);
             currentTokens += nodeTokens + (currentNodes.size() > 1 ? SEPARATOR_TOKENS : 0);
+            i++;
         }
 
-        // 输出剩余 Node
+        // 输出剩余普通 Node
         if (!currentNodes.isEmpty()) {
             results.add(buildChunkFromNodes(currentNodes));
         }
@@ -120,34 +119,44 @@ public class NodeBasedChunkBuilder {
     }
 
     /**
-     * 父子装配：超长单元镜像为 Level1 父块（不参与检索）+ Level2 子块（子 Node token 装箱）。
-     * parentChunkId 用结果列表索引表达，由 ChunkPipelineCoordinator 的两 pass 插入解析为 DB id。
+     * 组装同 groupId 的子 Node：合成 Level1 父块（同组 Node 拼接，不参与检索）
+     * + 一个或多个 Level2 子块（同组 Node 按 token 装箱，可检索，parentChunkId 指向父块）。
      *
-     * @param parent    父 Node（超长单元整体）
-     * @param children  子 Node 序列（Python 二次切分产物，带 parentId 指向 parent）
-     * @param maxTokens 子块的最大 Token 数
-     * @param results   结果列表（父块追加在此，level1Index 为其在列表中的索引）
+     * 同组总长通常 > maxTokens（这正是「超长 unit」拆分的来源）：
+     * - 子块按 maxTokens 装箱切多个；
+     * - 父块为同组所有 Node 拼接的整体（Level1，isSearchable=false），作为 Small-to-Big 检索锚与 parentChunkId 指向。
+     * parentChunkId 用结果列表索引表达，由 ChunkIngestCoordinator 的两 pass 插入解析为 DB id。
+     *
+     * @param groupNodes 同 groupId 的子 Node 序列（非空、有序）
+     * @param maxTokens  子块的最大 Token 数
+     * @param results    结果列表（父块追加在此，level1Index 为其在列表中的索引）
      */
-    private void assembleParentWithChildren(DocumentNode parent, List<DocumentNode> children,
-                                            int maxTokens, List<ChunkResult> results) {
-        // Level1 父块：镜像整块内容，不参与检索（isSearchable 由 buildChunk 按 chunkLevel 判定为 false）
-        ChunkResult level1 = buildChunkFromNodes(List.of(parent));
+    private void assembleGroupIdMember(List<DocumentNode> groupNodes, int maxTokens,
+                                      List<ChunkResult> results) {
+        if (groupNodes.isEmpty()) {
+            return;
+        }
+
+        // Level1 父块：同组所有 Node 拼接≈原整块，不参与检索（isSearchable 由 buildChunk 按 chunkLevel 判定为 false）
+        ChunkResult level1 = buildChunkFromNodes(groupNodes);
         level1.setChunkLevel(RagParameters.CHUNK_LEVEL_1);
-        level1.setTitlePath(parent.getTitlePath());
+        // titlePath 取组内首 Node（同源父子块共享同一标题路径）
+        level1.setTitlePath(groupNodes.get(0).getTitlePath());
+        String parentTitlePath = groupNodes.get(0).getTitlePath();
         int level1Index = results.size();
         results.add(level1);
 
-        // Level2 子块：子 Node 按 token 装箱，parentChunkId 指向 level1Index
+        // Level2 子块：同组 Node 按 token 装箱，parentChunkId 指向 level1Index
         List<DocumentNode> currentNodes = new ArrayList<>();
         int currentTokens = 0;
-        for (DocumentNode child : children) {
+        for (DocumentNode child : groupNodes) {
             int nodeTokens = estimateTokens(child);
 
             if (currentTokens + nodeTokens + SEPARATOR_TOKENS > maxTokens && !currentNodes.isEmpty()) {
                 ChunkResult childChunk = buildChunkFromNodes(currentNodes);
                 childChunk.setChunkLevel(RagParameters.CHUNK_LEVEL_2);
                 childChunk.setParentChunkId(level1Index);
-                childChunk.setTitlePath(parent.getTitlePath());
+                childChunk.setTitlePath(parentTitlePath);
                 results.add(childChunk);
                 currentNodes = new ArrayList<>();
                 currentTokens = 0;
@@ -160,7 +169,7 @@ public class NodeBasedChunkBuilder {
             ChunkResult childChunk = buildChunkFromNodes(currentNodes);
             childChunk.setChunkLevel(RagParameters.CHUNK_LEVEL_2);
             childChunk.setParentChunkId(level1Index);
-            childChunk.setTitlePath(parent.getTitlePath());
+            childChunk.setTitlePath(parentTitlePath);
             results.add(childChunk);
         }
     }

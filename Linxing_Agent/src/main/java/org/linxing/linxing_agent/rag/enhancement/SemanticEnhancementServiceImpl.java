@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.service.impl;
+package org.linxing.linxing_agent.rag.enhancement;
 
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.TextContent;
@@ -13,13 +13,8 @@ import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.node.CodeNode;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.node.ImageNode;
-import org.linxing.linxing_agent.rag.node.NeighborNodeRenderer;
 import org.linxing.linxing_agent.rag.node.NodeType;
-import org.linxing.linxing_agent.rag.node.SemanticContext;
-import org.linxing.linxing_agent.rag.node.SemanticContextBuilder;
-import org.linxing.linxing_agent.rag.node.SemanticEnhancementPrompts;
 import org.linxing.linxing_agent.rag.node.TableNode;
-import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -147,7 +142,7 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
 
             // 设置语义描述
             if (description != null && !description.isBlank()) {
-                node.setSemanticDescription(cleanResponse(description));//设置 VLM 生成的语义描述到当前节点中（数据封装对象）
+                node.setSemanticDescription(cleanResponse(description));//设置 VLM 生成的语义描述到当前节点中（数据封装对象），属于直接修改共享变量的做法使得其他链路能够感知变化
                 log.debug("ImageNode {} VLM 描述: {}", node.getId(), truncateForLog(node.getSemanticDescription()));
             }
         } catch (Exception e) {
@@ -170,7 +165,7 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
         String explanation = callLlm(LlmType.CODE_ENHANCE_MODEL, prompt);
 
         if (explanation != null && !explanation.isBlank()) {
-            node.setSemanticExplanation(cleanResponse(explanation));//设置 VLM 生成的语义描述到当前节点中（数据封装对象）
+            node.setSemanticExplanation(cleanResponse(explanation));//设置 VLM 生成的语义描述到当前节点中（数据封装对象），属于直接修改共享变量的做法使得其他链路能够感知变化
             log.debug("CodeNode {} LLM 解释: {}", node.getId(), truncateForLog(node.getSemanticExplanation()));
         }
     }
@@ -189,7 +184,7 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
         String summary = callLlm(LlmType.TABLE_ENHANCE_MODEL, prompt);
 
         if (summary != null && !summary.isBlank()) {
-            node.setSemanticSummary(cleanResponse(summary));//设置 VLM 生成的语义描述到当前节点中（数据封装对象）
+            node.setSemanticSummary(cleanResponse(summary));//设置 VLM 生成的语义描述到当前节点中（数据封装对象），属于直接修改共享变量的做法使得其他链路能够感知变化
             log.debug("TableNode {} LLM 总结: {}", node.getId(), truncateForLog(node.getSemanticSummary()));
         }
     }
@@ -224,6 +219,8 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
      * 应对 VLM/LLM 服务偶发的 GOAWAY、连接重置、请求超时等瞬时故障：
      * 最多重试 {@value #MAX_RETRY_ATTEMPTS} 次，退避间隔按 2 的幂增长（1s/2s/4s...）。
      * 超时类与 IO 异常视为可重试，其他异常直接抛出。
+     *
+     * TODO：将此方法与callLlm()合并。不必再套一层
      */
     private <T> T callWithRetry(java.util.function.Supplier<T> action, String label) {
         Exception lastException = null;

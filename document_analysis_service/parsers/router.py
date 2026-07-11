@@ -1,31 +1,39 @@
 """
 文档类型路由器
 
-职责：根据文件扩展名 + 内容特征二次判定文档类型，分发给对应的解析器。
-替代旧 DocumentParser._detect_document_type 的 if-else，对应旧 Java ChunkStrategy.supports() 逻辑。
+职责：根据文件扩展名 + 内容特征二次判定文档类型，分发给对应的解析器；是 python 侧
+唯一的解析派发入口（2026-07-11 第 21 点下沉后，pdf/docx 与 md/html/code/linebased
+平等，均由本模块直接派发）。
 
-路由优先级（与旧 Java ChunkStrategyFactory 一致）：
-    markdown > html > code > pdf/docx > linebased
+返回 {"documentType": str, "nodes": List[dict]}。
 
-返回 {"documentType": str, "nodes": List[dict]}，与旧 DocumentParser.parse 输出一致。
+说明：
+- pdf / docx 解析器需要图片存储目录，由本模块从 config 读取 IMAGE_STORE_DIR /
+  IMAGE_URL_PREFIX 后懒加载注入；import config 只读环境变量，不会强制加载
+  fitz/pdfplumber/python-docx，重型依赖仍是首次解析 pdf/docx 时才加载。
+- md / html / code / linebased 解析器无图片需求，全局单例直接派发。
+- xlsx 暂未实现独立 parser，保留占位（warning + 空列表）。
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict
 
+from config import IMAGE_STORE_DIR, IMAGE_URL_PREFIX
 from .linebased_parser import LineBasedParser
 from .code_parser import CodeParser
 from .markdown_parser import MarkdownParser
 
 logger = logging.getLogger("docling_analysis_service.parsers.router")
 
-# 各类型解析器单例（图片解析器 pdf/docx 仍由 DocumentParser 处理，路由器只负责 md/html/code/linebased）
+# 各类型解析器单例（md/html/code/linebased 无图片需求，可全局单例）；
+# pdf/docx 需注入图片目录，单例在首次解析时懒加载并注入 image 配置
 _markdown_parser = None
 _html_parser = None
 _code_parser = None
 _linebased_parser = None
+_pdf_parser = None
+_docx_parser = None
 
 
 def _get_markdown_parser():
@@ -58,6 +66,36 @@ def _get_linebased_parser():
     return _linebased_parser
 
 
+def _get_pdf_parser():
+    """懒加载 PDF 解析器单例，注入图片存储目录配置。
+
+    延迟导入 fitz/pdfplumber，避免未解析 pdf 时也强制加载这些重型依赖。
+    """
+    global _pdf_parser
+    if _pdf_parser is None:
+        from .pdf_parser import PdfParser
+        _pdf_parser = PdfParser(
+            image_store_dir=IMAGE_STORE_DIR,
+            image_url_prefix=IMAGE_URL_PREFIX,
+        )
+    return _pdf_parser
+
+
+def _get_docx_parser():
+    """懒加载 DOCX 解析器单例，注入图片存储目录配置。
+
+    延迟导入 python-docx，避免未解析 docx 时也强制加载这些重型依赖。
+    """
+    global _docx_parser
+    if _docx_parser is None:
+        from .docx_parser import DocxParser
+        _docx_parser = DocxParser(
+            image_store_dir=IMAGE_STORE_DIR,
+            image_url_prefix=IMAGE_URL_PREFIX,
+        )
+    return _docx_parser
+
+
 # 扩展名 → 文档类型映射（与旧 Java ChunkStrategy.supports() 的扩展名判定对齐）
 _MARKDOWN_EXTS = {"md", "markdown"}
 _HTML_EXTS = {"html", "htm"}
@@ -65,7 +103,6 @@ _CODE_EXTS = {
     "java", "py", "js", "ts", "go", "rs", "c", "cpp", "cs", "kt",
     "rb", "php", "swift", "scala", "hs", "lua", "r", "sh", "bash", "sql",
 }
-_STRUCTURED_EXTS = {"pdf", "docx", "doc", "xlsx"}  # 仍由 DocumentParser 解析
 _LINEBASED_EXTS = {"log", "csv", "tsv", "txt"}
 
 # 代码内容特征指示符（与旧 Java CodeChunkStrategy.CODE_INDICATOR 一致）
@@ -80,7 +117,7 @@ def detect_document_type(file_path) -> str:
     按扩展名 + 内容特征二次判定文档类型。
 
     判定顺序：
-    1. 扩展名直接命中结构化类型（pdf/docx/xlsx）→ 返回对应类型（交由 DocumentParser）
+    1. 扩展名直接命中结构化类型（pdf/docx/xlsx）→ 返回对应类型（由本模块 parse 派发到 pdf/docx parser）
     2. 扩展名命中 markdown/html/code/linebased → 返回对应类型
     3. 扩展名未命中 → 读内容特征：
        - 含 `# `/`## `/` ``` ` → markdown
@@ -95,7 +132,7 @@ def detect_document_type(file_path) -> str:
     suffix = Path(file_path).suffix.lower().lstrip(".")
     file_path = Path(file_path)
 
-    # 1. 结构化文档（仍由 DocumentParser 处理）
+    # 1. 结构化文档（由本模块 parse 派发到 pdf/docx parser）
     if suffix == "pdf":
         return "pdf"
     if suffix in ("docx", "doc"):
@@ -123,42 +160,8 @@ def detect_document_type(file_path) -> str:
         if _looks_like_code(sample):
             return "code"
 
-    # linebased 作为最通用的文本兜底（与旧 Java RecursiveChunkStrategy 兜底语义对应）
+    # linebased 作为最通用的文本兜底（与 Java RecursiveChunkStrategy 兜底语义对应）
     return "linebased"
-
-
-def parse(file_path, document_id: int, user_id: int) -> Dict[str, Any]:
-    """
-    路由分发：按检测到的文档类型调用对应解析器，返回统一 Node JSON。
-
-    :param file_path: 文件路径
-    :param document_id: 文档 ID（图片目录隔离，md/html/code/linebased 无图片，仅透传）
-    :param user_id: 用户 ID
-    :return: {"documentType": str, "nodes": List[dict]}
-    """
-    file_path = Path(file_path)
-    doc_type = detect_document_type(file_path)
-    logger.info("路由判定文档类型: %s (file=%s)", doc_type, file_path.name)
-
-    try:
-        if doc_type == "markdown":
-            nodes = _get_markdown_parser().parse(file_path, document_id, user_id)
-        elif doc_type == "html":
-            nodes = _get_html_parser().parse(file_path, document_id, user_id)
-        elif doc_type == "code":
-            nodes = _get_code_parser().parse(file_path, document_id, user_id)
-        elif doc_type == "linebased":
-            nodes = _get_linebased_parser().parse(file_path, document_id, user_id)
-        else:
-            # pdf/docx/xlsx 不应由路由器处理（DocumentParser 负责）；防御性返回空
-            logger.warning("路由器收到结构化文档类型 %s，应交由 DocumentParser 处理", doc_type)
-            nodes = []
-    except Exception as e:
-        logger.exception("解析器 %s 处理失败: %s", doc_type, file_path.name)
-        raise
-
-    logger.info("解析完成: file=%s, type=%s, nodes=%d", file_path.name, doc_type, len(nodes))
-    return {"documentType": doc_type, "nodes": nodes}
 
 
 # ------------------------------ 内容特征判定 ------------------------------
@@ -191,3 +194,44 @@ def _looks_like_html(sample: str) -> bool:
 def _looks_like_code(sample: str) -> bool:
     """代码内容特征：含 package/import/class/def/function 等指示符（与旧 Java CODE_INDICATOR 一致）。"""
     return any(kw in sample for kw in _CODE_INDICATOR_KEYWORDS)
+
+
+
+def parse(file_path, document_id: int, user_id: int) -> Dict[str, Any]:
+    """
+    路由分发：按检测到的文档类型调用对应解析器，返回统一 Node JSON。
+
+    :param file_path: 文件路径
+    :param document_id: 文档 ID（md/html/code/linebased 无图片，仅透传）
+    :param user_id: 用户 ID
+    :return: {"documentType": str, "nodes": List[dict]}
+    """
+    file_path = Path(file_path)
+    doc_type = detect_document_type(file_path)#根据后缀名判断文件类型，为后续处理器路由提供依据
+    logger.info("路由判定文档类型: %s (file=%s)", doc_type, file_path.name)
+
+    try:
+        if doc_type == "markdown":
+            nodes = _get_markdown_parser().parse(file_path, document_id, user_id)
+        elif doc_type == "html":
+            nodes = _get_html_parser().parse(file_path, document_id, user_id)
+        elif doc_type == "code":
+            nodes = _get_code_parser().parse(file_path, document_id, user_id)
+        elif doc_type == "linebased":
+            nodes = _get_linebased_parser().parse(file_path, document_id, user_id)
+        elif doc_type == "pdf":
+            nodes = _get_pdf_parser().parse(file_path, document_id, user_id)
+        elif doc_type == "docx":
+            nodes = _get_docx_parser().parse(file_path, document_id, user_id)
+        else:
+            # xlsx 暂未实现独立 parser，保留占位（warning + 空列表）
+            logger.warning("xlsx 暂不支持解析，返回空 Node 列表: %s", file_path)
+            nodes = []
+    except Exception as e:
+        logger.exception("解析器 %s 处理失败: %s", doc_type, file_path.name)
+        raise
+
+    logger.info(
+        "解析完成: file=%s, type=%s, nodes=%d", file_path.name, doc_type, len(nodes)
+    )
+    return {"documentType": doc_type, "nodes": nodes}

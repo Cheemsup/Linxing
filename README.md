@@ -12,6 +12,7 @@ Linxing 起初是一个个人笔记 RAG 问答系统，现已演进为 Agent 驱
 - **HumanInTheLoop**：工作流可在关键节点暂停等待用户澄清回复后继续执行
 - **联网搜索**：集成 Tavily，弥补个人笔记知识盲区
 - **混合检索**：向量检索 + BM25 全文检索 + RRF 融合 + Cross-encoder 重排序
+- **Node-Based RAG**：Python 服务统一解析所有文件类型为原子化 Node 序列；Java 侧做语义增强（VLM/LLM）→ Node 装箱成 Chunk（含 groupId 父子装配）→ 责任链后处理；Display/Index 文本双轨（原文展示 / 语义增强参与检索）
 - **语义缓存**：基于 Redis Vector Set 的回答级语义缓存
 - **树形对话**：多轮对话以树形结构组织，可追溯任意分支
 - **多用户隔离**：JWT 认证 + 用户级数据隔离
@@ -22,8 +23,9 @@ Linxing 起初是一个个人笔记 RAG 问答系统，现已演进为 Agent 驱
 |------|------|
 | ReAct Agent | 自研主循环，最多 20 步；工具数较多时启用渐进披露（先看目录，再 resolve 取规格） |
 | 多 Agent 工作流 | `study_plan` 工作流：知识收集 Agent + 计划生成 Agent + 条件出题 Agent，顺序编排 |
-| 多格式文档导入 | TXT、Markdown、PDF、Word、Excel、HTML、CSV、Java 代码等 |
-| 智能分块 | 策略模式按文档类型自动选择（Markdown / HTML / 代码 / 语义 / 递归兜底） |
+| Node-Based RAG | Python 服务统一解析所有文件类型为 Node 序列；Java 侧语义增强 + Node 装箱成 Chunk（含父子装配）+ 文本双轨 |
+| 多格式文档导入 | PDF、Word、Markdown、HTML、Java/Python 等代码、TXT/CSV/TSV/LOG 行式文本（XLSX 暂未实现） |
+| 语义增强 | VLM 图片描述 + LLM 代码解释 / 表格总结，打包临近上下文送模型，结果进入 indexText 参与检索 |
 | 混合检索 | 向量检索 + BM25 + RRF 融合 + ONNX Cross-encoder 重排序 |
 | 学习计划 | 分阶段结构化计划，支持阶段进度更新与 Markdown / HTML 导出 |
 | 知识测验 | 单选 / 多选 / 填空 / 判断 / 简答，作答后自动批改 |
@@ -73,9 +75,15 @@ Linxing/
 │   │   ├── user/                          # 用户域（登录注册）
 │   │   ├── rag/                            # 知识检索域（被封装为 Agent 工具）
 │   │   │   ├── controller/                # DocumentController / IngestController / SearchController / ChunkController
-│   │   │   ├── service/ strategy/ pipeline/
+│   │   │   ├── parse/                     # 文档解析门面（DocumentAnalysisFacade → Python 服务，NodeConverter）
+│   │   │   ├── enhancement/               # Node 语义增强（VLM/LLM：SemanticEnhancementService + 上下文打包）
+│   │   │   ├── chunk/                     # NodeBasedChunkBuilder（Node 装箱成 Chunk，含 groupId 父子装配）
+│   │   │   ├── pipeline/                  # ChunkIngestCoordinator + 责任链 handler（向量化/标题提取/全文索引）
+│   │   │   ├── node/                      # DocumentNode 接口 + 各实现（Text/Heading/Image/Code/Table/Formula）
+│   │   │   ├── render/                    # 已废弃（Display/Index 双轨已内联到 NodeBasedChunkBuilder）
+│   │   │   ├── strategy/                  # 旧 ChunkStrategy 体系（已废弃，保留供历史参考）
 │   │   │   ├── utils/                      # Reranker / RRF / QueryRewriter / EmbeddingHelper
-│   │   │   └── entity/ dto/ vo/ mapper/
+│   │   │   └── entity/ dto/ vo/ mapper/ config/ constant/
 │   │   └── agent/                          # Agent 域（业务编排核心）
 │   │       ├── core/                       # AgentExecutor（ReAct 主循环）/ AgentContext / AgentPrompts
 │   │       ├── adapter/                    # SseChatAdapter（SSE 流式响应）
@@ -92,6 +100,10 @@ Linxing/
 │       ├── models/                         # ONNX 重排序模型（gitignored）
 │       ├── application.yaml                # 主配置（非密钥项）
 │       └── schema.sql                      # 数据库建表脚本
+│
+├── document_analysis_service/              # Python 文档解析服务（Node-Based RAG 的解析入口）
+│   ├── app.py                              # FastAPI 入口（/parse）
+│   └── parsers/                            # router + pdf/docx/markdown/html/code/linebased 各 parser
 │
 └── webconsole/                             # 前端项目
     └── src/
@@ -126,7 +138,19 @@ CREATE EXTENSION vector;
 psql -d vectordb -f Linxing_Agent/src/main/resources/schema.sql
 ```
 
-### 2. 后端配置
+### 2. Python 文档解析服务
+
+Node-Based RAG 的文档解析由独立的 Python 服务承担，需先启动：
+
+```bash
+cd document_analysis_service
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+> 该服务由 Java 侧 `rag.python-service.url`（默认 `http://localhost:8000`）调用，详见 [document_analysis_service/README.md](document_analysis_service/README.md)。
+
+### 3. 后端配置
 
 在 `Linxing_Agent/src/main/resources/` 下创建 `application-dev.yaml`（已被 `.gitignore` 忽略，需本地配置），至少包含以下密钥与路径：
 
@@ -158,7 +182,7 @@ JWT_TOKEN_NAME: Authorization
 
 > 模型文件 `models/ms-marco-MiniLM-L-6-v2/model.onnx` 与 tokenizer 需放置在 classpath（默认已声明在 `application.yaml`）。上传文档目录 `files_store/` 会被自动创建。
 
-### 3. 后端启动
+### 4. 后端启动
 
 ```bash
 cd Linxing_Agent
@@ -167,7 +191,7 @@ mvn spring-boot:run
 
 后端服务运行在 `http://localhost:8080`
 
-### 4. 前端启动
+### 5. 前端启动
 
 ```bash
 cd webconsole
@@ -240,16 +264,33 @@ start_study_plan_workflow 工具触发
 用户提问 → 查询改写 → 向量检索 + BM25 检索 → RRF 融合 → Cross-encoder 重排序 → 返回片段
 ```
 
-### 分块策略（策略模式）
+### 文档入库流程（Node-Based RAG）
 
-系统按优先级自动选择最优分块策略：
+```
+文件上传 → IngestServiceImpl 持久化文件 → DocumentAnalysisFacade.analyze()
+              ↓
+   Python 文档解析服务（document_analysis_service）
+      router 按扩展名 + 内容特征派发到 pdf/docx/markdown/html/code/linebased parser
+      产出统一 Node JSON（含 titlePath、groupId 等结构信息）
+              ↓
+   NodeConverter 反序列化为 List<DocumentNode>
+              ↓
+   SemanticEnhancementService（语义增强）
+      IMAGE → VLM 图片描述 / CODE → LLM 代码解释 / TABLE → LLM 表格总结
+      打包临近上下文（前 2 + 后 2 邻居）送模型，增强失败 fallback 到原文
+              ↓
+   NodeBasedChunkBuilder（Node 装箱成 Chunk）
+      - 普通 Node：按 token 装箱，产出 Level2 块
+      - 同 groupId 子 Node：合成 Level1 父块（不可检索）+ 多个 Level2 子块（可检索，parentChunkId 指向父块）
+      - 同时生成 chunkText（Display：原文/占位符）与 indexText（Index：语义增强文本，用于 Embedding + BM25）
+              ↓
+   ChunkIngestCoordinator 责任链后处理（两 pass 插入：先父后子，解析 parentChunkId → DB id）
+      标题提取 → tsContent 全文索引 → EmbeddingPersist 向量化（优先 indexText）
+              ↓
+   持久化到 chunks / embeddings 表
+```
 
-1. **MarkdownChunkStrategy** — Markdown 文档（识别标题层级）
-2. **HtmlChunkStrategy** — HTML 文档
-3. **CodeChunkStrategy** — 代码文件（识别函数 / 类结构）
-4. **StructureAwareChunkStrategy** — 结构化文档
-5. **LineBasedChunkStrategy** — 行式文档
-6. **RecursiveChunkStrategy** — 通用兜底策略
+> 旧的 `ChunkStrategyFactory + strategy.execute` 按文件类型分派的处理路径已废弃（`ChunkIngestCoordinator.processDocument` 抛 `UnsupportedOperationException`），所有文件类型统一走 Node 体系 `processDocumentFromNodes`。
 
 ## 数据库设计
 
@@ -257,7 +298,7 @@ start_study_plan_workflow 工具触发
 |------|------|
 | users | 用户信息 |
 | documents | 文档元数据 |
-| chunks | 分块索引（支持分层 Small-to-Big 检索） |
+| chunks | 分块索引（含 `chunk_text` 展示文本、`index_text` 检索文本、`node_metadata` 还原信息、`parent_chunk_id` 父子关系、`chunk_level` 层级、`is_searchable` 是否可检索） |
 | embeddings | 向量存储（pgvector） |
 | activity_logs | 操作日志 |
 | chat_sessions | 聊天会话 |

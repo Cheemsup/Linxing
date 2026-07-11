@@ -1,7 +1,8 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.parse;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.dto.NodeDTO;
+import org.linxing.linxing_agent.rag.node.*;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -152,12 +153,12 @@ public class NodeConverter {
             metadata.put("colCount", dto.getColCount());
         }
 
-        // Python 侧结构识别产出的标题路径与父子关系（阶段二协议扩展）
+        // Python 侧结构识别产出的标题路径与同源整块组关系（groupId 协议扩展）
         if (dto.getTitlePath() != null) {
             metadata.put("titlePath", dto.getTitlePath());
         }
-        if (dto.getParentId() != null) {
-            metadata.put("parentId", dto.getParentId());
+        if (dto.getGroupId() != null) {
+            metadata.put("groupId", dto.getGroupId());
         }
 
         return metadata;

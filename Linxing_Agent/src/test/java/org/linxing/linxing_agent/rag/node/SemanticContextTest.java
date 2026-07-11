@@ -3,6 +3,10 @@ package org.linxing.linxing_agent.rag.node;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.linxing.linxing_agent.rag.config.RagProperties;
+import org.linxing.linxing_agent.rag.enhancement.NeighborNodeRenderer;
+import org.linxing.linxing_agent.rag.enhancement.SemanticContext;
+import org.linxing.linxing_agent.rag.enhancement.SemanticContextBuilder;
+import org.linxing.linxing_agent.rag.enhancement.SemanticEnhancementPrompts;
 
 import java.util.List;
 

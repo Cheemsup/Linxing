@@ -2,12 +2,8 @@
 源代码文件解析器（java / py / js / ts / go / rs / c / cpp / cs / kt / rb / php / swift / scala / hs / lua / r / sh / bash / sql）
 
 职责：将源代码文件解析为统一的 Node JSON 序列。
-对应 Java 侧 CodeChunkStrategy.splitByClassOrFunction / extractFuncName 等逻辑。
 
-选型决策（reference/TODOS/betterRAG/0702_dealWithOldStrategy.md 第 7.3 节）：
-- 不引入 tree-sitter，迁移现有正则，零新增依赖（仅标准库 re）。
-- tree-sitter 真正优势在「超长方法按逻辑块切」（拿 AST 节点），
-  但这是边缘场景；旧 CodeChunkStrategy 的正则对「类/函数提取 + titlePath」已够用。
+选型决策：不引入 tree-sitter（优势在「超长方法按逻辑块切」），只做旧方案java侧正则的迁移并健全化。
 
 核心策略 —— 类/函数边界拆分：
 1. CLASS_PATTERN / FUNCTION_PATTERN 收集所有 class/func 匹配位置，按 start 排序
@@ -18,18 +14,13 @@
 4. 每个块文本 = 从当前 match.start 到下一个 match.start（trim 后空则跳过）
 5. 无任何 class/func 匹配 → 整个文件作为一个 code Node（titlePath=None）
 
-本次改造（区别于旧 Java RecursiveTextSplitter.refine）：
-- 超长块（> CHUNK_THRESHOLD_CODE=1500）：先输出父 code Node（parentId=None，
-  text=整块，titlePath 同），再按「逻辑行」拆出子 Node（parentId=父id，titlePath 同父）
-- 逻辑行拆分优先级：空行/方法边界 → 句子 [。！？.!?；;] → 固定行数兜底
-
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - id: str "n1"... 自管递增
 - type: "code"
 - text: 代码块文本
 - language: 检测出的语言（java/py/js/ts...），None 也行
 - titlePath: str（class 名或 "class > func"），无则 None
-- parentId: str 或 None（超长块拆出的子 Node 指向同源父 Node id）
+- groupId: str 或 None（超长块内部拆出的小 Node 共享同一 groupId 标识同源整块；普通块 None）
 - page: 1
 - bbox: None
 - html: None
@@ -42,38 +33,80 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger("docling_analysis_service.parsers.code_parser")
 
-# 与旧 Java CodeChunkStrategy.DEFAULT_MAX_CHUNK_SIZE 一致
 CHUNK_THRESHOLD_CODE = 1500
 
-# 旧 Java CODE_EXTENSIONS（忠实复刻）
 CODE_EXTENSIONS = {
     "java", "py", "js", "ts", "go", "rs", "c", "cpp", "cs", "kt",
     "rb", "php", "swift", "scala", "hs", "lua", "r", "sh", "bash", "sql",
 }
 
-# 旧 Java CODE_INDICATOR（忠实复刻，包括 \\b 边界与空格）
 CODE_INDICATOR = re.compile(
     r"\b(package|import|class|public class|private class|def |function |fn |func |int main|void main)\b"
 )
 
-# 旧 Java CLASS_PATTERN（忠实复刻，MULTILINE）
-# group(1)=前导空白 group(2)=修饰符 group(3)=class/interface/enum/... group(4)=类名
+# 旧 Java CLASS_PATTERN（迁移并健全化）：
+# 旧版缺陷：
+# 1) 修饰符组只允许 0~1 个（(?:public|...|data)?\s*），"public final class X" /
+#    "public abstract class X" / "public static class X" 等多修饰符声明漏判
+# 2) 缺 export / override（TS export class、Kotlin override class）
+# 3) "enum class Foo" / "sealed class Foo" 这类"关键字 class 名字"被误判：
+#    旧版正则在 "enum class Foo" 上把 group(3) 命中 "enum"、group(4) 命中 "class"，name 取错
+# 健全化：修饰符组改为 (mod\s+)* 多修饰符；并在主关键字后允许可选的 "class"/"struct"
+# （Kotlin/Scala 的 "enum class" / "data class" / "sealed class"），name 正确取到 Foo。
+# group(1)=前导空白 group(2)=修饰符组 group(3)=class/interface/enum/... group(4)=类名
 CLASS_PATTERN = re.compile(
-    r"^(\s*)((?:public|private|protected|abstract|final|sealed|open|data)?\s*)"
-    r"(class|interface|enum|object|trait|struct|impl)\s+(\w+)",
+    r"^(\s*)"
+    r"((?:(?:public|private|protected|abstract|final|sealed|open|data|static|inline|override|export)\s+)*)"
+    r"(class|interface|enum|object|trait|struct|impl|module)(?:\s+(?:class|struct))?\s+(\w+)",
     re.MULTILINE,
 )
 
-# 旧 Java FUNCTION_PATTERN（忠实复刻，MULTILINE）
-# group(1)=前导空白 group(2)=修饰符组（最后一个）
+# 旧 Java FUNCTION_PATTERN（迁移并健全化）：
+# 原始 Java 版本：
+#   ^(\s*)((?:public|private|protected|static|final|abstract|synchronized|async|def|fn|func|function)\s+)+
+#   \S+\s+\w+\s*\([^)]*\)\s*\{?
+# 原版问题：
+# 1) 修饰符组用 (mod\s+)+，要求"至少一个修饰符"，导致无修饰符的 JS `function foo(){}` /
+#    Python `def foo():` / Go `func foo(){}` / Rust `fn foo(){}` / Kotlin `fun foo(){}`
+#    ——各语言最常见的函数声明写法——全部漏判
+# 2) 关键字 def/fn/func/fun/function 被塞进"修饰符组"而非"关键字前缀"，
+#    其后又要求 "\S+\s+\w+\s*\("（返回类型 + 名字），无返回类型的签名漏判
+# 3) Kotlin `fun` 关键字缺失；Rust `pub fn`、Go `func main(){` 缺失
+# 4) C 风格 `int main(){` / `void main(){`（无修饰符前缀）漏判
+# 5) `if(...)` / `while(...)` / `for(...)` / `switch(...)` / `catch(...)` /
+#    `synchronized(...)` 这类控制流语句会被误判为函数声明
+# 健全化：分两个分支
+#   A：前缀引导 —— 至少一个修饰符（含 pub/override/export/async/open 等），
+#      或 def/fn/func/fun/function/sub/proc 关键字前缀；
+#      后接可选返回类型 + name + (params) + 可选后缀（-> | => | : type）+ 可选 {
+#      覆盖现代语言（Java/C#/TS/JS/Kotlin/Python/Go/Rust/Swift）的函数声明
+#   B：C 风格顶级声明 —— TYPE NAME(...){，必须有 {（避免把函数调用 `foo(x);` 误判）
+#      覆盖 C/C++ 的 `int main(){`、`void helper(int x){` 等
+# 命名捕获 nameA / nameB 即函数名；_extract_func_name 也作用于整段匹配串兜底取名
 FUNCTION_PATTERN = re.compile(
-    r"^(\s*)((?:public|private|protected|static|final|abstract|synchronized|async|def|fn|func|function)\s+)+"
-    r"\S+\s+\w+\s*\([^)]*\)\s*\{?",
+    r"^(\s*)"
+    r"(?:"
+    # 分支 A：前缀引导（修饰符 或 关键字）
+    r"(?P<prefix>(?:(?:public|private|protected|static|final|abstract|sealed|synchronized|open|override|async|export|default|native|inline|pub)\s+)+"
+    r"|(?:def|fn|func|fun|function|sub|proc)\s+)"
+    r"(?:[\w<>:\[\],\s]*?\s+)?(?P<nameA>\w+)\s*\([^)]*\)\s*(?:(?:->|=>|:[^\n{]*)?\s*)?\{?"
+    r"|"
+    # 分支 B：C 风格顶级声明 TYPE NAME(...) {
+    r"(?P<ctype>[\w:<>\[\],\s]+?)\s+(?P<nameB>\w+)\s*\([^)]*\)\s*\{"
+    r")",
     re.MULTILINE,
 )
 
 # 旧 Java extractFuncName 内部正则：\s+(\w+)\s*\(
+# 修饰符引导型签名下，匹配最后一个 "标识符 (" 即函数名（search 取首个命中，
+# 对 `public void foo(` 命中 "foo"；对 `private static int bar(` 也命中 "bar"）
 _FUNC_NAME_PATTERN = re.compile(r"\s+(\w+)\s*\(")
+
+# 关键字引导型签名的函数名提取：def/fn/func/function/fun name( → 取 name
+# 配合 _extract_func_name 优先使用，避免把关键字本身误当函数名
+_KEYWORD_FUNC_NAME_PATTERN = re.compile(
+    r"\b(?:def|fn|func|function|fun)\s+(\w+)\s*\("
+)
 
 # 扩展名 → 语言映射（优先于 CODE_INDICATOR 启发）
 _EXT_LANGUAGE_MAP = {
@@ -110,10 +143,10 @@ _FALLBACK_LINES_PER_SUB = 40
 
 
 class CodeParser:
-    """源代码文件解析器，基于标准库 re 实现，零新增依赖。
+    """源代码文件解析器，基于标准库 re 实现
 
     忠实迁移旧 Java CodeChunkStrategy 的正则与 splitByClassOrFunction 逻辑，
-    超长块拆分改用「虚拟父 Node + 逻辑行子 Node + parentId」方案。
+    超长块拆分改用「内部拆为多个小 Node + 共享 groupId」方案（不再输出整块超长镜像父 Node）。
     """
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD_CODE):
@@ -135,7 +168,7 @@ class CodeParser:
         :param document_id: 文档 ID（保留参数，与 parser.py 风格一致）
         :param user_id: 用户 ID（保留参数，与 parser.py 风格一致）
         :return: Node dict 列表，每个 Node 形如
-                 {id, type, text, language, titlePath, parentId, page, bbox, html}
+                 {id, type, text, language, titlePath, groupId, page, bbox, html}
         """
         file_path = Path(file_path)
         logger.info("CodeParser 开始解析: %s", file_path)
@@ -153,7 +186,7 @@ class CodeParser:
         # 语言推断：优先扩展名，否则 CODE_INDICATOR 启发
         language = self._detect_language(file_path, text)
 
-        # 类/函数边界拆分（含 parentId 标注）
+        # 类/函数边界拆分（含 groupId 标注）
         nodes = self._split_by_class_or_function(text, language)
 
         logger.info(
@@ -173,7 +206,7 @@ class CodeParser:
         与 Java 的区别：
         - 输出 Node dict（而非 ChunkResult）
         - 超长块不再走 RecursiveTextSplitter.refine，
-          改为输出虚拟父 Node + 逻辑行子 Node（带 parentId）
+          改为输出多个小 Node（内部语义/逻辑行切分），共享同一 groupId
         """
         results: List[dict] = []
         if not text:
@@ -201,7 +234,7 @@ class CodeParser:
                 results.append(
                     self._make_code_node(
                         next(node_seq), trimmed, language=language,
-                        title_path=None, parent_id=None,
+                        title_path=None, group_id=None,
                     )
                 )
             return results
@@ -217,7 +250,7 @@ class CodeParser:
                 results.append(
                     self._make_code_node(
                         next(node_seq), preamble, language=language,
-                        title_path=None, parent_id=None,
+                        title_path=None, group_id=None,
                     )
                 )
 
@@ -245,46 +278,49 @@ class CodeParser:
                 results.append(
                     self._make_code_node(
                         next(node_seq), block_text, language=language,
-                        title_path=block_title_path, parent_id=None,
+                        title_path=block_title_path, group_id=None,
                     )
                 )
             else:
-                # 超长块：先输出父 Node（parentId=None），再拆子 Node（parentId=父id）
-                parent_id = next(node_seq)
-                results.append(
-                    self._make_code_node(
-                        parent_id, block_text, language=language,
-                        title_path=block_title_path, parent_id=None,
-                    )
-                )
+                # 超长块：内部拆为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
+                group_id = next(node_seq)
                 sub_chunks = self._split_oversized_block(block_text, self.threshold)
                 for sub_text in sub_chunks:
                     if sub_text and sub_text.strip():
                         results.append(
                             self._make_code_node(
                                 next(node_seq), sub_text.strip(), language=language,
-                                title_path=block_title_path, parent_id=parent_id,
+                                title_path=block_title_path, group_id=group_id,
                             )
                         )
 
         return results
 
-    # ============================== extractFuncName（忠实复刻） ==============================
+    # ============================== extractFuncName（迁移并健壮化） ==============================
 
     @staticmethod
     def _extract_func_name(signature: str) -> str:
         """
         从函数签名中提取函数名。
-        （忠实复刻 Java CodeChunkStrategy.extractFuncName）
 
-        正则：\\s+(\\w+)\\s*\\(
-        - 匹配第一个「空白 + 标识符 + 空白 + (」中的标识符
-        - 找不到则返回签名压缩空白后前 30 字符（与 Java 一致）
+        旧 Java 版本用 \\s+(\\w+)\\s*\\( 取第一个"空白+标识符+(" 的标识符，
+        但对关键字型函数（def foo() / function foo()）会误把关键字本身当函数名
+        （因为关键字后紧跟空格再接 name(，\\s+(\\w+)\\s*\\( 命中的是 "foo"，OK；
+        但对 `public void foo(` 会取到 "foo" 也 OK；对 `func (r Receiver) foo(`
+        会取到 "Receiver" —— 但这种 Go receiver 签名本身不在覆盖范围内，可接受）。
+
+        健壮化：先尝试匹配"关键字/修饰符 + name(" 模式，定位真正的函数名标识符；
+        退回旧 \\s+(\\w+)\\s*\\( 兜底；都失败则压缩空白取前 30 字符。
         """
+        # 1. 关键字引导：def/fn/func/function/fun name( → 取关键字后的标识符
+        m = _KEYWORD_FUNC_NAME_PATTERN.search(signature)
+        if m:
+            return m.group(1)
+        # 2. 修饰符引导：取紧邻 ( 的标识符（函数名）—— 即最后一个 \w+ 后接 (
         m = _FUNC_NAME_PATTERN.search(signature)
         if m:
             return m.group(1)
-        # 兜底：压缩空白后取前 30 字符（与 Java signature.replaceAll("\\s+"," ").substring(0, min(30, len)) 一致）
+        # 3. 兜底：压缩空白后取前 30 字符
         compact = re.sub(r"\s+", " ", signature)
         return compact[: min(30, len(compact))]
 
@@ -296,7 +332,7 @@ class CodeParser:
         """
         拆分超长代码块为子 Node 文本列表。
         优先级：空行/方法边界 → 句子分隔 → 固定行数兜底。
-        子 Node 由调用方标注 parentId 指向同源父 Node。
+        子 Node 由调用方标注同一 groupId 标识同源整块。
 
         与旧 Java RecursiveTextSplitter.refine 的区别：
         - 不做 overlap
@@ -453,11 +489,13 @@ class CodeParser:
         text: str,
         language: Optional[str],
         title_path: Optional[str],
-        parent_id: Optional[str],
+        group_id: Optional[str],
     ) -> dict:
         """
         构造一个 code Node dict（与 Java 侧 NodeDTO 协议对应）。
         代码文件无页面/bbox/html 信息。
+        group_id 非空表示该 Node 属于「同源整块」拆出的小 Node（超长类/函数块语义切分产物），
+        Java 侧据此聚同组 Node 优先组装并合成父子 chunk；普通块 group_id=None。
         """
         return {
             "id": node_id,
@@ -465,7 +503,7 @@ class CodeParser:
             "text": text,
             "language": language,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
             "html": None,

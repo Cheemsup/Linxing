@@ -1,6 +1,7 @@
-package org.linxing.linxing_agent.rag.node;
+package org.linxing.linxing_agent.rag.enhancement;
 
 import org.linxing.linxing_agent.rag.config.RagProperties;
+import org.linxing.linxing_agent.rag.node.*;
 
 import java.util.List;
 import java.util.stream.Collectors;

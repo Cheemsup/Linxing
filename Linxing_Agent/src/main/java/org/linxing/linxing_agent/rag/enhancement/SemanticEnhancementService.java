@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.rag.service;
+package org.linxing.linxing_agent.rag.enhancement;
 
 import org.linxing.linxing_agent.rag.node.DocumentNode;
 

@@ -1,9 +1,8 @@
-package org.linxing.linxing_agent.rag.service;
+package org.linxing.linxing_agent.rag.parse;
 
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.dto.ParseResult;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
-import org.linxing.linxing_agent.rag.node.NodeConverter;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -13,7 +12,7 @@ import java.util.List;
 /**
  * 文档分析服务门面（Facade）。
  * 优先调用 Python 服务获取 Node 序列；失败时 fallback 到 Java 备用方案。
- * //TODO：需说明目前备选方案还未实现，调用会报错（0702）；调整该文件的位置，现在的位置是接口的层次
+ * //TODO：需说明目前备选方案还未实现，调用会报错（0702）
  */
 @Slf4j
 @Service

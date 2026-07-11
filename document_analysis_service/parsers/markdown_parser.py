@@ -2,17 +2,14 @@
 Markdown 解析器
 
 职责：将 Markdown 文档解析为统一的 Node JSON 序列。
-对应 Java 侧 MarkdownChunkStrategy.splitByHeadings / processNoTitleDocument 等逻辑。
 
 选型决策（reference/TODOS/betterRAG/0702_dealWithOldStrategy.md 第 7.3 节）：
-- 使用 mistune 3（mistune>=3.3.2）做结构识别（heading level、paragraph 边界、list/list_item 边界、
-  code_block fence 边界、table 边界）。
-- mistune 只负责"识别结构边界"，**titlePath 栈推导、超长拆分、parentId 标注、无标题三级降级**
-  仍是本系统手写领域逻辑（用标准库 re）。
+- 使用 mistune 3（mistune>=3.3.2）做结构识别（heading level、paragraph 边界、list/list_item 边界、code_block fence 边界、table 边界）。
+- mistune 只负责"识别结构边界"，**titlePath 栈推导、超长拆分、groupId 标注、无标题三级降级**仍是本系统手写领域逻辑（用标准库 re）。
 
-核心策略（忠实复刻旧 Java MarkdownChunkStrategy）：
+核心策略：
 1. 按标题拆分（只识别 #{1,3} 一二三级），维护标题栈推导 titlePath（格式 "一级 > 二级 > 三级"），清下级
-2. 超长 section（> threshold，默认 1000）按句子拆分（中英文标点 [。！？.!?；;]），标 parentId 指向同源 Level1 单元
+2. 超长 section（> threshold，默认 1000）在内部按句子拆分为多个小 Node（中英文标点 [。！？.!?；;]），共享同一 groupId（同源整块），不再返回整块超长 Node
 3. 无标题文档三级降级：强段落（多换行/双换行）→ 弱段落（单换行，保持列表项完整）→ 句子，阈值累加
 4. 标题前有 preamble（前置文本）也作为 section
 5. code_block / table 作为原子块不可拆（即使超长也整体输出，不拆句子）
@@ -25,7 +22,7 @@ Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - language: str（code 用，可 None）
 - html: str（table 用，转 HTML 字符串）
 - titlePath: str（标题路径如 "第一章 > 第一节"，非标题块也带其所属标题路径；无标题上下文时 None）
-- parentId: str 或 None（超长 section 拆出的子 Node，parentId 指向同源 Level1 父 Node 的 id）
+- groupId: str 或 None（超长 section 内部拆出的小 Node 共享同一 groupId 标识同源整块；普通块 None）
 - page: int（Markdown 无分页，固定 1）
 - bbox: None
 """
@@ -52,16 +49,15 @@ try:
 except ImportError:
     mistune = None  # type: ignore
 
-# 与旧 Java MarkdownChunkStrategy.CHUNK_THRESHOLD 一致
 CHUNK_THRESHOLD = 1000
 
-# 只识别一二三级标题（#{1,3}，与 Java HEADING_PATTERN 一致）
+# 只识别一二三级标题
 HEADING_PATTERN = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 
-# 句子分隔符（中英文，与 Java SENTENCE_DELIMITER 一致）
+# 句子分隔符
 SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
 
-# 强段落分隔：多换行/双换行（与 Java STRONG_PARAGRAPH_SEP 一致）
+# 强段落分隔：多换行/双换行
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
 
 # Markdown 扩展名
@@ -79,12 +75,12 @@ class MarkdownParser:
     """Markdown 解析器，基于 mistune 3 AST + 手写领域逻辑。
 
     mistune 产出的 block token 是扁平列表（heading 与其后段落是兄弟），
-    本类用栈推导 titlePath，并处理超长拆分、parentId 标注、无标题三级降级。
+    本类用栈推导 titlePath，并处理超长拆分、groupId 标注、无标题三级降级。
     """
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
         """
-        :param chunk_threshold: 拆分阈值（默认 1000，与旧 Java 一致）
+        :param chunk_threshold: 拆分阈值（默认 1000）
         """
         self.threshold = chunk_threshold
         if mistune is None:
@@ -111,7 +107,7 @@ class MarkdownParser:
         :param document_id: 文档 ID（保留参数，与 parser.py 风格一致）
         :param user_id: 用户 ID（保留参数，与 parser.py 风格一致）
         :return: Node dict 列表，每个 Node 形如
-                 {id, type, text, level, language, html, titlePath, parentId, page, bbox}
+                 {id, type, text, level, language, html, titlePath, groupId, page, bbox}
         """
         file_path = Path(file_path)
         logger.info("MarkdownParser 开始解析: %s", file_path)
@@ -166,7 +162,7 @@ class MarkdownParser:
             if preamble:
                 results.append(
                     self._make_text_node(
-                        next(node_seq), preamble, title_path=None, parent_id=None
+                        next(node_seq), preamble, title_path=None, group_id=None
                     )
                 )
 
@@ -229,7 +225,7 @@ class MarkdownParser:
         1. 用 mistune AST 模式识别 block 边界（paragraph / code_block / table / list）
         2. 对于每个 block：
            - code_block / table → 原子块，整体输出一个 Node（不拆分）
-           - paragraph / list → 检查是否超长，超长则拆句子 + parentId
+           - paragraph / list → 检查是否超长，超长则内部拆句子为多小 Node + 共享 groupId
         """
         results: List[dict] = []
 
@@ -273,7 +269,7 @@ class MarkdownParser:
                             code_text.strip(),
                             language=language,
                             title_path=title_path,
-                            parent_id=None,
+                            group_id=None,
                         )
                     )
 
@@ -286,7 +282,7 @@ class MarkdownParser:
                             next(node_seq),
                             html=table_html,
                             title_path=title_path,
-                            parent_id=None,
+                            group_id=None,
                         )
                     )
 
@@ -300,20 +296,12 @@ class MarkdownParser:
                                 next(node_seq),
                                 para_text.strip(),
                                 title_path=title_path,
-                                parent_id=None,
+                                group_id=None,
                             )
                         )
                     else:
-                        # 超长段落：拆句子 + parentId
-                        parent_id = next(node_seq)
-                        results.append(
-                            self._make_text_node(
-                                parent_id,
-                                para_text.strip(),
-                                title_path=title_path,
-                                parent_id=None,
-                            )
-                        )
+                        # 超长段落：内部拆句子为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
+                        group_id = next(node_seq)
                         sub_chunks = self._split_by_sentence_with_threshold(
                             para_text, self.threshold
                         )
@@ -324,7 +312,7 @@ class MarkdownParser:
                                         next(node_seq),
                                         sub_text.strip(),
                                         title_path=title_path,
-                                        parent_id=parent_id,
+                                        group_id=group_id,
                                     )
                                 )
 
@@ -338,20 +326,12 @@ class MarkdownParser:
                                 next(node_seq),
                                 list_text.strip(),
                                 title_path=title_path,
-                                parent_id=None,
+                                group_id=None,
                             )
                         )
                     else:
-                        # 超长列表：拆句子 + parentId（列表项整体不拆散）
-                        parent_id = next(node_seq)
-                        results.append(
-                            self._make_text_node(
-                                parent_id,
-                                list_text.strip(),
-                                title_path=title_path,
-                                parent_id=None,
-                            )
-                        )
+                        # 超长列表：内部拆句子为多个小 Node，共享同一 groupId（列表项整体不拆散；不再输出整块超长镜像父 Node）
+                        group_id = next(node_seq)
                         sub_chunks = self._split_by_sentence_with_threshold(
                             list_text, self.threshold
                         )
@@ -362,7 +342,7 @@ class MarkdownParser:
                                         next(node_seq),
                                         sub_text.strip(),
                                         title_path=title_path,
-                                        parent_id=parent_id,
+                                        group_id=group_id,
                                     )
                                 )
 
@@ -376,19 +356,12 @@ class MarkdownParser:
                                 next(node_seq),
                                 quote_text.strip(),
                                 title_path=title_path,
-                                parent_id=None,
+                                group_id=None,
                             )
                         )
                     else:
-                        parent_id = next(node_seq)
-                        results.append(
-                            self._make_text_node(
-                                parent_id,
-                                quote_text.strip(),
-                                title_path=title_path,
-                                parent_id=None,
-                            )
-                        )
+                        # 超长引用：内部拆句子为多个小 Node，共享同一 groupId
+                        group_id = next(node_seq)
                         sub_chunks = self._split_by_sentence_with_threshold(
                             quote_text, self.threshold
                         )
@@ -399,7 +372,7 @@ class MarkdownParser:
                                         next(node_seq),
                                         sub_text.strip(),
                                         title_path=title_path,
-                                        parent_id=parent_id,
+                                        group_id=group_id,
                                     )
                                 )
 
@@ -433,26 +406,19 @@ class MarkdownParser:
                 if buffer:
                     results.append(
                         self._make_text_node(
-                            next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                            next(node_seq), buffer.strip(), title_path=None, group_id=None
                         )
                     )
                     buffer = ""
 
-                # 超长段落整体作为虚拟父 Node（parentId=None）
-                parent_id = next(node_seq)
-                results.append(
-                    self._make_text_node(
-                        parent_id, trimmed_para.strip(), title_path=None, parent_id=None
-                    )
-                )
-
-                # 三级降级拆分：强段落 → 弱段落 → 句子
+                # 超长段落：内部拆为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
+                group_id = next(node_seq)
                 sub_chunks = self._split_oversized_paragraph(trimmed_para, self.threshold)
                 for sub in sub_chunks:
                     if sub and sub.strip():
                         results.append(
                             self._make_text_node(
-                                next(node_seq), sub.strip(), title_path=None, parent_id=parent_id
+                                next(node_seq), sub.strip(), title_path=None, group_id=group_id
                             )
                         )
             else:
@@ -462,7 +428,7 @@ class MarkdownParser:
                     # 超过阈值，先输出当前 buffer
                     results.append(
                         self._make_text_node(
-                            next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                            next(node_seq), buffer.strip(), title_path=None, group_id=None
                         )
                     )
                     buffer = trimmed_para
@@ -475,7 +441,7 @@ class MarkdownParser:
         if buffer:
             results.append(
                 self._make_text_node(
-                    next(node_seq), buffer.strip(), title_path=None, parent_id=None
+                    next(node_seq), buffer.strip(), title_path=None, group_id=None
                 )
             )
 
@@ -764,7 +730,7 @@ class MarkdownParser:
                         code_text,
                         language=language,
                         title_path=title_path,
-                        parent_id=None,
+                        group_id=None,
                     )
                 )
 
@@ -784,7 +750,7 @@ class MarkdownParser:
                             next(node_seq),
                             html=html,
                             title_path=title_path,
-                            parent_id=None,
+                            group_id=None,
                         )
                     )
 
@@ -799,19 +765,12 @@ class MarkdownParser:
                         next(node_seq),
                         remaining_text,
                         title_path=title_path,
-                        parent_id=None,
+                        group_id=None,
                     )
                 )
             else:
-                parent_id = next(node_seq)
-                results.append(
-                    self._make_text_node(
-                        parent_id,
-                        remaining_text,
-                        title_path=title_path,
-                        parent_id=None,
-                    )
-                )
+                # 超长剩余文本：内部拆句子为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
+                group_id = next(node_seq)
                 sub_chunks = self._split_by_sentence_with_threshold(
                     remaining_text, self.threshold
                 )
@@ -822,7 +781,7 @@ class MarkdownParser:
                                 next(node_seq),
                                 sub_text.strip(),
                                 title_path=title_path,
-                                parent_id=parent_id,
+                                group_id=group_id,
                             )
                         )
 
@@ -881,9 +840,9 @@ class MarkdownParser:
         node_id: str,
         text: str,
         title_path: Optional[str],
-        parent_id: Optional[str],
+        group_id: Optional[str],
     ) -> dict:
-        """构造一个 text Node dict"""
+        """构造一个 text Node dict。group_id 非空表示同源整块拆出的子 Node（共享同 groupId）。"""
         return {
             "id": node_id,
             "type": "text",
@@ -892,7 +851,7 @@ class MarkdownParser:
             "language": None,
             "html": None,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
         }
@@ -913,7 +872,7 @@ class MarkdownParser:
             "language": None,
             "html": None,
             "titlePath": title_path,
-            "parentId": None,
+            "groupId": None,
             "page": 1,
             "bbox": None,
         }
@@ -924,9 +883,9 @@ class MarkdownParser:
         text: str,
         language: Optional[str],
         title_path: Optional[str],
-        parent_id: Optional[str],
+        group_id: Optional[str],
     ) -> dict:
-        """构造一个 code Node dict"""
+        """构造一个 code Node dict。group_id 非空表示同源整块拆出的子 Node。"""
         return {
             "id": node_id,
             "type": "code",
@@ -935,7 +894,7 @@ class MarkdownParser:
             "language": language,
             "html": None,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
         }
@@ -945,9 +904,9 @@ class MarkdownParser:
         node_id: str,
         html: str,
         title_path: Optional[str],
-        parent_id: Optional[str],
+        group_id: Optional[str],
     ) -> dict:
-        """构造一个 table Node dict"""
+        """构造一个 table Node dict。group_id 非空表示同源整块拆出的子 Node。"""
         return {
             "id": node_id,
             "type": "table",
@@ -956,7 +915,7 @@ class MarkdownParser:
             "language": None,
             "html": html,
             "titlePath": title_path,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
         }

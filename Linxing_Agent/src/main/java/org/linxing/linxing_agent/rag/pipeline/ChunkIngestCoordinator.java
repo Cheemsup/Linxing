@@ -14,10 +14,10 @@ import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.rag.node.DocumentNode;
-import org.linxing.linxing_agent.rag.node.NodeBasedChunkBuilder;
+import org.linxing.linxing_agent.rag.chunk.NodeBasedChunkBuilder;
 import org.linxing.linxing_agent.rag.node.NodeType;
 import org.linxing.linxing_agent.rag.pipeline.handler.EmbeddingPersist;
-import org.linxing.linxing_agent.rag.service.SemanticEnhancementService;
+import org.linxing.linxing_agent.rag.enhancement.SemanticEnhancementService;
 import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +36,7 @@ import java.util.Set;
  */
 @Slf4j
 @Component
-public class ChunkPipelineCoordinator {
+public class ChunkIngestCoordinator {
 
     private final ChunkProcessingPipeline pipeline;
     private final EmbeddingPersist embeddingPersist;
@@ -48,7 +48,7 @@ public class ChunkPipelineCoordinator {
     private final NodeBasedChunkBuilder nodeBasedChunkBuilder;
     private final SemanticEnhancementService semanticEnhancementService;
 
-    public ChunkPipelineCoordinator(
+    public ChunkIngestCoordinator(
             ChunkProcessingPipeline pipeline,
             EmbeddingPersist embeddingPersist,
             ChunkMapper chunkMapper,
@@ -99,7 +99,6 @@ public class ChunkPipelineCoordinator {
         int maxChunkSize = ragProperties.getEmbedding().getChunkSize();
 
         // NodeBasedChunkBuilder 将各个 Node 按照文档顺序排好以及组合，最终得到经由了Node组合的chunk列表
-        // （含父子装配：超长单元镜像为 Level1 父块 + Level2 子块，parentChunkId 用结果索引表达）
         List<ChunkResult> chunkResults = nodeBasedChunkBuilder.build(nodes, maxChunkSize);
 
         if (chunkResults.isEmpty()) {
@@ -408,8 +407,8 @@ public class ChunkPipelineCoordinator {
             // 把 metadata 中的还原图心字段拷贝过来（imagePath/caption/code/language/html/formula 等）
             for (Map.Entry<String, Object> e : meta.entrySet()) {
                 String k = e.getKey();
-                // 跳过内部使用的辅助字段（titlePath/parentId 已在 chunk 级字段表达）
-                if ("titlePath".equals(k) || "parentId".equals(k)) {
+                // 跳过内部使用的辅助字段（titlePath/groupId 已在 chunk 级字段表达）
+                if ("titlePath".equals(k) || "groupId".equals(k)) {
                     continue;
                 }
                 entry.putIfAbsent(k, e.getValue());

@@ -2,7 +2,6 @@
 行式文本解析器（log / csv / tsv / txt）
 
 职责：将行式文本文件解析为统一的 Node JSON 序列。
-对应 Java 侧 LineBasedChunkStrategy.splitWithThreeLevelStrategy 等逻辑。
 
 核心策略 —— 三级降级拆分 + 阈值累加：
 1. 强段落分隔（多换行/双换行）拆分，正常段落（≤ threshold*1.5）累加到阈值输出
@@ -13,15 +12,12 @@
 4. 列表项识别：- / * / + / 数字序号
 5. 句子分隔 [。！？.!?；;]，保留分隔符在句末，累加到阈值切
 
-本次改造新增 parentId：超长段落整体先作为虚拟父 Node（parentId=None），
-三级降级拆出的每个子 Node parentId = 父 id；普通累加输出的块 parentId=None。
-
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - id: str "n1"... 自管递增
 - type: "text"
 - text: 块文本
 - titlePath: None（行式文档无标题路径）
-- parentId: str 或 None（超长段落拆出的子 Node 指向同源父 Node id；普通块 None）
+- groupId: str 或 None（超长段落内部拆出的小 Node 共享同一 groupId 标识同源整块；普通块 None）
 - page: 1
 - bbox: None
 - language: None
@@ -35,13 +31,12 @@ from typing import List, Optional
 
 logger = logging.getLogger("docling_analysis_service.parsers.linebased_parser")
 
-# 与旧 Java LineBased 默认一致
 CHUNK_THRESHOLD = 600
 
-# 强段落分隔：双换行或多换行（独立语义块），与 Java 侧 STRONG_PARAGRAPH_SEP 一致
+# 强段落分隔：双换行或多换行（独立语义块）
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
 
-# 句子分隔符（中英文），与 Java 侧 SENTENCE_DELIMITER 一致
+# 句子分隔符（中英文）
 SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
 
 # 行式文本扩展名
@@ -49,7 +44,7 @@ LINE_BASED_EXTENSIONS = {"log", "csv", "tsv", "txt"}
 
 
 class LineBasedParser:
-    """行式文本解析器，基于标准库 re 实现，零新增依赖。"""
+    """行式文本解析器，基于标准库 re 实现"""
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
         """
@@ -72,7 +67,7 @@ class LineBasedParser:
         :param document_id: 文档 ID（保留参数，与 parser.py 风格一致）
         :param user_id: 用户 ID（保留参数，与 parser.py 风格一致）
         :return: Node dict 列表，每个 Node 形如
-                 {id, type, text, titlePath, parentId, page, bbox, language, html}
+                 {id, type, text, titlePath, groupId, page, bbox, language, html}
         """
         file_path = Path(file_path)
         logger.info("LineBasedParser 开始解析: %s", file_path)
@@ -88,7 +83,7 @@ class LineBasedParser:
             logger.info("LineBasedParser 文件内容为空: %s", file_path)
             return []
 
-        # 三级降级拆分（含 parentId 标注）
+        # 三级降级拆分（含 groupId 标注）
         nodes = self._split_with_three_level_strategy(text)
 
         logger.info(
@@ -105,7 +100,7 @@ class LineBasedParser:
 
         与 Java splitWithThreeLevelStrategy 等价，区别在于：
         - 输出的是 Node dict 列表（而非 ChunkResult）
-        - 超长段落拆出的子 Node 标注 parentId 指向虚拟父 Node
+        - 超长段落内部拆出的小 Node 共享同一 groupId（不再输出整块超长镜像父 Node），Java 侧据 groupId 合成父子 chunk
         """
         results: List[dict] = []
         if not text:
@@ -126,22 +121,18 @@ class LineBasedParser:
             if len(trimmed_para) > self.threshold * 1.5:
                 # 先 flush 当前 buffer
                 if buffer:
-                    results.append(self._make_text_node(next(node_seq), buffer.strip(), parent_id=None))
+                    results.append(self._make_text_node(next(node_seq), buffer.strip(), group_id=None))
                     buffer = ""
 
-                # 超长段落整体作为虚拟父 Node（parentId=None）
-                parent_id = next(node_seq)
-                results.append(
-                    self._make_text_node(parent_id, trimmed_para.strip(), parent_id=None)
-                )
-
-                # 三级降级拆分：强段落 → 弱段落 → 句子
+                # 超长段落：内部拆为多个小 Node，共享同一 groupId（标识同源整块）；
+                # 不再输出整块超长的镜像父 Node（Java 侧据 groupId 合成父子 chunk）
+                group_id = next(node_seq)
                 sub_chunks = self._split_oversized_paragraph(trimmed_para, self.threshold)
                 for sub in sub_chunks:
                     if sub and sub.strip():
                         results.append(
                             self._make_text_node(
-                                next(node_seq), sub.strip(), parent_id=parent_id
+                                next(node_seq), sub.strip(), group_id=group_id
                             )
                         )
             else:
@@ -149,7 +140,7 @@ class LineBasedParser:
                 add_len = len(trimmed_para) + (2 if buffer else 0)
                 if buffer and len(buffer) + add_len > self.threshold:
                     # 超过阈值，先输出当前 buffer
-                    results.append(self._make_text_node(next(node_seq), buffer.strip(), parent_id=None))
+                    results.append(self._make_text_node(next(node_seq), buffer.strip(), group_id=None))
                     buffer = trimmed_para
                 else:
                     if buffer:
@@ -158,7 +149,7 @@ class LineBasedParser:
 
         # 输出剩余 buffer
         if buffer:
-            results.append(self._make_text_node(next(node_seq), buffer.strip(), parent_id=None))
+            results.append(self._make_text_node(next(node_seq), buffer.strip(), group_id=None))
 
         return results
 
@@ -413,18 +404,20 @@ class LineBasedParser:
 
     @staticmethod
     def _make_text_node(
-        node_id: str, text: str, parent_id: Optional[str]
+        node_id: str, text: str, group_id: Optional[str]
     ) -> dict:
         """
         构造一个 text Node dict（与 Java 侧 NodeDTO 协议对应）。
         行式文档无标题路径、无页面/bbox/html/language 信息。
+        group_id 非空表示该 Node 属于「同源整块」拆出的小 Node（超长段落语义切分产物），
+        Java 侧据此聚同组 Node 优先组装并合成父子 chunk；普通块 group_id=None。
         """
         return {
             "id": node_id,
             "type": "text",
             "text": text,
             "titlePath": None,
-            "parentId": parent_id,
+            "groupId": group_id,
             "page": 1,
             "bbox": None,
             "language": None,

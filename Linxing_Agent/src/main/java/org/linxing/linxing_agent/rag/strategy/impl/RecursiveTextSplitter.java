@@ -21,8 +21,8 @@ import java.util.regex.Pattern;
  * - 弱段落分隔（单换行）：可能是列表项、短句换行等
  * - 列表项识别：以 "- "、"1. "、"* " 开头的行作为原子单元
  *
- * @deprecated 已废弃。超长拆分职责已迁移至 Python 侧 parsers（按句子/逻辑行拆分并标 parentId，
- *             由 NodeBasedChunkBuilder 做父子装配）。仅服务于已废弃的 HtmlChunkStrategy/
+ * @deprecated 已废弃。超长拆分职责已迁移至 Python 侧 parsers（按句子/逻辑行拆分并标 groupId，
+ *             由 NodeBasedChunkBuilder 据 groupId 合成父子装配）。仅服务于已废弃的 HtmlChunkStrategy/
  *             CodeChunkStrategy/StructureAwareChunkStrategy 旧路径，保留仅供历史参考，后续应删除。
  */
 @Deprecated

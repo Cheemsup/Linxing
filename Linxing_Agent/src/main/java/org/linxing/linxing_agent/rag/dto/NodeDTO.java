@@ -90,9 +90,10 @@ public class NodeDTO {
     private String titlePath;
 
     /**
-     * 超长单元的父 Node ID（用于父子 chunk）。
-     * Python 侧对超长 section/段落/方法做二次切分时，拆出的子 Node 标 parentId 指向同源 Level1 父 Node 的 id；
-     * 普通块为 null。
+     * 所属组 ID（用于父子 chunk）。
+     * Python 侧对超长 section/段落/方法在内部拆为多个子 Node 时，这些子 Node 共享同一个 groupId
+     * 以标识「同源整块」；普通块（未被拆分）为 null。Java 侧据 groupId 把同组子 Node 优先装在一起，
+     * 并合成为一个不可检索的 Level1 父块（同组子 Node 拼接≈原整块），与拆出的多个 Level2 子块建立父子关系。
      */
-    private String parentId;
+    private String groupId;
 }

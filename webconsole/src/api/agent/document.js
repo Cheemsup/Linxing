@@ -19,10 +19,6 @@ export const documentApi = {
     return api.get(`/rag/documents/${id}/preview`)
   },
 
-  getDownloadUrl(id) {
-    return `/api/rag/documents/${id}/download`
-  },
-
   download(id) {
     return api.get(`/rag/documents/${id}/download`, {
       responseType: 'blob'

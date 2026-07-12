@@ -1,368 +1,299 @@
-# Linxing — Agent 驱动的个人学习平台
+# Linxing
 
-基于 **LangChain4j 1.13 + BGE-small-zh-v1.5 + PostgreSQL/pgvector**，自研 ReAct Agent + `langchain4j-agentic` 多 Agent 工作流，在个人笔记知识库之上提供对话问答、学习计划制定、知识测验出题与联网搜索能力。
+Agent 驱动的个人学习平台。基于自研 ReAct Agent 主循环与多 Agent 工作流，在个人笔记知识库（Node-Based RAG）之上提供智能问答、学习计划生成、知识测验出题与联网搜索能力。
 
-## 项目简介
+## 为什么创建这个项目
 
-Linxing 起初是一个个人笔记 RAG 问答系统，现已演进为 Agent 驱动的学习平台：
+个人学习材料（PDF / DOCX / Markdown / 笔记 / 代码片段）分散、难检索、难复习。Linxing 把这些材料统一入库为可检索的知识库，再用 Agent 把"检索"封装成一个可被 LLM 调用的工具，从而让对话、出题、生成学习计划等学习场景都建立在**用户自己的笔记**之上，而非通用语料。
 
-- **RAG 作为能力而非入口**：知识库检索被封装为 `search_knowledge_base` 工具，由 Agent 自主决定何时调用
-- **自研 ReAct Agent**：LLM 推理 → 工具调用 → 结果注入循环，支持渐进披露、JSON 容器结构化输出、工具超时控制
-- **多 Agent 工作流**：基于 `langchain4j-agentic` 的两阶段顺序编排（知识收集 → 内容生成），用于学习计划与测验
-- **HumanInTheLoop**：工作流可在关键节点暂停等待用户澄清回复后继续执行
-- **联网搜索**：集成 Tavily，弥补个人笔记知识盲区
-- **混合检索**：向量检索 + BM25 全文检索 + RRF 融合 + Cross-encoder 重排序
-- **Node-Based RAG**：Python 服务统一解析所有文件类型为原子化 Node 序列；Java 侧做语义增强（VLM/LLM）→ Node 装箱成 Chunk（含 groupId 父子装配）→ 责任链后处理；Display/Index 文本双轨（原文展示 / 语义增强参与检索）
-- **语义缓存**：基于 Redis Vector Set 的回答级语义缓存
-- **树形对话**：多轮对话以树形结构组织，可追溯任意分支
-- **多用户隔离**：JWT 认证 + 用户级数据隔离
+## 适用场景
 
-### 核心特性
+- 把课程笔记 / 技术文档 / 代码整理成个人知识库，并通过对话检索和使用
+- 基于知识库自动生成学习计划与知识测验
+- 在学习中联网补充外部资料并与笔记内容对照
 
-| 能力 | 说明 |
-|------|------|
-| ReAct Agent | 自研主循环，最多 20 步；工具数较多时启用渐进披露（先看目录，再 resolve 取规格） |
-| 多 Agent 工作流 | `study_plan` 工作流：知识收集 Agent + 计划生成 Agent + 条件出题 Agent，顺序编排 |
-| Node-Based RAG | Python 服务统一解析所有文件类型为 Node 序列；Java 侧语义增强 + Node 装箱成 Chunk（含父子装配）+ 文本双轨 |
-| 多格式文档导入 | PDF、Word、Markdown、HTML、Java/Python 等代码、TXT/CSV/TSV/LOG 行式文本（XLSX 暂未实现） |
-| 语义增强 | VLM 图片描述 + LLM 代码解释 / 表格总结，打包临近上下文送模型，结果进入 indexText 参与检索 |
-| 混合检索 | 向量检索 + BM25 + RRF 融合 + ONNX Cross-encoder 重排序 |
-| 学习计划 | 分阶段结构化计划，支持阶段进度更新与 Markdown / HTML 导出 |
-| 知识测验 | 单选 / 多选 / 填空 / 判断 / 简答，作答后自动批改 |
-| 多 LLM | MiniMax、DeepSeek（支持 thinking）、GLM、Kimi（均走 OpenAI 兼容 API） |
+## 核心特性
+
+- **自写 ReAct Agent 主循环**：有上限推理-工具调用-观察循环，SSE 流式推送每一步事件
+- **多 Agent 工作流**：基于 `langchain4j-agentic` 的两阶段编排（集成本地RAG和网络搜索MCP服务知识收集 → 内容生成），支持 HumanInTheLoop 打断补充
+- **Node-Based RAG**：Python 服务统一解析所有文件类型为原子化 Node，Java 侧完成语义增强、父子 Chunk 装箱与向量化。构建Display / Index 文本双轨——展示文本保留原文形态（图片/代码/表格为占位符），索引文本含 VLM/LLM 语义增强结果，分别服务前端渲染与检索
+- **混合检索**：向量召回 + BM25 全文召回 + RRF 融合 + ONNX cross-encoder 重排序
+- **渐进披露**：工具/技能数量超过阈值时，LLM 仅看到 元工具，按需动态注入工具规格
+- **技能系统**：基于 `SKILL.md`（YAML frontmatter）声明式技能，按需加载
+- **Agent 记忆**：滑动窗口记忆 + 摘要压缩记忆（超 token 预算时按工具调用组为原子单位压缩）
+- **多 LLM 供应商管理**：注册中心管理MiniMax / DeepSeek / GLM / Kimi 等多个大模型配置
 
 ## 技术栈
 
-### 后端
-
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Spring Boot | 4.0.5 | 核心框架 |
-| LangChain4j | 1.13.0 | RAG + Agent 框架 |
-| langchain4j-agentic | 1.13.0 | 多 Agent 工作流（@Agent / sequenceBuilder） |
-| langchain4j-tavily | 1.13.0-beta23 | 联网搜索 |
-| PostgreSQL + pgvector | - | 向量数据库 |
-| MyBatis | 4.0.0 | ORM 框架 |
-| Druid | 1.2.28 | 数据库连接池 |
-| ONNX Runtime | 1.20.0 | 重排序模型推理 |
-| BGE-small-zh-v1.5 | - | 中文嵌入模型（512 维） |
-| Redis + Jedis | 6.2.0 | 语义缓存 / 会话消息缓存 |
-| Caffeine | - | 技能指令 LRU 缓存 |
-| JJWT | 0.12.6 | JWT 认证 |
-| Jsoup / Jieba / PDFBox | - | HTML / 中文分词 / PDF 解析 |
-
-### 前端
-
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Vue | 3.2.13 | 前端框架 |
-| Element Plus | 2.13.7 | UI 组件库 |
-| Vue Router | 4 | 路由管理 |
-| Axios | 1.15.2 | HTTP 客户端 |
-| vue3-d3-tree | 1.0.2 | 对话树可视化 |
+| 技术 | 用途 |
+|---|---|
+| Spring Boot 4.0.5 / JDK 17 | 后端框架 |
+| langchain4j 1.13.0 | RAG 框架 |
+| langchain4j-agentic | 多 Agent 工作流编排 |
+| langchain4j-embeddings-bge-small-zh-v15 | 本地嵌入模型（暂定） |
+| langchain4j-pgvector | 向量存储 |
+| langchain4j-onnx-scoring | Cross-encoder 重排序（ms-marco-MiniLM-L-6-v2，暂定） |
+| langchain4j-web-search-engine-tavily | 联网搜索 |
+| MyBatis 4.0.0 + Druid | ORM 与连接池 |
+| PostgreSQL + pgvector | 主库与向量库 |
+| Redis (Jedis) | 会话缓存 / 语义缓存 |
+| JWT (jjwt) | 认证 |
+| Vue 3.2.13 + Element Plus 2.13.7 | 前端 |
+| FastAPI 0.115.6 + Uvicorn | Python 文档解析服务 |
+| PyMuPDF / pdfplumber / python-docx / mistune / beautifulsoup4 | 文档结构解析 |
 
 ## 项目结构
 
 ```
 Linxing/
-├── Linxing_Agent/                         # 后端项目
-│   ├── src/main/java/org/linxing/linxing_agent/
-│   │   ├── common/                        # 共享基础设施
-│   │   │   ├── config/                    # LlmManager / RedisConfig / WebMvcConfig ...
-│   │   │   ├── interceptor/               # JwtTokenUserInterceptor
-│   │   │   ├── security/                  # JwtUtil / PasswordEncoder
-│   │   │   └── result/ userInfoMaintainer/
-│   │   ├── user/                          # 用户域（登录注册）
-│   │   ├── rag/                            # 知识检索域（被封装为 Agent 工具）
-│   │   │   ├── controller/                # DocumentController / IngestController / SearchController / ChunkController
-│   │   │   ├── parse/                     # 文档解析门面（DocumentAnalysisFacade → Python 服务，NodeConverter）
-│   │   │   ├── enhancement/               # Node 语义增强（VLM/LLM：SemanticEnhancementService + 上下文打包）
-│   │   │   ├── chunk/                     # NodeBasedChunkBuilder（Node 装箱成 Chunk，含 groupId 父子装配）
-│   │   │   ├── pipeline/                  # ChunkIngestCoordinator + 责任链 handler（向量化/标题提取/全文索引）
-│   │   │   ├── node/                      # DocumentNode 接口 + 各实现（Text/Heading/Image/Code/Table/Formula）
-│   │   │   ├── render/                    # 已废弃（Display/Index 双轨已内联到 NodeBasedChunkBuilder）
-│   │   │   ├── strategy/                  # 旧 ChunkStrategy 体系（已废弃，保留供历史参考）
-│   │   │   ├── utils/                      # Reranker / RRF / QueryRewriter / EmbeddingHelper
-│   │   │   └── entity/ dto/ vo/ mapper/ config/ constant/
-│   │   └── agent/                          # Agent 域（业务编排核心）
-│   │       ├── core/                       # AgentExecutor（ReAct 主循环）/ AgentContext / AgentPrompts
-│   │       ├── adapter/                    # SseChatAdapter（SSE 流式响应）
-│   │       ├── controller/                 # ChatController / ExamController / StudyPlanController
-│   │       ├── tool/                       # ToolRegistry + 12 个 Tool 实现
-│   │       ├── skill/                      # SkillRegistry / SkillLoader（扫描 SKILL.md）
-│   │       ├── catalog/                    # CatalogProvider 渐进披露目录
-│   │       ├── memory/                     # AgentMemory / WindowMemory / SummaryMemory
-│   │       ├── subagent/                   # 多 Agent 工作流（study_plan 两阶段编排）
-│   │       └── entity/ dto/ vo/ mapper/ exception/
-│   └── src/main/resources/
-│       ├── mapper/{agent,rag}/             # MyBatis XML
-│       ├── skills/                         # SKILL.md 技能定义（study_plan / exam）
-│       ├── models/                         # ONNX 重排序模型（gitignored）
-│       ├── application.yaml                # 主配置（非密钥项）
-│       └── schema.sql                      # 数据库建表脚本
-│
-├── document_analysis_service/              # Python 文档解析服务（Node-Based RAG 的解析入口）
-│   ├── app.py                              # FastAPI 入口（/parse）
-│   └── parsers/                            # router + pdf/docx/markdown/html/code/linebased 各 parser
-│
-└── webconsole/                             # 前端项目
-    └── src/
-        ├── api/{auth,rag/}                 # API 接口
-        ├── components/rag/                 # ChatPanel / ChatTreePanel / QuizPanel / StudyPlanTimeline ...
-        ├── views/{auth,rag}/               # ChatView / IngestView / NotesView / QuizView / SearchView / StudyPlanView
-        ├── layouts/ router/ stores/        # 布局 / 路由 / Pinia
-        └── composables/                    # useMarkdownRenderer
+├── Linxing_Agent/              # Spring Boot 后端（org.linxing.linxing_agent）
+│   └── src/main/java/org/linxing/linxing_agent/
+│       ├── common/             # 共享基础设施：LlmManager / RedisConfig / JWT 拦截器
+│       ├── user/               # 用户认证（注册 / 登录 / 登出）
+│       ├── rag/                # 知识检索域
+│       │   ├── parse/          # Python 服务对接、Node 反序列化
+│       │   ├── enhancement/    # VLM/LLM 语义增强（图片/代码/表格）
+│       │   ├── chunk/          # Node 装箱为 Chunk（父子关系）
+│       │   ├── pipeline/       # 入库责任链协调器
+│       │   ├── service/        # 混合检索、向量持久化、全文索引
+│       │   └── controller/     # 文档上传 / 检索 / 分块上下文接口
+│       └── agent/              # Agent 编排核心
+│           ├── core/           # ReAct 主循环、上下文、提示词、SSE 事件
+│           ├── adapter/        # SSE 流式响应适配器
+│           ├── tool/           # 工具注册中心与各工具实现
+│           ├── skill/          # 技能注册中心（SKILL.md 扫描）
+│           ├── catalog/        # 渐进披露目录
+│           ├── memory/         # 窗口记忆 / 摘要记忆
+│           ├── subagent/       # 学习计划多 Agent 工作流
+│           └── controller/     # 对话 / 测验 / 学习计划接口
+├── document_analysis_service/  # Python FastAPI 文档解析服务
+│   ├── app.py                  # FastAPI 入口，/parse 与 /health
+│   ├── config.py               # 环境变量配置
+│   └── parsers/                # 各文件类型解析器，统一产出 Node JSON
+├── webconsole/                 # Vue 3 前端
+│   └── src/
+│       ├── api/                # 后端接口封装
+│       ├── stores/             # 自封装状态管理
+│       ├── composables/        # Markdown 渲染等组合式函数
+│       ├── views/              # 页面级组件
+│       ├── components/         # 可复用组件
+│       └── router/             # 路由表与守卫
+├── files_store/                # 文档与图片存储（gitignore）
+├── reference/                  # 开发参考/计划
+└── AGENTS.md                   # 架构与开发约束详述
 ```
+
+## 架构概览
+
+```
+┌─────────────┐     SSE/HTTP      ┌──────────────────────────────┐
+│  webconsole │ ─────────────────▶│      Linxing_Agent (8080)     │
+│  (Vue 3)    │◀─────────────────│  ReAct Agent + 多 Agent 工作流 │
+└─────────────┘   /api 前缀剥离   └──────────┬───────────────────┘
+                                            │
+                       ┌────────────────────┼────────────────────┐
+                       ▼                    ▼                    ▼
+              ┌────────────────┐   ┌─────────────────┐   ┌──────────────┐
+              │ document_      │   │ PostgreSQL /    │   │   Redis      │
+              │ analysis_      │   │ pgvector        │   │ 会话/语义缓存 │
+              │ service (8000) │   │ chunks/embeddings│  └──────────────┘
+              └────────────────┘   └─────────────────┘
+```
+
+**文档入库数据流**：
+
+1. 用户在前端上传文档 → 后端 `/rag/ingest/file`
+2. Java 侧 `DocumentAnalysisFacade` 调用 Python `/parse`，得到 Node JSON 列表
+3. `SemanticEnhancementService` 对图片（VLM）、代码（LLM）、表格（LLM）做语义增强
+4. `NodeBasedChunkBuilder` 装箱 Chunk（包含父子关系构建），同时生成 `chunkText`（展示）与 `indexText`（索引）
+5. `ChunkIngestCoordinator` 责任链完成向量化与全文索引，持久化到 PG
+
+**对话数据流**：用户提问 → `AgentExecutor` ReAct 循环 → 必要时调用 `search_knowledge_base` 工具走混合检索 → 结果注入上下文 → LLM 生成回答 → SSE 推送步骤事件。
 
 ## 快速开始
 
 ### 环境要求
 
 - JDK 17+
-- Node.js 16+
-- PostgreSQL 14+（需安装 pgvector 扩展）
-- Redis 6+（用于语义缓存与会话消息缓存）
-- Yarn（前端包管理）
+- Maven（仓库内置 `mvnw` / `mvnw.cmd`）
+- Node.js 16+ 与 yarn
+- Python 3.10+
+- PostgreSQL 14+ 且**已安装 pgvector 扩展**
+- Redis 6+
 
-### 1. 数据库准备
+### 1. 准备数据库
 
-```sql
-CREATE DATABASE vectordb;
-\c vectordb
-CREATE EXTENSION vector;
-```
+创建数据库 `vectordb` 并启用 pgvector 扩展，schema 见 [Linxing_Agent/src/main/resources/schema.sql](Linxing_Agent/src/main/resources/schema.sql)。
 
-执行建表脚本：
+### 2. 配置环境变量
 
-```bash
-psql -d vectordb -f Linxing_Agent/src/main/resources/schema.sql
-```
+后端 `application.yaml` 通过环境变量注入敏感信息。在 [Linxing_Agent/src/main/resources/](Linxing_Agent/src/main/resources/) 下创建 `application-dev.yaml`，填入：
 
-### 2. Python 文档解析服务
+- `PG_HOST` / `PG_PORT` / `PG_DATABASE` / `PG_USER` / `PG_PASSWORD`
+- `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`
+- `RAG_STORE_PATH`（文档与图片存储根目录，替代OSS服务）
+- `LLM_DEFAULT_PROVIDER`对应大模型提供商的 `api-key` / `base-url` / `model`等
+- `TAVILY_API_KEY`
+- `JWT_SECRET_KEY` / `JWT_TTL` / `JWT_TOKEN_NAME`
 
-Node-Based RAG 的文档解析由独立的 Python 服务承担，需先启动：
+### 3. 启动 Python 文档解析服务
+
+Python 服务需**先于后端启动**（后端文档入库依赖它）。
 
 ```bash
 cd document_analysis_service
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000
+uvicorn app:app --host 0.0.0.0 --port 8000 / python app.py
 ```
 
-> 该服务由 Java 侧 `rag.python-service.url`（默认 `http://localhost:8000`）调用，详见 [document_analysis_service/README.md](document_analysis_service/README.md)。
-
-### 3. 后端配置
-
-在 `Linxing_Agent/src/main/resources/` 下创建 `application-dev.yaml`（已被 `.gitignore` 忽略，需本地配置），至少包含以下密钥与路径：
-
-```yaml
-PG_HOST: localhost
-PG_PORT: 5432
-PG_DATABASE: vectordb
-PG_USER: <your_user>
-PG_PASSWORD: <your_password>
-
-RAG_STORE_PATH: <本地文档存储绝对路径>
-RAG_VECTOR_HOST: localhost
-RAG_VECTOR_PORT: 5432
-RAG_VECTOR_DATABASE: vectordb
-RAG_VECTOR_USER: <your_user>
-RAG_VECTOR_PASSWORD: <your_password>
-
-LLM_DEFAULT_PROVIDER: minimax          # minimax / deepseek / glm / kimi
-MINIMAX_API_KEY: <your_key>
-MINIMAX_BASE_URL: <your_base_url>
-MINIMAX_MODEL: <your_model>
-
-TAVILY_API_KEY: <your_key>             # 联网搜索
-
-JWT_SECRET_KEY: <your_jwt_secret>
-JWT_TTL: 86400000
-JWT_TOKEN_NAME: Authorization
-```
-
-> 模型文件 `models/ms-marco-MiniLM-L-6-v2/model.onnx` 与 tokenizer 需放置在 classpath（默认已声明在 `application.yaml`）。上传文档目录 `files_store/` 会被自动创建。
-
-### 4. 后端启动
+### 4. 启动后端
 
 ```bash
 cd Linxing_Agent
-mvn spring-boot:run
+./mvnw spring-boot:run / mvn spring-boot:run
 ```
 
-后端服务运行在 `http://localhost:8080`
-
-### 5. 前端启动
+### 5. 启动前端
 
 ```bash
 cd webconsole
-yarn install
-yarn serve
+yarn install / npm install
+yarn serve / npm run serve
 ```
 
-前端服务运行在 `http://localhost:3000`，开发代理将 `/api/*` 转发到后端并剥离 `/api` 前缀。
+### 访问地址
 
-## 核心架构
-
-### Agent 执行流程
-
-```
-用户提问 → SSE 流式响应
-              ↓
-    AgentExecutor（ReAct 主循环，上限 20 步）
-              ↓
-    构建系统提示词（注入工具 + 技能目录）
-              ↓
-    ┌── LLM 推理（流式）─────────────────┐
-    │                                      │
-    │  ① 渐进披露模式：先调用 resolve       │
-    │     获取工具/技能完整定义              │
-    │                                      │
-    │  ② 调用工具：                          │
-
-    │     - search_knowledge_base（RAG）   │
-    │     - web_search（Tavily 联网）       │
-    │     - start_study_plan_workflow      │
-    │       （触发多 Agent 工作流）         │
-    │     - create/append/replace_container │
-    │       （JSON 结构化输出）             │
-    │                                      │
-    │  ③ 结果注入记忆 → 下一轮              │
-    └──────────────────────────────────────┘
-              ↓
-    LLM 不再发起工具调用 → 输出最终回答
-```
-
-### 多 Agent 工作流（study_plan）
-
-```
-start_study_plan_workflow 工具触发
-              ↓
-   StudyPlanWorkflowService（两阶段顺序编排）
-              ↓
-   ┌──────────────── 阶段一 ────────────────┐
-   │ KnowledgeCollectionWorkflowService     │
-   │   ├ 可选澄清（HumanInTheLoop 暂停）     │
-   │   └ KnowledgeCollectorAgent            │
-   │       自主调用 search_knowledge_base   │
-   │       + web_search 收集素材            │
-   │       写入 AgenticScope.materials     │
-   └─────────────────────────────────────────┘
-              ↓
-   ┌──────────────── 阶段二 ────────────────┐
-   │ ContentGenerationWorkflowService       │
-   │   ├ PlanGeneratorAgent → 计划 JSON     │
-   │   ├ ExamGeneratorAgent（可选）→ 测验  │
-   │   └ JsonSanitizer 校验 → 持久化        │
-   └─────────────────────────────────────────┘
-              ↓
-   通过 SSE step 事件实时推送：workflow_start → sub_agent → workflow_end
-```
-
-### RAG 检索流程（被封装为 `search_knowledge_base` 工具）
-
-```
-用户提问 → 查询改写 → 向量检索 + BM25 检索 → RRF 融合 → Cross-encoder 重排序 → 返回片段
-```
-
-### 文档入库流程（Node-Based RAG）
-
-```
-文件上传 → IngestServiceImpl 持久化文件 → DocumentAnalysisFacade.analyze()
-              ↓
-   Python 文档解析服务（document_analysis_service）
-      router 按扩展名 + 内容特征派发到 pdf/docx/markdown/html/code/linebased parser
-      产出统一 Node JSON（含 titlePath、groupId 等结构信息）
-              ↓
-   NodeConverter 反序列化为 List<DocumentNode>
-              ↓
-   SemanticEnhancementService（语义增强）
-      IMAGE → VLM 图片描述 / CODE → LLM 代码解释 / TABLE → LLM 表格总结
-      打包临近上下文（前 2 + 后 2 邻居）送模型，增强失败 fallback 到原文
-              ↓
-   NodeBasedChunkBuilder（Node 装箱成 Chunk）
-      - 普通 Node：按 token 装箱，产出 Level2 块
-      - 同 groupId 子 Node：合成 Level1 父块（不可检索）+ 多个 Level2 子块（可检索，parentChunkId 指向父块）
-      - 同时生成 chunkText（Display：原文/占位符）与 indexText（Index：语义增强文本，用于 Embedding + BM25）
-              ↓
-   ChunkIngestCoordinator 责任链后处理（两 pass 插入：先父后子，解析 parentChunkId → DB id）
-      标题提取 → tsContent 全文索引 → EmbeddingPersist 向量化（优先 indexText）
-              ↓
-   持久化到 chunks / embeddings 表
-```
-
-> 旧的 `ChunkStrategyFactory + strategy.execute` 按文件类型分派的处理路径已废弃（`ChunkIngestCoordinator.processDocument` 抛 `UnsupportedOperationException`），所有文件类型统一走 Node 体系 `processDocumentFromNodes`。
-
-## 数据库设计
-
-| 表名 | 说明 |
-|------|------|
-| users | 用户信息 |
-| documents | 文档元数据 |
-| chunks | 分块索引（含 `chunk_text` 展示文本、`index_text` 检索文本、`node_metadata` 还原信息、`parent_chunk_id` 父子关系、`chunk_level` 层级、`is_searchable` 是否可检索） |
-| embeddings | 向量存储（pgvector） |
-| activity_logs | 操作日志 |
-| chat_sessions | 聊天会话 |
-| chat_messages | 聊天消息（通过 parent_id 构成树形结构） |
-| agent_steps | Agent 执行步骤（thinking / tool_call / tool_result / error，final 不入库） |
-| exams | 知识测验元信息 |
-| exam_context | 测验试题（题干 / 选项 / 答案 / 解析） |
-| exam_answers | 用户答题记录与得分 |
-| study_plans | 学习计划主表 |
-| study_plan_phases | 学习计划阶段 |
-| study_plan_progress | 阶段进度 |
+| 服务 | 地址 |
+|---|---|
+| 前端 | http://localhost:3000 |
+| 后端 API | http://localhost:8080 |
+| Python 解析服务 | http://localhost:8000 |
+| Python 健康检查 | http://localhost:8000/health |
 
 ## 配置说明
 
-### LLM 提供商
+以下为开发者常需调整的配置项，完整配置见 [Linxing_Agent/src/main/resources/application.yaml](Linxing_Agent/src/main/resources/application.yaml)。
 
-在 `application-dev.yaml` 中配置 `LLM_DEFAULT_PROVIDER`：
+### LLM 模型
 
-- `minimax` — MiniMax
-- `deepseek` — DeepSeek（支持 thinking tokens）
-- `glm` — 智谱 GLM
-- `kimi` — Moonshot Kimi
+通过 `rag.llm.default-provider` 切换供应商（`minimax` / `deepseek` / `glm` / `kimi` / `other1`），均走 OpenAI 兼容 API。DeepSeek 支持 `return-thinking` 与 `send-thinking`。
 
-### Agent 配置（`application.yaml`）
+### Agent 行为
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `agent.skills.path` | 空（classpath） | 技能目录路径，未配置时从 classpath `skills/` 解析 |
-| `agent.disclosure.threshold` | 5 | 工具 + 技能总数超过此值启用渐进披露 |
-| `agent.tool.timeout-seconds` | 180 | 普通工具执行超时 |
-| `agent.tool.workflow-timeout-seconds` | 600 | 工作流类工具（如 `start_study_plan_workflow`）超时 |
-| `agent.memory.type` | window | 记忆类型：`window` / `summary` |
-| `agent.memory.max-messages` | 40 | 滑动窗口最大消息数 |
-| `agent.memory.max-tokens` | 32000 | summary 模式 token 预算 |
-| `agent.web-search.tavily.api-key` | - | Tavily API Key |
-| `agent.web-search.tavily.max-results` | 5 | 联网搜索返回结果数 |
+| 配置 | 默认值 | 说明 |
+|---|---|---|
+| `agent.disclosure.threshold` | 5 | 工具+技能超过此值启用渐进披露 |
+| `agent.tool.timeout-seconds` | 180 | 普通工具超时 |
+| `agent.tool.workflow-timeout-seconds` | 600 | 工作流工具超时 |
+| `agent.memory.type` | window | 记忆类型（`window` / `summary`） |
+| `agent.memory.max-messages` | 40 | 窗口记忆条数 |
+| `agent.memory.max-tokens` | 32000 | 摘要记忆触发阈值 |
 
-### 语义缓存（`rag.cache.semantic-cache`）
+### 检索与缓存
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `enabled` | true | 是否启用回答级语义缓存 |
-| `threshold` | 0.95 | 相似度阈值 |
-| `quota-per-user` | 100 | 每用户缓存配额 |
-| `quantization` | NOQUANT | Redis Vector Set 量化方式 |
+| 配置 | 默认值 | 说明 |
+|---|---|---|
+| `rag.reranker.enabled` | true | 是否启用 ONNX 重排序 |
+| `rag.reranker.batch-size` | 8 | 重排序批大小 |
+| `rag.cache.semantic-cache.enabled` | true | Redis 语义缓存 |
+| `rag.cache.semantic-cache.threshold` | 0.95 | 语义缓存相似度阈值 |
+| `rag.semantic-enhancement.context.previous-nodes` | 2 | 语义增强前文 Node 数 |
+| `rag.semantic-enhancement.context.next-nodes` | 2 | 语义增强后文 Node 数 |
 
-### 文件存储路径
+### Python 服务对接
 
-- `RAG_STORE_PATH` — 上传文件存储目录
-- `rag.reranker.model-path` — ONNX 重排序模型路径（默认 `classpath:models/ms-marco-MiniLM-L-6-v2/model.onnx`）
+| 配置 | 默认值 | 说明 |
+|---|---|---|
+| `rag.python-service.url` | http://localhost:8000 | Python 解析服务地址 |
+| `rag.python-service.timeout-seconds` | 120 | 调用超时 |
+| `rag.python-service.image-store-dir` | ${RAG_STORE_PATH}/chunk_images | 图片落盘目录 |
 
-## 关键 API 端点
+Python 服务侧的环境变量见 [document_analysis_service/config.py](document_analysis_service/config.py)（`SERVICE_HOST` / `SERVICE_PORT` / `IMAGE_STORE_DIR` / `IMAGE_URL_PREFIX`）。
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/agent/chat` | POST | SSE 流式对话（推送 thinking / tool_call / tool_result / final 事件） |
-| `/agent/workflow/clarify` | POST | HumanInTheLoop 澄清回复，唤醒阻塞的工作流 |
-| `/agent/sessions` | GET/POST | 会话列表 / 创建会话 |
-| `/agent/sessions/{id}/messages` | GET | 会话消息（树形结构） |
-| `/agent/messages/{id}/steps` | GET | 按消息 ID 懒加载 Agent 推理步骤 |
-| `/exam` | GET/POST | 测验列表 / 详情 / 提交答案 / 草稿 |
-| `/study-plan` | GET/POST | 学习计划列表 / 详情 / 阶段进度更新 / Markdown-HTML 导出 |
-| `/rag/ingest` | POST | 文档上传与解析入库 |
-| `/rag/search` | POST | 知识库检索 |
-| `/user/login` `/user/register` | POST | 登录 / 注册（无需认证） |
+## 使用示例
 
-> 前端调用时统一加 `/api` 前缀（如 `/api/agent/chat`），由 `vue.config.js` 代理剥离后转发到后端。
+### 上传笔记并以此生成知识测验
+
+1. 启动三个服务后，浏览器访问 http://localhost:3000，注册并登录
+2. 进入「导入笔记」页上传 PDF / DOCX / Markdown 等格式文件
+3. 进入「智能问答」发起对话，Agent 会按需检索你的笔记库内容作为参考、启动工作流自动生成知识测验
+
+### 调用检索接口
+
+```bash
+curl -X POST http://localhost:8080/rag/search \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "向量检索原理", "topK": 5, "hybrid": true}'
+```
+
+### 上传文档接口
+
+```bash
+curl -X POST http://localhost:8080/rag/ingest/file \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -F "file=@/path/to/note.pdf"
+```
+
+## 主要 API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/user/register` `/user/login` `/user/logout` | 用户认证 |
+| POST | `/agent/chat` | Agent 对话（SSE 流式） |
+| POST | `/agent/workflow/clarify` | 工作流澄清回复 |
+| GET/POST/DELETE | `/agent/sessions[...]` | 会话管理 |
+| GET | `/agent/messages/{id}/steps` | 查看推理步骤 |
+| GET | `/exam` `/exam/{id}` | 测验列表与详情 |
+| POST | `/exam/{id}/submit` | 提交答题 |
+| GET | `/study-plan` `/study-plan/{id}` | 学习计划 |
+| GET | `/study-plan/{id}/export?format=md` | 导出计划 |
+| POST | `/rag/ingest/file` | 上传文档 |
+| GET/DELETE | `/rag/documents[...]` | 文档管理 |
+| POST | `/rag/search` | 知识库检索 |
+| GET | `/rag/chunks/{id}/context` | 分块上下文 |
+
+> 后端路径无 `/api` 前缀；前端调用统一加 `/api`，由 `vue.config.js` 代理剥离。所有非登录注册接口需携带 Bearer Token。
+
+## 开发说明
+
+### 模块划分
+
+- 后端按 DDD 风格分层：`common` → `user` → `rag` → `agent`
+- `rag` 域是知识检索基础设施，被 `agent` 域封装为 `search_knowledge_base` 工具
+- `agent` 域是业务编排核心，包含对话、工具、技能、记忆、子 Agent 工作流
+
+### 构建与测试
+
+```bash
+cd Linxing_Agent
+./mvnw clean package        # 构建
+./mvnw test                 # 运行测试
+```
+
+测试目录 [Linxing_Agent/src/test/java/](Linxing_Agent/src/test/java/) 包含 Agent 执行、工具、RAG 流程、语义上下文等测试。
+
+### 前端构建
+
+```bash
+cd webconsole
+yarn build                  # 生产构建
+yarn lint                   # 代码检查
+```
+
+
+## 进一步阅读
+
+- [AGENTS.md](AGENTS.md) — 架构、关键约束、依赖详述
+- [document_analysis_service/README.md](document_analysis_service/README.md) — Python 解析服务文档
+- [webconsole/README.md](webconsole/README.md) — 前端文档
+- [Linxing_Agent/src/main/resources/schema.sql](Linxing_Agent/src/main/resources/schema.sql) — 数据库 schema
+
+## 贡献
+
+欢迎通过 Issue 反馈问题或提出功能建议。提交 PR 前：
+
+1. Fork 本仓库
+2. 新建分支开发
+3. 确保后端 `mvnw test` 与前端 `yarn lint` 通过
+4. PR 描述清楚变更目的与影响范围

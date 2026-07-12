@@ -123,6 +123,11 @@ class DocxParser:
         # title_path 取聚类内首个段落的（同属一个标题区间）。
         cluster = {"buffer": [], "title_path": None}  # type: dict
 
+        # 连续空 w:p 计数（2026-07-12 决策：区分硬分隔与软换行）
+        # - 单个空 w:p = 软换行，不 flush，仅作聚类内段落分隔
+        # - 连续 ≥2 个空 w:p = 硬分隔（作者显式空多行分段），flush 聚类
+        consecutive_blank = {"count": 0}
+
         def flush_cluster():
             """flush 聚类缓冲为 text Node（若有内容）。
 
@@ -176,13 +181,14 @@ class DocxParser:
                 self._handle_paragraph(
                     paragraph, element, doc, image_output_dir,
                     user_id, document_id, node_seq, title_stack, nodes,
-                    cluster, flush_cluster,
+                    cluster, flush_cluster, consecutive_blank,
                 )
             elif tag == qn("w:tbl"):
                 table = table_map.get(id(element))
                 if table is None:
                     continue
                 # 表格是原子块，切断正文聚类
+                consecutive_blank["count"] = 0
                 flush_cluster()
                 self._handle_table(
                     table, node_seq, title_stack, nodes,
@@ -209,18 +215,21 @@ class DocxParser:
         nodes: List[dict],
         cluster: dict,
         flush_cluster,
+        consecutive_blank: dict,
     ) -> None:
-        """处理 w:p 段落：聚类缓冲模式。
+        """处理 w:p 段落：聚类缓冲模式（区分硬分隔与软换行）。
 
         正文段落累积到 cluster 缓冲（文本用 \\n 连接）；
-        遇空 w:p / space_after 显著大 / 标题 / 代码 / 表格 / 列表项 / 图片 时 flush 为独立 text Node。
-        单换行、段内 w:br/w:cr 一律合并，绝不作为分隔符。
+        遇标题 / 代码 / 表格 / 图片 / 列表项 时 flush 为独立 text Node；
+        遇空 w:p：单个=软换行（不 flush，作聚类内段落分隔），连续≥2=硬分隔 flush。
+        段内 w:br/w:cr 一律并入段内 \\n，绝不作为分隔符。
         """
         # 用 XPath 显式取 w:br / w:cr 作为段内 \n，不依赖 paragraph.text 渲染行为
         text = self._extract_paragraph_text_with_breaks(paragraph).strip()
 
         # 1. 内嵌图片（即使段落无文本也提取）——图片是原子块，先 flush 正文聚类
         if element.xpath(".//a:blip"):
+            consecutive_blank["count"] = 0  # 原子块前重置计数
             flush_cluster()
         self._extract_inline_images(
             element, doc, image_output_dir,
@@ -228,9 +237,23 @@ class DocxParser:
         )
 
         if not text:
-            # 空 w:p = 硬分隔，flush 缓冲
-            flush_cluster()
+            # 空 w:p：累计连续空段计数，不立即 flush
+            # 连续 ≥2 个空段视为硬分隔（下一非空段进来时 flush）；
+            # 单个空段视为软换行（仅作聚类内段落分隔）
+            consecutive_blank["count"] += 1
             return
+
+        # 非空段落进来：先消化连续空段计数
+        if consecutive_blank["count"] >= 2:
+            # 硬分隔：flush 当前聚类，本段开启新聚类
+            flush_cluster()
+        elif consecutive_blank["count"] == 1:
+            # 软换行：不 flush，但在聚类 buffer 内追加空串占位，
+            # flush 时 "\n".join 会天然形成段落分隔（前后段之间多一个空串→多一个\n）
+            # 仅当聚类已有内容时才需要分隔占位
+            if cluster["buffer"]:
+                cluster["buffer"].append("")
+        consecutive_blank["count"] = 0
 
         # 2. 判定标题：style.name 优先，outline level 兜底
         is_heading, level = self._detect_heading(paragraph)

@@ -32,7 +32,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from parsers._common import should_flush_under_elastic
+from parsers._common import compute_hash, should_flush_under_elastic
 
 logger = logging.getLogger("docling_analysis_service.parsers.markdown_parser")
 
@@ -80,10 +80,19 @@ class MarkdownParser:
     本类用栈推导 titlePath，并处理超长拆分、groupId 标注、无标题三级降级。
     """
 
-    def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
+    def __init__(
+        self,
+        image_store_dir: str,
+        image_url_prefix: str = "/chunk_images",
+        chunk_threshold: int = CHUNK_THRESHOLD,
+    ):
         """
+        :param image_store_dir: 图片存储根目录（与 docx/pdf 一致，落盘到 {dir}/{userId}/{docId}/）
+        :param image_url_prefix: 图片 URL 前缀（与 docx/pdf 一致）
         :param chunk_threshold: 拆分阈值（默认 1000）
         """
+        self.image_store_dir = Path(image_store_dir)
+        self.image_url_prefix = image_url_prefix.rstrip("/")
         self.threshold = chunk_threshold
         if mistune is None:
             logger.warning(
@@ -92,9 +101,10 @@ class MarkdownParser:
             )
         else:
             logger.info(
-                "MarkdownParser 初始化完成，mistune 版本: %s, 阈值: %d",
+                "MarkdownParser 初始化完成，mistune 版本: %s, 阈值: %d, 图片存储目录: %s",
                 mistune.__version__ if hasattr(mistune, "__version__") else "unknown",
                 self.threshold,
+                self.image_store_dir,
             )
 
     # ============================== 对外入口 ==============================
@@ -124,8 +134,12 @@ class MarkdownParser:
             logger.info("MarkdownParser 文件内容为空: %s", file_path)
             return []
 
+        # 图片输出目录（与 docx/pdf 一致，按 userId/documentId 隔离）
+        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir.mkdir(parents=True, exist_ok=True)
+
         # 核心解析流程
-        nodes = self._parse_markdown(text)
+        nodes = self._parse_markdown(text, file_path, image_output_dir, user_id, document_id)
 
         logger.info(
             "MarkdownParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes)
@@ -134,7 +148,7 @@ class MarkdownParser:
 
     # ============================== 核心解析流程 ==============================
 
-    def _parse_markdown(self, text: str) -> List[dict]:
+    def _parse_markdown(self, text: str, file_path: Path, image_output_dir: Path, user_id: int, document_id: int) -> List[dict]:
         """
         核心 Markdown 解析流程。
 
@@ -142,19 +156,29 @@ class MarkdownParser:
         1. 先检查是否有标题（HEADING_PATTERN）
         2. 有标题 → 按标题拆分 + titlePath 栈推导 + 超长拆分
         3. 无标题 → 三级降级拆分（强段落 → 弱段落 → 句子）
+
+        图片处理：mistune AST 识别 image token（含 paragraph 内嵌 image），
+        仅处理文档自带本地图片资源（相对/绝对路径），远程 http(s) 链接跳过。
+        遇图片先 flush 当前段落文本，再产出独立 image Node（与 docx 一致）。
         """
         results: List[dict] = []
         if not text:
             return results
 
         node_seq = self._make_node_seq()
+        img_ctx = {
+            "file_path": file_path,
+            "image_output_dir": image_output_dir,
+            "user_id": user_id,
+            "document_id": document_id,
+        }
 
         # 1. 检查是否有标题
         heading_matches = list(HEADING_PATTERN.finditer(text))
 
         if not heading_matches:
             # 无标题文档：三级降级拆分（与 Java processNoTitleDocument 一致）
-            return self._process_no_title_document(text, node_seq)
+            return self._process_no_title_document(text, node_seq, img_ctx)
 
         # 2. 有标题：按标题拆分（与 Java splitByHeadings 一致）
         # 处理第一个标题前的 preamble（前置文本）
@@ -162,10 +186,8 @@ class MarkdownParser:
         if first_heading_start > 0:
             preamble = text[:first_heading_start].strip()
             if preamble:
-                results.append(
-                    self._make_text_node(
-                        next(node_seq), preamble, title_path=None, group_id=None
-                    )
+                self._emit_text_with_images(
+                    preamble, None, node_seq, results, img_ctx,
                 )
 
         # 只跟踪一二三级标题（最多三层）
@@ -204,11 +226,10 @@ class MarkdownParser:
             )
             results.append(heading_node)
 
-            # 处理 section 内容（可能包含 code_block / table / list / paragraph）
+            # 处理 section 内容（可能包含 image / code_block / table / list / paragraph）
             section_nodes = self._process_section_content(
-                full_section, title_path, node_seq
+                full_section, title_path, node_seq, results, img_ctx,
             )
-            results.extend(section_nodes)
 
         return results
 
@@ -219,21 +240,24 @@ class MarkdownParser:
         section_text: str,
         title_path: Optional[str],
         node_seq,
-    ) -> List[dict]:
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
         """
-        处理标题区块内的内容（可能包含多种 block 类型）。
+        处理标题区块内的内容（可能包含多种 block 类型），结果直接 append 到 results。
 
         策略：
-        1. 用 mistune AST 模式识别 block 边界（paragraph / code_block / table / list）
+        1. 用 mistune AST 模式识别 block 边界（paragraph / code_block / table / list / image）
         2. 对于每个 block：
            - code_block / table → 原子块，整体输出一个 Node（不拆分）
-           - paragraph / list → 检查是否超长，超长则内部拆句子为多小 Node + 共享 groupId
+           - image → 独立 image Node（仅本地图片落盘，远程跳过）
+           - paragraph / list / block_quote → 检查是否超长，超长则内部拆句子为多小 Node + 共享 groupId；
+             若段落内嵌 image，则遇图片先 flush 段前文本，产出 image Node，段后文本作为新 text Node
         """
-        results: List[dict] = []
-
         if mistune is None:
             # 降级为纯正则模式（简化处理）
-            return self._process_section_fallback(section_text, title_path, node_seq)
+            self._process_section_fallback(section_text, title_path, node_seq, results, img_ctx)
+            return
 
         # 使用 mistune AST 模式解析
         md = mistune.create_markdown(renderer="ast")
@@ -246,7 +270,8 @@ class MarkdownParser:
             # mistune 解析异常属于非预期失败（输入已通过编码兜底读到），降级为正则模式可保证流程继续，
             # 但意味着丢失 mistune 的准确结构识别能力，需 error 级别便于排查
             logger.error("mistune 解析失败，降级为正则模式: %s", e, exc_info=True)
-            return self._process_section_fallback(section_text, title_path, node_seq)
+            self._process_section_fallback(section_text, title_path, node_seq, results, img_ctx)
+            return
 
         # 遍历 token 树，提取 block
         for token in tokens:
@@ -288,38 +313,18 @@ class MarkdownParser:
                         )
                     )
 
+            elif token_type == "image":
+                # 顶层独立图片块：产出独立 image Node（仅本地图片落盘）
+                self._emit_image_node(token, title_path, node_seq, results, img_ctx)
+
             elif token_type == "paragraph":
-                # 段落：检查超长
-                para_text = self._extract_text_from_token(token)
-                if para_text.strip():
-                    if len(para_text) <= self.threshold:
-                        results.append(
-                            self._make_text_node(
-                                next(node_seq),
-                                para_text.strip(),
-                                title_path=title_path,
-                                group_id=None,
-                            )
-                        )
-                    else:
-                        # 超长段落：内部拆句子为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
-                        group_id = next(node_seq)
-                        sub_chunks = self._split_by_sentence_with_threshold(
-                            para_text, self.threshold
-                        )
-                        for sub_text in sub_chunks:
-                            if sub_text.strip():
-                                results.append(
-                                    self._make_text_node(
-                                        next(node_seq),
-                                        sub_text.strip(),
-                                        title_path=title_path,
-                                        group_id=group_id,
-                                    )
-                                )
+                # 段落：可能内嵌 image。先尝试拆出图片与文本片段
+                self._emit_paragraph_with_images(
+                    token, title_path, node_seq, results, img_ctx,
+                )
 
             elif token_type == "list":
-                # 列表：检查整体长度
+                # 列表：检查整体长度（列表内嵌图片少见，仍走纯文本提取）
                 list_text = self._extract_text_from_token(token)
                 if list_text.strip():
                     if len(list_text) <= self.threshold:
@@ -380,14 +385,17 @@ class MarkdownParser:
 
             # 其他 block 类型（blank_line / thematic_break 等）忽略
 
-        return results
+        return
 
     # ============================== 无标题文档三级降级 ==============================
 
-    def _process_no_title_document(self, text: str, node_seq) -> List[dict]:
+    def _process_no_title_document(self, text: str, node_seq, img_ctx: dict) -> List[dict]:
         """
         处理无标题文档：三级降级拆分（强段落 → 弱段落 → 句子）+ 阈值累加。
         （忠实复刻 Java processNoTitleDocument）
+
+        段落内可能内嵌图片：每个强段落经 _emit_text_with_images 处理，
+        遇图片先 flush 段前文本，产出 image Node，段后文本作为新 text Node。
         """
         results: List[dict] = []
         if not text:
@@ -406,14 +414,13 @@ class MarkdownParser:
             if len(trimmed_para) > self.threshold * 1.5:
                 # 先输出当前 buffer
                 if buffer:
-                    results.append(
-                        self._make_text_node(
-                            next(node_seq), buffer.strip(), title_path=None, group_id=None
-                        )
+                    self._emit_text_with_images(
+                        buffer.strip(), None, node_seq, results, img_ctx,
                     )
                     buffer = ""
 
                 # 超长段落：内部拆为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
+                # 注意：超长段落内的图片在此路径下不单独拆出（与原逻辑保持简单），仍按句子拆分文本
                 group_id = next(node_seq)
                 sub_chunks = self._split_oversized_paragraph(trimmed_para, self.threshold)
                 for sub in sub_chunks:
@@ -427,11 +434,9 @@ class MarkdownParser:
                 # 3. 正常段落：累加到阈值（弹性区间，减少阈值附近对强关联语义的人为切断）
                 add_len = len(trimmed_para) + (2 if buffer else 0)
                 if should_flush_under_elastic(len(buffer), add_len, self.threshold):
-                    # 超过弹性上界，先输出当前 buffer
-                    results.append(
-                        self._make_text_node(
-                            next(node_seq), buffer.strip(), title_path=None, group_id=None
-                        )
+                    # 超过弹性上界，先输出当前 buffer（含图片拆分）
+                    self._emit_text_with_images(
+                        buffer.strip(), None, node_seq, results, img_ctx,
                     )
                     buffer = trimmed_para
                 else:
@@ -441,10 +446,8 @@ class MarkdownParser:
 
         # 输出剩余 buffer
         if buffer:
-            results.append(
-                self._make_text_node(
-                    next(node_seq), buffer.strip(), title_path=None, group_id=None
-                )
+            self._emit_text_with_images(
+                buffer.strip(), None, node_seq, results, img_ctx,
             )
 
         return results
@@ -625,11 +628,234 @@ class MarkdownParser:
 
         return sentences
 
+    # ============================== 图片处理 ==============================
+
+    # 远程图片 URL 前缀（不下载，直接跳过）
+    _REMOTE_URL_PREFIXES = ("http://", "https://", "ftp://", "ftps://")
+
+    def _emit_paragraph_with_images(
+        self,
+        token: Dict[str, Any],
+        title_path: Optional[str],
+        node_seq,
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
+        """处理含内嵌 image 的 paragraph token。
+
+        遍历 children，按阅读顺序切分「文本片段」与「图片」：
+        - 遇到 image token：先输出当前已累积的文本片段为 text Node，再产出 image Node；
+        - 遇到 text/其他 token：累积到文本缓冲。
+        段落无图片时退化为普通段落处理（超长拆句子 + groupId）。
+        """
+        children = token.get("children", [])
+        if not children:
+            return
+
+        # 先收集图片，无图片则走原段落逻辑
+        has_image = any(
+            self._is_image_token(c) for c in children if isinstance(c, dict)
+        )
+        if not has_image:
+            para_text = self._extract_text_from_token(token)
+            if para_text.strip():
+                self._emit_text_fragment(para_text.strip(), title_path, node_seq, results)
+            return
+
+        # 有图片：按顺序切分文本片段与图片
+        text_buffer = ""
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            if self._is_image_token(child):
+                # 先 flush 段前文本
+                if text_buffer.strip():
+                    self._emit_text_fragment(text_buffer.strip(), title_path, node_seq, results)
+                    text_buffer = ""
+                # 产出 image Node
+                self._emit_image_node(child, title_path, node_seq, results, img_ctx)
+            else:
+                # 累积文本（递归取子文本，含 emphasis/strong 等 inline token）
+                text_buffer += self._extract_text_from_token(child)
+
+        # flush 段后剩余文本
+        if text_buffer.strip():
+            self._emit_text_fragment(text_buffer.strip(), title_path, node_seq, results)
+
+    def _emit_text_with_images(
+        self,
+        text: str,
+        title_path: Optional[str],
+        node_seq,
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
+        """处理一段原始文本（可能含 ![alt](url) 图片语法），按阅读顺序产出 text/image Node。
+
+        用于无标题文档路径与 preamble：用正则识别图片，图片前的文本作为 text Node，
+        图片产出 image Node，图片后的文本继续作为 text Node。
+        """
+        if not text or not text.strip():
+            return
+
+        image_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+        last_end = 0
+        has_image = False
+        for m in image_pattern.finditer(text):
+            has_image = True
+            frag = text[last_end:m.start()]
+            if frag.strip():
+                self._emit_text_fragment(frag.strip(), title_path, node_seq, results)
+            alt = m.group(1).strip()
+            url = m.group(2).strip()
+            self._emit_image_node_by_url(url, alt, title_path, node_seq, results, img_ctx)
+            last_end = m.end()
+
+        # 末尾剩余文本（或无图片时的整段文本）
+        tail = text[last_end:]
+        if tail.strip():
+            self._emit_text_fragment(tail.strip(), title_path, node_seq, results)
+
+        # 无图片且有文本时已被上面 tail 分支处理；has_image 仅用于可读性
+        _ = has_image
+
+    def _emit_text_fragment(
+        self,
+        text: str,
+        title_path: Optional[str],
+        node_seq,
+        results: List[dict],
+    ) -> None:
+        """输出一段文本为 text Node（超长则内部拆句子 + 共享 groupId）。"""
+        if not text or not text.strip():
+            return
+        text = text.strip()
+        if len(text) <= self.threshold:
+            results.append(
+                self._make_text_node(
+                    next(node_seq), text, title_path=title_path, group_id=None,
+                )
+            )
+        else:
+            group_id = next(node_seq)
+            sub_chunks = self._split_by_sentence_with_threshold(text, self.threshold)
+            for sub_text in sub_chunks:
+                if sub_text.strip():
+                    results.append(
+                        self._make_text_node(
+                            next(node_seq), sub_text.strip(),
+                            title_path=title_path, group_id=group_id,
+                        )
+                    )
+
+    @staticmethod
+    def _is_image_token(token: Dict[str, Any]) -> bool:
+        """判断 mistune token 是否为 image。"""
+        return isinstance(token, dict) and token.get("type") == "image"
+
+    def _emit_image_node(
+        self,
+        token: Dict[str, Any],
+        title_path: Optional[str],
+        node_seq,
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
+        """从 mistune image token 提取 url/alt 并产出 image Node。"""
+        attrs = token.get("attrs", {}) or {}
+        url = attrs.get("url", "")
+        # alt 文本可能来自 attrs.alt 或 children 内的 text
+        alt = attrs.get("alt", "")
+        if not alt:
+            alt = self._extract_text_from_token(token).strip()
+        self._emit_image_node_by_url(url, alt, title_path, node_seq, results, img_ctx)
+
+    def _emit_image_node_by_url(
+        self,
+        url: str,
+        alt: str,
+        title_path: Optional[str],
+        node_seq,
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
+        """根据 url 产出 image Node（仅本地图片落盘，远程跳过）。
+
+        url 可能带标题片段 "url \"title\""，需剥离。
+        """
+        if not url:
+            return
+        # 剥离 mistune/原生 markdown 可能的 title：url "title"
+        url = url.strip().split()[0] if url.strip() else ""
+        if not url:
+            return
+
+        # 远程链接：不下载，跳过（不产出 image Node，不阻断解析）
+        if url.lower().startswith(self._REMOTE_URL_PREFIXES):
+            logger.debug("Markdown 远程图片不处理，跳过: %s", url)
+            return
+
+        # 本地图片：相对 markdown 文件目录解析
+        md_file_path: Path = img_ctx["file_path"]
+        image_output_dir: Path = img_ctx["image_output_dir"]
+        user_id = img_ctx["user_id"]
+        document_id = img_ctx["document_id"]
+
+        # 解析本地路径（支持相对/绝对，去除 URL query/fragment）
+        clean_url = url.split("?")[0].split("#")[0]
+        src_path = Path(clean_url)
+        if not src_path.is_absolute():
+            src_path = (md_file_path.parent / src_path).resolve()
+
+        if not src_path.exists() or not src_path.is_file():
+            logger.warning("Markdown 本地图片文件不存在，跳过: %s (resolved=%s)", url, src_path)
+            return
+
+        try:
+            with open(src_path, "rb") as f:
+                image_bytes = f.read()
+        except Exception as e:
+            logger.warning("Markdown 本地图片读取失败，跳过: %s, %s", src_path, e)
+            return
+
+        # 扩展名推断
+        ext = src_path.suffix.lower().lstrip(".")
+        if not ext:
+            ext = "png"
+
+        node_id = next(node_seq)
+        img_filename = f"img_{node_id[1:]}.{ext}"
+        img_path = image_output_dir / img_filename
+        try:
+            with open(img_path, "wb") as f:
+                f.write(image_bytes)
+        except Exception as e:
+            logger.warning("Markdown 图片落盘失败，跳过: %s, %s", img_path, e)
+            return
+
+        relative_url = (
+            f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+        )
+        img_hash = compute_hash(image_bytes)
+
+        results.append({
+            "id": node_id,
+            "type": "image",
+            "imagePath": relative_url,
+            "caption": alt if alt else None,
+            "titlePath": title_path,
+            "page": 1,
+            "bbox": None,
+            "hash": img_hash,
+        })
+        logger.debug("Markdown 图片落盘: %s -> %s", src_path.name, img_filename)
+
     # ============================== mistune 辅助方法 ==============================
 
     def _extract_text_from_token(self, token: Dict[str, Any]) -> str:
         """
         从 mistune token 中提取纯文本（递归遍历 children）。
+        image token 的 alt 不在此处提取（图片由 _emit_image_node 单独处理）。
         """
         if "raw" in token:
             return token["raw"]
@@ -707,18 +933,43 @@ class MarkdownParser:
         section_text: str,
         title_path: Optional[str],
         node_seq,
-    ) -> List[dict]:
+        results: List[dict],
+        img_ctx: dict,
+    ) -> None:
         """
-        无 mistune 时的降级处理：纯正则模式。
+        无 mistune 时的降级处理：纯正则模式，结果直接 append 到 results。
 
         简化策略：
-        1. 尝试识别代码围栏 ```...```，整体输出为 code Node
-        2. 尝试识别表格（|...|），整体输出为 table Node（转 HTML）
-        3. 剩余文本作为 paragraph，超长拆句子
+        1. 识别图片 ![alt](url)，产出 image Node（仅本地图片落盘）
+        2. 识别代码围栏 ```...```，整体输出为 code Node
+        3. 识别表格（|...|），整体输出为 table Node（转 HTML）
+        4. 剩余文本作为 paragraph，超长拆句子
         """
-        results: List[dict] = []
+        # 1. 识别图片 ![alt](url)
+        image_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+        # 记录图片间/前后的文本片段，保持阅读顺序
+        text_fragments: List[str] = []
+        last_end = 0
+        for m in image_pattern.finditer(section_text):
+            frag = section_text[last_end:m.start()]
+            if frag.strip():
+                text_fragments.append(frag)
+            alt = m.group(1).strip()
+            url = m.group(2).strip()
+            # 输出图片前的文本片段
+            for frag in text_fragments:
+                self._emit_text_fragment(frag.strip(), title_path, node_seq, results)
+            text_fragments = []
+            self._emit_image_node_by_url(url, alt, title_path, node_seq, results, img_ctx)
+            last_end = m.end()
+        # 末尾剩余文本
+        tail = section_text[last_end:]
+        if tail.strip():
+            text_fragments.append(tail)
+        for frag in text_fragments:
+            self._emit_text_fragment(frag.strip(), title_path, node_seq, results)
 
-        # 1. 识别代码围栏
+        # 2. 识别代码围栏（在图片已剥离后的原 section_text 上识别，避免图片 url 误判）
         code_fence_pattern = re.compile(r"^```(\w*)\s*\n(.*?)\n```", re.DOTALL | re.MULTILINE)
         for m in code_fence_pattern.finditer(section_text):
             language = m.group(1) if m.group(1) else None
@@ -734,15 +985,12 @@ class MarkdownParser:
                     )
                 )
 
-        # 移除代码块后的文本
+        # 3. 识别表格（连续 |...| 行）
         remaining_text = code_fence_pattern.sub("", section_text).strip()
-
-        # 2. 识别表格（连续 |...| 行）
         table_pattern = re.compile(r"(\|.*?\|\n)+", re.MULTILINE)
         for m in table_pattern.finditer(remaining_text):
             table_text = m.group(0).strip()
             if table_text:
-                # 转换为 HTML
                 html = self._table_text_to_html(table_text)
                 if html:
                     results.append(
@@ -754,38 +1002,7 @@ class MarkdownParser:
                         )
                     )
 
-        # 移除表格后的文本
-        remaining_text = table_pattern.sub("", remaining_text).strip()
-
-        # 3. 剩余文本作为 paragraph
-        if remaining_text:
-            if len(remaining_text) <= self.threshold:
-                results.append(
-                    self._make_text_node(
-                        next(node_seq),
-                        remaining_text,
-                        title_path=title_path,
-                        group_id=None,
-                    )
-                )
-            else:
-                # 超长剩余文本：内部拆句子为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
-                group_id = next(node_seq)
-                sub_chunks = self._split_by_sentence_with_threshold(
-                    remaining_text, self.threshold
-                )
-                for sub_text in sub_chunks:
-                    if sub_text.strip():
-                        results.append(
-                            self._make_text_node(
-                                next(node_seq),
-                                sub_text.strip(),
-                                title_path=title_path,
-                                group_id=group_id,
-                            )
-                        )
-
-        return results
+        return
 
     def _table_text_to_html(self, table_text: str) -> Optional[str]:
         """

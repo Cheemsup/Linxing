@@ -87,16 +87,15 @@ public class SearchServiceImpl implements ISearchService {
             return List.of();
         }
 
-        List<VectorSearchResult> results;
-        if (reranker.isAvailable()) {
-            log.debug("[搜索] 用户{} 开始Cross-Encoder重排序，候选数: {}, 目标TopK: {}",
-                    userId, candidates.size(), effectiveTopK);
-            results = reranker.rerank(query, candidates, effectiveTopK);//重排
-        } else {
-            results = candidates.stream().limit(effectiveTopK).collect(Collectors.toList());
-        }
+        //对全部候选统一 Cross-Encoder 打分（与 topK 无关，保证不同 topK 下打分对象一致）
+        List<Reranker.ScoredResult> scored = reranker.scoreAll(query, candidates);
 
-        results = expandToParentChunks(results, userId);//small2big处理
+        //父块去重展开（small2big），用父块代表小块参与最终排序
+        //   必须在 limit(topK) 之前做，否则不同 topK 截断后再父块去重会破坏前缀子集关系
+        List<Reranker.ScoredResult> expanded = expandScoredToParent(scored, userId);
+
+        //按分数稳定排序后截断 topK（不同 topK 下前 N 条恒为更大 topK 结果的前 N 条）
+        List<VectorSearchResult> results = reranker.pickTopK(expanded, effectiveTopK);
 
         return results.stream()
                 .map(r -> SearchResult.builder()
@@ -109,7 +108,10 @@ public class SearchServiceImpl implements ISearchService {
                         .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
                         .score(r.score() != null ? r.score() : 0.0)
                         .build())
-                .sorted(Comparator.comparingDouble(SearchResult::getScore).reversed())
+                //按score降序，同分时按chunkId升序作稳定tie-breaker
+                //——避免不同topK下同分父块顺序漂移导致前几名不一致
+                .sorted(Comparator.comparingDouble((SearchResult r) -> r.getScore()).reversed()
+                        .thenComparingInt(r -> r.getChunkId() != null ? r.getChunkId() : Integer.MAX_VALUE))
                 .collect(Collectors.toList());
     }
 
@@ -146,52 +148,73 @@ public class SearchServiceImpl implements ISearchService {
         }
     }
 
-    //small2big检索，将存在parent块的chunk再进行一次父块检索，作为最终返回的chunk
-    private List<VectorSearchResult> expandToParentChunks(List<VectorSearchResult> results, Integer userId) {
-        List<Integer> parentIds = results.stream()
-                .map(VectorSearchResult::parentChunkId)
+    /**
+     * 在 Cross-Encoder 打分之后、limit(topK) 之前做父块去重展开（small2big）。
+     */
+    private List<Reranker.ScoredResult> expandScoredToParent(List<Reranker.ScoredResult> scored, Integer userId) {
+        List<Integer> parentIds = scored.stream()
+                .map(sr -> sr.result().parentChunkId())
                 .filter(pid -> pid != null)
                 .distinct()
                 .toList();
 
         if (parentIds.isEmpty()) {
-            return results;
+            return scored;
         }
 
         Map<Integer, Chunk> parentMap = chunkMapper.findByIds(parentIds).stream()
                 .collect(Collectors.toMap(Chunk::getId, c -> c));
 
         log.debug("[搜索] 用户{} Small-to-Big替换: {}个小块，涉及{}个大块",
-                userId, results.size(), parentIds.size());
+                userId, scored.size(), parentIds.size());
 
-        LinkedHashMap<Integer, VectorSearchResult> expanded = new LinkedHashMap<>();
-        for (VectorSearchResult r : results) {
-            Integer parentId = r.parentChunkId();
-            if (parentId != null && parentMap.containsKey(parentId)) {
-                if (!expanded.containsKey(parentId)) {
-                    Chunk parent = parentMap.get(parentId);
-                    expanded.put(parentId, new VectorSearchResult(
-                            r.id(),
-                            r.score(),
-                            r.text(),
-                            r.metadata(),
-                            parent.getId(),
-                            parent.getDocumentId(),
-                            r.fileName(),
-                            parent.getChunkType() != null ? parent.getChunkType() : r.chunkType(),
-                            parent.getTitlePath() != null ? parent.getTitlePath() : r.titlePath(),
-                            parent.getChunkText(),
-                            null,
-                            serializeNodeMetadata(parent.getNodeMetadata())
-                    ));
-                }
+        //key=父块id（无父块则用小块自身chunkId），值=代表该父块的最高分小块（按分数降序、同分按chunkId升序取首个）
+        LinkedHashMap<Integer, Reranker.ScoredResult> expanded = new LinkedHashMap<>();
+        for (Reranker.ScoredResult sr : scored) {
+            Integer parentId = sr.result().parentChunkId();
+            Integer key = (parentId != null && parentMap.containsKey(parentId)) ? parentId : sr.result().chunkId();
+
+            Reranker.ScoredResult existing = expanded.get(key);
+            if (existing == null) {
+                //首次出现，若为父块则替换为父块文本但保留该小块最高分
+                expanded.put(key, toParentScored(sr, parentId, parentMap));
             } else {
-                expanded.put(r.chunkId(), r);
+                //已有同父块条目：取较高分作为代表分（同分保留先出现者，由上层稳定排序兜底）
+                if (sr.score() > existing.score()) {
+                    expanded.put(key, toParentScored(sr, parentId, parentMap));
+                }
             }
         }
 
         log.debug("[搜索] 用户{} Small-to-Big替换完成: {}条结果 → {}条（去重后）",
-                userId, results.size(), expanded.size());
+                userId, scored.size(), expanded.size());
         return new ArrayList<>(expanded.values());
+    }
+
+    /**
+     * 将小块打分结果替换为父块文本，保留原 Cross-Encoder 分数与小块id作 tie-breaker。
+     * parentId 为 null 或父块不存在时原样返回。
+     */
+    private Reranker.ScoredResult toParentScored(Reranker.ScoredResult sr, Integer parentId, Map<Integer, Chunk> parentMap) {
+        if (parentId == null || !parentMap.containsKey(parentId)) {
+            return sr;
+        }
+        Chunk parent = parentMap.get(parentId);
+        VectorSearchResult r = sr.result();
+        VectorSearchResult parentResult = new VectorSearchResult(
+                r.id(),
+                sr.score(),
+                r.text(),
+                r.metadata(),
+                parent.getId(),
+                parent.getDocumentId(),
+                r.fileName(),
+                parent.getChunkType() != null ? parent.getChunkType() : r.chunkType(),
+                parent.getTitlePath() != null ? parent.getTitlePath() : r.titlePath(),
+                parent.getChunkText(),
+                null,
+                serializeNodeMetadata(parent.getNodeMetadata())
+        );
+        return new Reranker.ScoredResult(parentResult, sr.score());
     }
 }

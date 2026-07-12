@@ -26,8 +26,8 @@ from .markdown_parser import MarkdownParser
 
 logger = logging.getLogger("docling_analysis_service.parsers.router")
 
-# 各类型解析器单例（md/html/code/linebased 无图片需求，可全局单例）；
-# pdf/docx 需注入图片目录，单例在首次解析时懒加载并注入 image 配置
+# 各类型解析器单例；pdf/docx/markdown 需注入图片目录（markdown 文档自带本地图片需落盘），
+# 单例在首次解析时懒加载并注入 image 配置
 _markdown_parser = None
 _html_parser = None
 _code_parser = None
@@ -37,9 +37,18 @@ _docx_parser = None
 
 
 def _get_markdown_parser():
+    """懒加载 Markdown 解析器单例，注入图片存储目录配置。
+
+    markdown 文档自带本地图片资源需落盘（与 docx/pdf 一致），故注入 IMAGE_STORE_DIR /
+    IMAGE_URL_PREFIX；远程 http(s) 图片不下载，仅本地图片处理。
+    """
     global _markdown_parser
     if _markdown_parser is None:
-        _markdown_parser = MarkdownParser()
+        from .markdown_parser import MarkdownParser
+        _markdown_parser = MarkdownParser(
+            image_store_dir=IMAGE_STORE_DIR,
+            image_url_prefix=IMAGE_URL_PREFIX,
+        )
     return _markdown_parser
 
 

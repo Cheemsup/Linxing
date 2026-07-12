@@ -126,18 +126,34 @@ public class Reranker {
             return candidates;
         }
 
-        if (candidates.size() <= topK) {
-            log.debug("候选结果数量({})不超过topK({})，跳过重排序", candidates.size(), topK);
-            return candidates;
-        }
-
+        //稳定兜底：模型不可用 / 出现异常时，统一按候选已有分数稳定降序后截断
+        //——保证不同 topK 下前几名一致（不依赖 topK 走不同排序路径）
         if (!isAvailable()) {
-            log.warn("Cross-Encoder模型不可用，返回原始排序的前{}条结果", topK);
-            return candidates.stream().limit(topK).collect(Collectors.toList());
+            log.warn("Cross-Encoder模型不可用，返回稳定排序后的前{}条结果", topK);
+            return stableLimit(candidates, topK);
         }
 
+        //对全部候选统一打分后稳定排序截断——不依赖 topK 走不同打分路径
+        return pickTopK(scoreAll(query, candidates), topK);
+    }
+
+    /**
+     * 对全部候选统一 Cross-Encoder 打分，返回带分结果（不排序、不截断）。
+     * 供调用方在父块去重后再做 limit(topK)，避免 topK 截断发生在父块去重之前
+     * 破坏不同 topK 下的前缀子集关系。
+     */
+    public List<ScoredResult> scoreAll(String query, List<VectorSearchResult> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        if (!isAvailable()) {
+            //模型不可用时退化为按候选已有分数包装，保持 ScoredResult 结构一致
+            return candidates.stream()
+                    .map(c -> new ScoredResult(c, c.score() != null ? c.score() : 0.0))
+                    .collect(Collectors.toList());
+        }
         try {
-            log.debug("开始ONNX Cross-Encoder重排序，查询: {}, 候选数: {}, 目标TopK: {}", truncateText(query, 60), candidates.size(), topK);
+            log.debug("开始ONNX Cross-Encoder打分，查询: {}, 候选数: {}", truncateText(query, 60), candidates.size());
 
             int batchSize = ragProperties.getReranker().getBatchSize();
             List<ScoredResult> scoredResults = new ArrayList<>(candidates.size());
@@ -158,20 +174,40 @@ public class Reranker {
                     scoredResults.add(new ScoredResult(batch.get(j), score));
                 }
             }
-
-            List<VectorSearchResult> reranked = scoredResults.stream()
-                    .sorted(Comparator.comparingDouble((ScoredResult sr) -> sr.score()).reversed())
-                    .limit(topK)
-                    .map((ScoredResult sr) -> sr.result())
-                    .collect(Collectors.toList());
-
-            log.debug("ONNX Cross-Encoder重排序完成，从 {} 条候选中精选出 {} 条最优结果", candidates.size(), reranked.size());
-            return reranked;
-
+            return scoredResults;
         } catch (Exception e) {
-            log.error("ONNX Cross-Encoder重排序失败，返回原始排序结果: {}", e.getMessage(), e);
-            return candidates.stream().limit(topK).collect(Collectors.toList());
+            log.error("ONNX Cross-Encoder打分失败，退化为候选已有分数: {}", e.getMessage(), e);
+            return candidates.stream()
+                    .map(c -> new ScoredResult(c, c.score() != null ? c.score() : 0.0))
+                    .collect(Collectors.toList());
         }
+    }
+
+    /**
+     * 对已打分结果按 Cross-Encoder 分数降序、同分按 chunkId 升序稳定排序后截断 topK。
+     */
+    public List<VectorSearchResult> pickTopK(List<ScoredResult> scored, int topK) {
+        if (scored == null || scored.isEmpty()) {
+            return List.of();
+        }
+        return scored.stream()
+                .sorted(Comparator.comparingDouble((ScoredResult sr) -> sr.score()).reversed()
+                        .thenComparingInt(sr -> sr.result().chunkId() != null ? sr.result().chunkId() : Integer.MAX_VALUE))
+                .limit(topK)
+                .map(ScoredResult::result)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 模型不可用/异常时的稳定兜底：按候选已有 score 降序、同分按 chunkId 升序，再 limit(topK)。
+     * 避免不同 topK 走不同排序路径导致前几名漂移。
+     */
+    private List<VectorSearchResult> stableLimit(List<VectorSearchResult> candidates, int topK) {
+        return candidates.stream()
+                .sorted(Comparator.comparingDouble((VectorSearchResult r) -> r.score() != null ? r.score() : 0.0).reversed()
+                        .thenComparingInt(r -> r.chunkId() != null ? r.chunkId() : Integer.MAX_VALUE))
+                .limit(topK)
+                .collect(Collectors.toList());
     }
 
     public boolean isAvailable() {
@@ -185,6 +221,6 @@ public class Reranker {
         return text.length() <= maxChars ? text : text.substring(0, maxChars) + "...";
     }
 
-    private record ScoredResult(VectorSearchResult result, double score) {
+    public record ScoredResult(VectorSearchResult result, double score) {
     }
 }

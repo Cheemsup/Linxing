@@ -11,8 +11,11 @@
 3. 遍历匹配：
    - class → 更新 currentClassName，titlePath = 类名
    - function → titlePath = currentClassName + " > " + funcName（无 class 则单独 funcName）
-4. 每个块文本 = 从当前 match.start 到下一个 match.start（trim 后空则跳过）
-5. 无任何 class/func 匹配 → 整个文件作为一个 code Node（titlePath=None）
+4. 每个块文本起点 = _absorb_leading_comments 吸收紧贴签名前的 Javadoc/块/行注释
+   （避免方法前注释被划入上一个方法块）；终点 = 下一个匹配的注释吸收起点
+5. 方法/类块保持原子性：不再对超长方法做内部拆分（embedding 用 LLM 解释而非代码原文，
+   超长方法直接作为原子单位不影响语义保持，且保障方法语义完整）
+6. 无任何 class/func 匹配 → 整个文件作为一个 code Node（titlePath=None）
 
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - id: str "n1"... 自管递增
@@ -20,7 +23,7 @@ Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - text: 代码块文本
 - language: 检测出的语言（java/py/js/ts...），None 也行
 - titlePath: str（class 名或 "class > func"），无则 None
-- groupId: str 或 None（超长块内部拆出的小 Node 共享同一 groupId 标识同源整块；普通块 None）
+- groupId: 始终 None（方法原子化后不再产生超长块内部拆分；保留字段以兼容协议）
 - page: 1
 - bbox: None
 - html: None
@@ -33,6 +36,8 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger("docling_analysis_service.parsers.code_parser")
 
+# 保留阈值常量以兼容 __init__ 导出与外部引用；
+# 方法原子化后超长方法不再内部拆分，threshold 仅作为日志/未来扩展用途，不再驱动切分。
 CHUNK_THRESHOLD_CODE = 1500
 
 CODE_EXTENSIONS = {
@@ -44,13 +49,7 @@ CODE_INDICATOR = re.compile(
     r"\b(package|import|class|public class|private class|def |function |fn |func |int main|void main)\b"
 )
 
-# 旧 Java CLASS_PATTERN（迁移并健全化）：
-# 旧版缺陷：
-# 1) 修饰符组只允许 0~1 个（(?:public|...|data)?\s*），"public final class X" /
-#    "public abstract class X" / "public static class X" 等多修饰符声明漏判
-# 2) 缺 export / override（TS export class、Kotlin override class）
-# 3) "enum class Foo" / "sealed class Foo" 这类"关键字 class 名字"被误判：
-#    旧版正则在 "enum class Foo" 上把 group(3) 命中 "enum"、group(4) 命中 "class"，name 取错
+# 对在java侧的旧版逻辑进行增强改造
 # 健全化：修饰符组改为 (mod\s+)* 多修饰符；并在主关键字后允许可选的 "class"/"struct"
 # （Kotlin/Scala 的 "enum class" / "data class" / "sealed class"），name 正确取到 Foo。
 # group(1)=前导空白 group(2)=修饰符组 group(3)=class/interface/enum/... group(4)=类名
@@ -132,29 +131,28 @@ _EXT_LANGUAGE_MAP = {
     "sql": "sql",
 }
 
-# 超长块子 Node 拆分：句子分隔符（中英文，与 linebased_parser 一致）
-_SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
-
-# 超长块子 Node 拆分：空行分隔（强逻辑边界）
-_BLANK_LINE_SEP = re.compile(r"\n\s*\n")
-
-# 超长块子 Node 拆分兜底行数（无空行无句子分隔时，每 N 行切一刀）
-_FALLBACK_LINES_PER_SUB = 40
+# 超长块子 Node 拆分相关的常量与方法已随「方法原子化」改造移除：
+# embedding 使用 LLM 解释而非代码原文，超长方法直接作为原子单位不再内部拆分。
+# 旧的 _split_oversized_block / _split_by_sentence_or_lines / _split_into_sentences
+# 及 _SENTENCE_DELIMITER / _BLANK_LINE_SEP / _FALLBACK_LINES_PER_SUB 一并删除。
 
 
 class CodeParser:
     """源代码文件解析器，基于标准库 re 实现
 
-    忠实迁移旧 Java CodeChunkStrategy 的正则与 splitByClassOrFunction 逻辑，
-    超长块拆分改用「内部拆为多个小 Node + 共享 groupId」方案（不再输出整块超长镜像父 Node）。
+    忠实迁移旧 Java CodeChunkStrategy 的正则与 splitByClassOrFunction 逻辑。
+    方法/类块保持原子性：不再对超长方法做内部拆分（embedding 用 LLM 解释而非代码原文，
+    超长方法直接作为原子单位不影响语义保持）。方法前注释通过 _absorb_leading_comments
+    归属到正确的方法块。
     """
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD_CODE):
         """
-        :param chunk_threshold: 超长块判定阈值（默认 1500，与旧 Java 一致）
+        :param chunk_threshold: 阈值（方法原子化后不再用于超长块内部拆分，
+            保留参数以兼容调用方与日志，未来若恢复切分逻辑可复用）
         """
         self.threshold = chunk_threshold
-        logger.info("CodeParser 初始化完成，阈值: %d", self.threshold)
+        logger.info("CodeParser 初始化完成，阈值: %d（方法原子化，不用于切分）", self.threshold)
 
     # ============================== 对外入口 ==============================
 
@@ -201,12 +199,12 @@ class CodeParser:
     ) -> List[dict]:
         """
         按类/函数边界拆分源代码，生成 Node JSON 列表。
-        （忠实迁移 Java CodeChunkStrategy.splitByClassOrFunction）
 
-        与 Java 的区别：
-        - 输出 Node dict（而非 ChunkResult）
-        - 超长块不再走 RecursiveTextSplitter.refine，
-          改为输出多个小 Node（内部语义/逻辑行切分），共享同一 groupId
+        改造点（some.md 第15点）：
+        - 注释归属：紧贴方法签名前的 Javadoc/块/行注释通过 _absorb_leading_comments
+          纳入当前方法块，不再被划入上一个方法块尾部。
+        - 方法原子性：不再对超长方法做内部拆分，直接作为单个 Node 输出（groupId=None）。
+          embedding 使用 LLM 解释而非代码原文，超长方法作为原子单位不影响语义保持。
         """
         results: List[dict] = []
         if not text:
@@ -243,9 +241,14 @@ class CodeParser:
         matches.sort(key=lambda x: x[0])
 
         # 4. 首匹配前的 preamble 作为独立块（import / package / 注释 / 全局变量）
+        #    注意：preamble 截止到「首个方法/类签名之前」，但紧贴签名前的注释会被第5步吸收到该方法块，
+        #    所以这里先按原始 first_start 取 preamble，真正的注释归属修正由 _absorb_leading_comments 完成。
         first_start = matches[0][0]
-        if first_start > 0:
-            preamble = text[:first_start].strip()
+        # 吸收首个匹配前的紧邻注释，注释段纳入首个方法/类块，preamble 仅保留注释段之前的内容
+        first_comment_start = self._absorb_leading_comments(text, first_start)
+        preamble_end = first_comment_start if first_comment_start < first_start else first_start
+        if preamble_end > 0:
+            preamble = text[:preamble_end].strip()
             if preamble:
                 results.append(
                     self._make_code_node(
@@ -266,35 +269,96 @@ class CodeParser:
             else:
                 block_title_path = m_name
 
-            # 块文本 = 从当前 match.start 到下一个 match.start
-            end = matches[i + 1][0] if i + 1 < len(matches) else len(text)
-            block_text = text[start:end].strip()
+            # 块文本起点：吸收紧贴签名前的注释（Javadoc/块注释/行注释），避免注释被划入上一个方法块
+            block_start = self._absorb_leading_comments(text, start)
+            # 块文本终点：下一个匹配的「注释吸收起点」（避免把下一个方法的注释留到当前块尾部）
+            if i + 1 < len(matches):
+                next_start = matches[i + 1][0]
+                next_comment_start = self._absorb_leading_comments(text, next_start)
+                end = next_comment_start if next_comment_start < next_start else next_start
+            else:
+                end = len(text)
+            block_text = text[block_start:end].strip()
 
             if not block_text:
                 continue
 
-            # 6. 普通块 / 超长块分流
-            if len(block_text) <= self.threshold:
-                results.append(
-                    self._make_code_node(
-                        next(node_seq), block_text, language=language,
-                        title_path=block_title_path, group_id=None,
-                    )
+            # 6. 方法/类块保持原子性：不再对超长方法做内部拆分
+            #    理由：embedding 使用的是经大模型解读后的解释性内容而非代码原文，
+            #    超长方法直接作为原子单位不影响 embedding 语义保持效果，且保障方法语义完整。
+            #    Java 侧 NodeBasedChunkBuilder 对超大单 Node 会独立成块（不切分 Node 本身）。
+            results.append(
+                self._make_code_node(
+                    next(node_seq), block_text, language=language,
+                    title_path=block_title_path, group_id=None,
                 )
-            else:
-                # 超长块：内部拆为多个小 Node，共享同一 groupId（不再输出整块超长镜像父 Node）
-                group_id = next(node_seq)
-                sub_chunks = self._split_oversized_block(block_text, self.threshold)
-                for sub_text in sub_chunks:
-                    if sub_text and sub_text.strip():
-                        results.append(
-                            self._make_code_node(
-                                next(node_seq), sub_text.strip(), language=language,
-                                title_path=block_title_path, group_id=group_id,
-                            )
-                        )
+            )
 
         return results
+
+    # ============================== 注释归属修正 ==============================
+
+    @staticmethod
+    def _absorb_leading_comments(text: str, match_start: int) -> int:
+        """
+        从 match_start 向前扫描，吸收「紧贴签名之前、连续无代码行间隔」的注释段，
+        返回注释段的起始偏移（若无注释则返回 match_start）。
+
+        目的：修正 some.md 第15点第二小点——方法前的 Javadoc/注释本用于解释该方法，
+        却因「块文本=[当前 match.start, 下一个 match.start)」被划入上一个方法块尾部。
+
+        覆盖的注释形态（跨语言）：
+        - 块注释：/\\* ... \\*/（含 Javadoc /\\*\\* ... \\*/）
+        - 行注释：// ...、# ...、-- ...（SQL）
+        - 连续空行允许出现在注释段内（注释之间的空行视为同段）
+
+        停止条件：遇到任何「非注释、非空行」的代码行即停止，避免误吞上一个方法的尾行。
+        """
+        if match_start <= 0:
+            return match_start
+
+        # 按行从后向前扫描（match_start 位于签名行某处，先回退到该行行首）
+        # 找到 match_start 所在行的起始
+        line_start = text.rfind("\n", 0, match_start) + 1
+        cursor = line_start
+
+        # 逐行向前判断：是否为注释行或空行
+        while cursor > 0:
+            # 找到上一行的起止
+            prev_newline = text.rfind("\n", 0, cursor - 1)
+            prev_line_start = prev_newline + 1
+            prev_line_end = cursor - 1  # 不含换行符
+            line = text[prev_line_start:prev_line_end].strip()
+
+            if line == "":
+                # 空行：允许在注释段内出现，继续向前看（但若前面已无注释则停在空行后）
+                cursor = prev_line_start
+                continue
+
+            if CodeParser._is_comment_line(line):
+                cursor = prev_line_start
+                continue
+
+            # 遇到非注释、非空行的代码行 → 停止，注释段从 cursor 开始
+            break
+
+        return cursor
+
+    @staticmethod
+    def _is_comment_line(line: str) -> bool:
+        """判断一行是否为注释行（跨语言，覆盖块注释、行注释、Javadoc）。"""
+        if not line:
+            return False
+        # 行注释：//、#、--（SQL）、rem（bat）
+        if line.startswith("//") or line.startswith("#") or line.startswith("--") or line.lower().startswith("rem "):
+            return True
+        # 块注释起止：/* */（含 Javadoc /** */）
+        # 单行块注释 /* xxx */ 由 startswith("/*") 命中；
+        # 多行块注释的中间行以 * 开头（Javadoc/Python 无此态，但 C/Java/JS 惯例），
+        # 结束行以 */ 结尾
+        if line.startswith("/*") or line.startswith("*") or line.endswith("*/"):
+            return True
+        return False
 
     # ============================== extractFuncName（迁移并健壮化） ==============================
 
@@ -323,103 +387,6 @@ class CodeParser:
         # 3. 兜底：压缩空白后取前 30 字符
         compact = re.sub(r"\s+", " ", signature)
         return compact[: min(30, len(compact))]
-
-    # ============================== 超长块拆分（本次改造新增） ==============================
-
-    def _split_oversized_block(
-        self, block_text: str, threshold: int
-    ) -> List[str]:
-        """
-        拆分超长代码块为子 Node 文本列表。
-        优先级：空行/方法边界 → 句子分隔 → 固定行数兜底。
-        子 Node 由调用方标注同一 groupId 标识同源整块。
-
-        与旧 Java RecursiveTextSplitter.refine 的区别：
-        - 不做 overlap
-        - 优先保留代码逻辑边界（空行 = 方法/字段间分隔）
-        """
-        # 1. 优先按空行拆分（代码中空行通常是逻辑块边界）
-        if _BLANK_LINE_SEP.search(block_text):
-            segments = _BLANK_LINE_SEP.split(block_text)
-            segments = [s for s in segments if s and s.strip()]
-            # 若所有段都 ≤ threshold，直接返回；否则对超长段继续按句子/行数兜底
-            if all(len(s) <= threshold for s in segments):
-                return segments
-            # 有超长段，递归拆分（按句子/行数）
-            result: List[str] = []
-            for seg in segments:
-                if len(seg) <= threshold:
-                    result.append(seg)
-                else:
-                    result.extend(self._split_by_sentence_or_lines(seg, threshold))
-            return result
-
-        # 2. 无空行 → 按句子/行数兜底
-        return self._split_by_sentence_or_lines(block_text, threshold)
-
-    def _split_by_sentence_or_lines(
-        self, text: str, threshold: int
-    ) -> List[str]:
-        """
-        句子分隔兜底（[。！？.!?；;]），累加到阈值切；
-        无句子分隔则按固定行数（_FALLBACK_LINES_PER_SUB）切。
-        """
-        # 1. 尝试按句子分隔符拆分
-        if _SENTENCE_DELIMITER.search(text):
-            sentences = self._split_into_sentences(text)
-            results: List[str] = []
-            buffer = ""
-            for sentence in sentences:
-                if not sentence.strip():
-                    continue
-                if buffer and len(buffer) + len(sentence) > threshold:
-                    results.append(buffer)
-                    buffer = sentence
-                else:
-                    buffer += sentence
-            if buffer:
-                results.append(buffer)
-            return results
-
-        # 2. 无句子分隔 → 按固定行数切（保留代码行完整性，不截断行）
-        lines = text.split("\n")
-        results = []
-        buffer_lines: List[str] = []
-        buffer_len = 0
-        for line in lines:
-            line_len = len(line) + 1  # +1 for \n
-            if buffer_lines and buffer_len + line_len > threshold:
-                results.append("\n".join(buffer_lines))
-                buffer_lines = [line]
-                buffer_len = line_len
-            else:
-                buffer_lines.append(line)
-                buffer_len += line_len
-            # 固定行数兜底（避免某些语言单行极长但仍无分隔符）
-            if len(buffer_lines) >= _FALLBACK_LINES_PER_SUB:
-                results.append("\n".join(buffer_lines))
-                buffer_lines = []
-                buffer_len = 0
-        if buffer_lines:
-            results.append("\n".join(buffer_lines))
-        return results
-
-    @staticmethod
-    def _split_into_sentences(text: str) -> List[str]:
-        """按句子分隔符拆分，保留分隔符在句末。"""
-        sentences: List[str] = []
-        last_end = 0
-        for m in _SENTENCE_DELIMITER.finditer(text):
-            delimiter_end = m.end()
-            sentence = text[last_end:delimiter_end]
-            if sentence.strip():
-                sentences.append(sentence)
-            last_end = delimiter_end
-        if last_end < len(text):
-            remaining = text[last_end:]
-            if remaining.strip():
-                sentences.append(remaining)
-        return sentences
 
     # ============================== 语言推断 ==============================
 

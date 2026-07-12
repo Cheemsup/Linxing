@@ -5,27 +5,31 @@ HTML 解析器
 
 选型决策：
 - 使用 beautifulsoup4（>=4.15.0），默认 html.parser 后端，不引入 lxml。
-- bs4 负责 DOM 遍历与 script/style 过滤；titlePath 栈推导、超长拆分、groupId 标注
+- bs4 负责 DOM 遍历与 script/style 过滤；titlePath 栈推导、语义容器边界识别
   仍是本系统手写领域逻辑（标准库 re）。
 
-核心策略（复刻旧 Java HtmlChunkStrategy）：
+核心策略：
 1. BeautifulSoup 解析 DOM，decompose() 掉 script/style/noscript/head/meta/link
 2. 从 body（无 body 用整棵 soup）深度优先遍历：
    - h1-h6：先 flushBuffer 输出累积文本为 block，再更新标题栈
      （弹出 size>=level 的，压入标题文本），标题文本也加入 buffer
-   - section/article：flushBuffer，记录栈大小，递归遍历，遍历完恢复栈并 flushBuffer
+   - 语义容器（section/article/main/header/footer/nav/aside/figure/form）：
+     flushBuffer，记录栈大小，递归遍历，遍历完恢复栈并 flushBuffer。
+     Node 边界由 HTML5 语义容器决定，而非 DOM 标签数量或文本长度。
    - table：flushBuffer，作为原子块输出 type="table" 的 block（html 字段），不递归
-   - 其他元素：递归遍历，文本节点累加到 buffer
+   - 其他元素（div/span 等布局标签）：仅递归遍历，忽略其边界，文本节点累加到 buffer
 3. flushBuffer：buffer trim 非空输出为 block，titlePath = 标题栈 join " > "（空则 None）
-4. 超长 block（> CHUNK_THRESHOLD=1000）：内部按句子 [。！？.!?；;] 拆分累加到阈值为多个小 Node，共享同一 groupId（同源整块），不再输出整块超长镜像父 Node
-5. 若解析后只有 0-1 个块，fallback：取纯文本 soup.get_text()，按段落/句子拆分
+4. text block 保持原子性：无论是否超长均作为单个 text Node 输出（groupId=None），
+   不再按句子拆分。html 文本块不引入 LLM 解读（本次保持原文向量化），
+   超长文本块由 Java 侧 NodeBasedChunkBuilder 独立成块。
+5. 若解析后只有 0-1 个块，fallback：取纯文本 soup.get_text()，按段落拆分
 
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 - id: str "n1","n2"... 自管递增
 - type: "text"（HTML 块统一为 text；table 转 html 字段并 type="table"）
 - text: 块文本（table 时为 None）
 - titlePath: str 标题路径，无则 None
-- groupId: str 或 None（超长 block 内部拆出的小 Node 共享同一 groupId；普通块 None）
+- groupId: 始终 None（文本块原子化后不再产生超长块内部拆分；保留字段以兼容协议）
 - page: 1
 - bbox: None
 - language: None
@@ -43,8 +47,6 @@ logger = logging.getLogger("docling_analysis_service.parsers.html_parser")
 
 CHUNK_THRESHOLD = 1000
 
-SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
-
 # 强段落分隔：多换行/双换行（fallback 用）
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
 
@@ -52,6 +54,12 @@ STRONG_PARAGRAPH_SEP = r"\n\s*\n"
 HTML_EXTENSIONS = {"html", "htm"}
 
 _STRIP_TAGS = ("script", "style", "noscript", "head", "meta", "link")
+
+# HTML5 语义容器：如下的标签作为Node的天然边界
+_SEMANTIC_CONTAINER_TAGS = (
+    "section", "article", "main", "header", "footer",
+    "nav", "aside", "figure", "form",
+)
 
 
 class HtmlParser:
@@ -62,7 +70,8 @@ class HtmlParser:
 
     def __init__(self, chunk_threshold: int = CHUNK_THRESHOLD):
         """
-        :param chunk_threshold: 拆分阈值（默认 1000，与旧 Java HtmlChunkStrategy 一致）
+        :param chunk_threshold: 阈值（文本块原子化后仅用于 fallback 段落累加上限，
+            不再驱动超长块内部句子拆分）
         """
         self.threshold = chunk_threshold
         logger.info("HtmlParser 初始化完成，阈值: %d", self.threshold)
@@ -157,10 +166,16 @@ class HtmlParser:
         深度优先遍历 DOM（与 Java walkDom 等价）。
 
         - h1-h6：flushBuffer → 更新标题栈 → 标题文本加 buffer
-        - section/article：flushBuffer → 记录栈大小 → 递归 → 恢复栈 → flushBuffer
-        - table：flushBuffer → 原子块输出 type="table"（不递归）
-        - 其他元素：递归遍历
+        - 语义容器（section/article/main/header/footer/nav/aside/figure/form）：
+          flush → 记录栈大小 → 递归 → 恢复栈 → flush
+        - table：flush → 原子块输出 type="table"（不递归）
+        - 其他元素（div/span 等布局标签）：仅递归遍历，忽略其边界
         - 文本节点：累加到 buffer
+
+        语义容器扩展（some.md 第16点第四小点，GPTinHTMLNodes.md 第一层）：
+        Node 边界由 HTML5 语义容器决定，而非 DOM 标签数量或文本长度。
+        form/nav/aside/header/footer/main/figure 与 section/article 同等作为天然边界。
+        div/span 等仅承担布局/样式作用的标签完全忽略边界，仅递归提取内容。
 
         :param element: bs4 元素（Tag 或 soup）
         :param blocks: 累积的 block 列表（输出）
@@ -199,8 +214,9 @@ class HtmlParser:
                 buffer.append(heading_text)
                 buffer.append(" ")
 
-            elif tag in ("section", "article"):
-                # section/article：flush → 记录栈大小 → 递归 → 恢复栈 → flush
+            elif tag in _SEMANTIC_CONTAINER_TAGS:
+                # 语义容器：flush → 记录栈大小 → 递归 → 恢复栈 → flush
+                # 容器内部的子标题仅在该容器作用域内有效，递归返回后恢复栈，避免污染兄弟块
                 self._flush_buffer(buffer, blocks, title_stack)
                 saved_size = len(title_stack)
 
@@ -223,7 +239,7 @@ class HtmlParser:
                 })
 
             else:
-                # 其他元素：递归遍历
+                # 其他元素（div/span 等布局标签）：仅递归遍历，忽略其边界
                 self._walk_dom(child, blocks, title_stack, buffer)
 
     def _flush_buffer(
@@ -254,8 +270,11 @@ class HtmlParser:
         将 blocks 转换为 Node JSON 列表。
 
         - table block → table Node（原子，不拆分）
-        - text block ≤ threshold → 单个 text Node（groupId=None）
-        - text block > threshold → 内部按句子拆为多个小 text Node，共享同一 groupId（同源整块，不再输出整块超长镜像父 Node）
+        - text block → 单个 text Node（groupId=None），无论是否超长均保持原子性
+
+        改造点（some.md 第16点，与 code 阶段一对齐）：
+        text block 不再按句子拆分 + groupId。html 文本块不引入 LLM 解读（本次保持原文向量化），
+        超长文本块直接作为单个 Node 输出，Java 侧 NodeBasedChunkBuilder 对超大单 Node 独立成块。
         """
         results: List[dict] = []
         for block in blocks:
@@ -278,30 +297,12 @@ class HtmlParser:
             if not text:
                 continue
 
-            if len(text) <= self.threshold:
-                # 普通块
-                results.append(
-                    self._make_text_node(
-                        next(node_seq), text, title_path=title_path, group_id=None
-                    )
+            # 文本块保持原子性：无论是否超长均作为单个 text Node 输出
+            results.append(
+                self._make_text_node(
+                    next(node_seq), text, title_path=title_path, group_id=None
                 )
-            else:
-                # 超长块：内部拆句子为多个小 Node，共享同一 groupId
-                group_id = next(node_seq)
-                sub_chunks = self._split_by_sentence_with_threshold(
-                    text, self.threshold
-                )
-                for sub_text in sub_chunks:
-                    sub_text = sub_text.strip()
-                    if sub_text:
-                        results.append(
-                            self._make_text_node(
-                                next(node_seq),
-                                sub_text,
-                                title_path=title_path,
-                                group_id=group_id,
-                            )
-                        )
+            )
 
         return results
 
@@ -310,9 +311,10 @@ class HtmlParser:
     def _fallback_split(self, plain_text: str) -> List[dict]:
         """
         DOM 遍历产出 0-1 块时的 fallback：取纯文本按段落（双换行）拆分，
-        段落累加到阈值输出，超长段落整体作为一个 block（交由 _blocks_to_nodes 拆句子）。
+        段落累加到阈值输出，超长段落整体作为一个 block。
 
-        （与 Java fallbackSplit 等价，区别在于保留段落换行用于切分边界）
+        改造点：文本块原子化后不再按句子拆分，超长段落整体作为一个 block，
+        由 _blocks_to_nodes 作为单个原子 text Node 输出。
         """
         blocks: List[dict] = []
         if not plain_text or not plain_text.strip():
@@ -327,7 +329,7 @@ class HtmlParser:
                 continue
 
             if len(trimmed) > self.threshold:
-                # 超长段落：先 flush buffer，再整体作为一个 block（后续 _blocks_to_nodes 会拆句子）
+                # 超长段落：先 flush buffer，再整体作为一个 block（原子化，不再拆句子）
                 if buffer:
                     blocks.append({
                         "text": buffer.strip(),
@@ -367,66 +369,6 @@ class HtmlParser:
             })
 
         return blocks
-
-    # ============================== 句子拆分 ==============================
-
-    def _split_by_sentence_with_threshold(
-        self, text: str, threshold: int
-    ) -> List[str]:
-        """
-        按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
-        句子是原子单位，不会被截断。
-        （与 Java splitBySentenceWithThreshold 一致）
-        """
-        results: List[str] = []
-        if not text or not text.strip():
-            return results
-
-        sentences = self._split_into_sentences(text)
-
-        buffer = ""
-        for sentence in sentences:
-            if not sentence.strip():
-                continue
-            # 检查累加后是否超过阈值
-            add_len = len(sentence)
-            if buffer and len(buffer) + add_len > threshold:
-                # 超过阈值，先输出当前 buffer
-                results.append(buffer.strip())
-                buffer = sentence
-            else:
-                buffer += sentence
-
-        # 输出剩余 buffer
-        if buffer:
-            results.append(buffer.strip())
-
-        return results
-
-    def _split_into_sentences(self, text: str) -> List[str]:
-        """
-        按句子分隔符拆分文本，保留分隔符在句子末尾。
-        （与 Java splitIntoSentences 一致）
-        """
-        sentences: List[str] = []
-        if not text:
-            return sentences
-
-        last_end = 0
-        for m in SENTENCE_DELIMITER.finditer(text):
-            delimiter_end = m.end()
-            sentence = text[last_end:delimiter_end]
-            if sentence.strip():
-                sentences.append(sentence)
-            last_end = delimiter_end
-
-        # 剩余部分（无分隔符的结尾）
-        if last_end < len(text):
-            remaining = text[last_end:]
-            if remaining.strip():
-                sentences.append(remaining)
-
-        return sentences
 
     # ============================== Node 构造辅助 ==============================
 

@@ -1,9 +1,8 @@
 """
 parsers 子包共享工具模块
 
-仅收录 PDF / DOCX 等结构化解析器共同需要的小工具，避免在 pdf_parser / docx_parser
-之间重复实现。其它纯文本解析器（markdown / html / code / linebased）历史上各自
-内联了等价辅助，沿用其自包含风格不动，不在本模块强制收敛。
+仅收录各解析器共同需要的小工具（节点 id 生成器、标题路径构建、哈希、表格 HTML、
+语言检测、累加阈值弹性策略），避免在各 parser 间重复实现。
 
 约定：本模块只放无状态、可复用的纯函数；不放任何解析器实例或路由逻辑。
 """
@@ -39,6 +38,33 @@ def build_title_path(title_stack: Iterable[Tuple[int, str]]) -> Optional[str]:
 def compute_hash(data: bytes) -> str:
     """计算 bytes 的 MD5 哈希（用于图片去重）。"""
     return hashlib.md5(data).hexdigest()
+
+
+# ============================== 累加阈值弹性策略 ==============================
+# 累加阈值采用弹性区间，减少在阈值附近对强关联语义的人为切断。
+# 语义：仅当"加入下一块后会超过弹性上界"时才切出当前累加块；落在弹性区间内的累积都视为可接受。
+# 仅作用于"同一原文流累加"场景（弱段落累加 / 句子累加），不改变跨强段落/标题的硬边界。
+ELASTIC_RATIO = 0.2
+
+
+def elastic_upper_bound(threshold: int, ratio: float = ELASTIC_RATIO) -> int:
+    """弹性上界：累加长度超过此值才切出当前块。"""
+    return int(threshold * (1.0 + ratio))
+
+
+def should_flush_under_elastic(
+    buffer_len: int, add_len: int, threshold: int, ratio: float = ELASTIC_RATIO
+) -> bool:
+    """判断是否应在加入下一块前 flush 当前累加缓冲。
+
+    硬阈值策略下：buffer + add > threshold 即 flush。
+    弹性策略下：仅当 buffer + add > 弹性上界才 flush；
+    落在 [threshold, 弹性上界] 区间的累积不切，保留强关联语义连续性。
+    buffer 为空时不 flush（避免首块即被空判误切）。
+    """
+    if buffer_len == 0:
+        return False
+    return buffer_len + add_len > elastic_upper_bound(threshold, ratio)
 
 
 def guess_image_ext(content_type: str) -> str:

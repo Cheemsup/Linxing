@@ -40,6 +40,12 @@ public class FormulaNode implements DocumentNode {
     }
 
     @Override
+    public String backgroundContent() {
+        // 全篇文档背景需要真实 LaTeX 公式（占位符 LLM 无法理解）
+        return formula != null ? formula : "无公式内容";
+    }
+
+    @Override
     public String semanticText() {
         // 增强后返回解释；未增强时返回公式原文或占位信息
         if (semanticExplanation != null && !semanticExplanation.isBlank()) {

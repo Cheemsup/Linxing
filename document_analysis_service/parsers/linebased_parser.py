@@ -29,6 +29,8 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
+from parsers._common import should_flush_under_elastic
+
 logger = logging.getLogger("docling_analysis_service.parsers.linebased_parser")
 
 CHUNK_THRESHOLD = 600
@@ -136,10 +138,10 @@ class LineBasedParser:
                             )
                         )
             else:
-                # 3. 正常段落：累加到阈值
+                # 3. 正常段落：累加到阈值（弹性区间，减少阈值附近对强关联语义的人为切断）
                 add_len = len(trimmed_para) + (2 if buffer else 0)
-                if buffer and len(buffer) + add_len > self.threshold:
-                    # 超过阈值，先输出当前 buffer
+                if should_flush_under_elastic(len(buffer), add_len, self.threshold):
+                    # 超过弹性上界，先输出当前 buffer
                     results.append(self._make_text_node(next(node_seq), buffer.strip(), group_id=None))
                     buffer = trimmed_para
                 else:
@@ -246,8 +248,7 @@ class LineBasedParser:
     def _accumulate_with_threshold(self, chunks: List[str], threshold: int) -> List[str]:
         """
         将拆分后的子块累加到阈值后输出。
-        子块之间以单换行连接，累加超过阈值则切出当前块。
-        （与 Java accumulateWithThreshold 一致）
+        子块之间以单换行连接，累加超过弹性上界则切出当前块（弹性区间减少人为切断强关联语义）。
         """
         results: List[str] = []
         if not chunks:
@@ -260,7 +261,7 @@ class LineBasedParser:
             trimmed = chunk.strip()
             # 单换行分隔长度为 1
             add_len = len(trimmed) + (1 if buffer else 0)
-            if buffer and len(buffer) + add_len > threshold:
+            if should_flush_under_elastic(len(buffer), add_len, threshold):
                 results.append(buffer.strip())
                 buffer = trimmed
             else:
@@ -278,8 +279,7 @@ class LineBasedParser:
     def _split_by_sentence_with_threshold(self, text: str, threshold: int) -> List[str]:
         """
         按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
-        句子是原子单位，不会被截断。
-        （与 Java splitBySentenceWithThreshold 一致）
+        句子是原子单位，不会被截断。累加采用弹性区间（减少对强关联句的人为切断）。
         """
         results: List[str] = []
         if not text or not text.strip():
@@ -291,10 +291,10 @@ class LineBasedParser:
         for sentence in sentences:
             if not sentence.strip():
                 continue
-            # 检查累加后是否超过阈值
+            # 检查累加后是否超过弹性上界
             add_len = len(sentence)
-            if buffer and len(buffer) + add_len > threshold:
-                # 超过阈值，先输出当前 buffer
+            if should_flush_under_elastic(len(buffer), add_len, threshold):
+                # 超过弹性上界，先输出当前 buffer
                 results.append(buffer.strip())
                 buffer = sentence
             else:

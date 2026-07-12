@@ -46,6 +46,13 @@ public class ImageNode implements DocumentNode {
     }
 
     @Override
+    public String backgroundContent() {
+        // 全篇文档背景：图片字节无法拼进文本背景，只能用 caption；
+        // 当前 Node 自身的视觉内容由 VLM 在增强时直接看图字节，背景里仅体现其它图片的 caption
+        return caption != null && !caption.isBlank() ? caption : "[图片]";
+    }
+
+    @Override
     public String semanticText() {
         // 增强后返回 VLM 描述；未增强时返回 caption 或占位信息
         if (semanticDescription != null && !semanticDescription.isBlank()) {

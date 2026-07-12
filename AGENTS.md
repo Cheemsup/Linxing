@@ -5,96 +5,41 @@
 Monorepo: Spring Boot 4.x backend (`Linxing_Agent/`) + Vue 3 frontend (`webconsole/`) + Python 文档解析服务 (`document_analysis_service/`)。
 Agent-driven personal learning platform — 自研 ReAct Agent 主循环 + `langchain4j-agentic` 多 Agent 工作流，在 PG 向量知识库（Node-Based RAG）、联网搜索之上提供对话、学习计划生成、知识测验出题与联网搜索能力。
 
-## Commands
-
-```bash
-# Backend (from Linxing_Agent/)
-./mvnw spring-boot:run                    # start backend on :8080
-./mvnw compile                            # compile-only
-
-# Python 文档解析服务 (from document_analysis_service/)
-uvicorn app:app --host 0.0.0.0 --port 8000   # Node-Based RAG 的解析入口，需先于后端启动
-# 或 python app.py
-
-# Frontend (from webconsole/)
-yarn serve                                # dev server on :3000, proxies /api → :8080
-yarn build                                # production build
-yarn lint                                 # ESLint
-```
-
 ## Architecture
 
 - **Backend package**: `org.linxing.linxing_agent`
 - **Domain-driven layout**: `common/`（共享基础设施）→ `user/`（认证）→ `rag/`（知识检索）→ `agent/`（对话编排、工具、技能、子 Agent 工作流）
-- **Data access**: MyBatis XML mappers under `resources/mapper/{agent,rag}/`
-- **Multi-tenant**: All tables carry `user_id`; JWT interceptor extracts user on every request
 - **Auth**: JWT via `JwtTokenUserInterceptor` — excludes only `/user/login` and `/user/register`（后端路径无 `/api` 前缀）
-- **Database**: PostgreSQL `vectordb` on localhost:5432，需 `pgvector` 扩展，schema 在 `schema.sql`
 
 ### Node-Based RAG 架构（rag 域核心）
 
-文档入库统一走 Node 体系，旧 `ChunkStrategyFactory + strategy.execute` 按文件类型分派路径已废弃：
+主要的流程：文档给到python侧划分出Node数据（详见document_analysis_service\README.md），Node List给回java侧完成图片解读、语义丰富、拼装等（在保障Node原子性的情况下消费Node），以及完成后续的向量化chunk等
 
-| 组件 | 职责 |
-|---|---|
-| `rag/parse/DocumentAnalysisFacade` | 解析门面：优先调 Python 服务，失败 fallback 到 Java（Java 备用方案当前未实现，调用会报错） |
-| `rag/parse/PythonDocumentAnalysisServiceImpl` | 调用 `document_analysis_service` 的 `/parse`，反序列化为 `ParseResult` |
-| `rag/parse/NodeConverter` | `NodeDTO` → `DocumentNode` 实现（按 type 分派到 Text/Heading/Image/Code/Table/Formula） |
-| `rag/node/DocumentNode` | Node 统一接口：`originalContent()`（Display）/ `semanticText()`（Index）/ `metadata()`（含 titlePath、groupId） |
-| `rag/enhancement/SemanticEnhancementService` | VLM/LLM 语义增强：IMAGE→VLM 描述、CODE→LLM 解释、TABLE→LLM 总结，打包临近上下文，带指数退避重试 |
-| `rag/enhancement/SemanticContextBuilder` | 构造 `SemanticContext`（前 N + 后 N 邻居，默认各 2），失败 fallback 到默认 `semanticText` |
-| `rag/chunk/NodeBasedChunkBuilder` | Node 装箱成 Chunk：普通 Node 按 token 装箱 → Level2；同 `groupId` 子 Node 合成 Level1 父块（不可检索）+ 多个 Level2 子块（`parentChunkId` 指向父块） |
-| `rag/pipeline/ChunkIngestCoordinator` | 入库协调：语义增强 → ChunkBuilder → 两 pass 插入（先 Level1 父块建立 index→dbId 映射，再 Level2 子块解析 parentChunkId）→ 责任链后处理 |
-| `rag/pipeline/handler/*` | 责任链 handler：`EmbeddingPersist`（向量化，优先 indexText）/ `FullTextIndexer`（BM25 全文索引）/ `TitlePathExtractor` / `ContextEnricher` / `ChunkTypeClassifier` / `SearchabilityMarker` |
-| `rag/strategy/*` | 旧 ChunkStrategy 体系（已废弃，保留供历史参考，`ChunkStrategyFactory`/`ChunkStrategy`/`ChunkStrategyContext` 及各 impl 不再有调用方） |
-| `rag/render/*` | 旧渲染器（已废弃，`@Deprecated`；Display/Index 双轨已内联到 `NodeBasedChunkBuilder.buildChunkFromNodes`） |
-
-### Display/Index 文本双轨
+#### Display/Index 文本双轨
 
 - **chunkText（Display）**：`originalContent()` 拼接，保留原文形态（图片/代码/表格为占位符 `[[LINXING:TYPE:nodeId]]`），前端通过 `nodeMetadata` 还原
 - **indexText（Index）**：`semanticText()` 拼接，含 VLM/LLM 语义增强结果，供 Embedding + BM25 使用
 - 下游 `EmbeddingPersist`/`FullTextIndexer` 优先读 `indexText`，缺失时回退 `chunkText`
-- `render/` 包的三个类已标记废弃（见 `render/LISTEN.md`），渲染逻辑内联在 `NodeBasedChunkBuilder`
 
-### Agent 域核心组件
+### Agent 域核心组件（部分）
 
 | 组件 | 职责 |
 |---|---|
 | `agent/core/AgentExecutor` | 自研 ReAct 主循环（上限 20 步），LLM 推理 → 工具调用 → 结果注入 → 下一轮 |
 | `agent/core/AgentContext` / `AgentResult` / `AgentStepEvent` | 执行上下文、结果、SSE 步骤事件 |
 | `agent/core/AgentPrompts` | 系统提示词模板（全量 / 渐进披露两套） |
-| `agent/core/JsonContainer` + `tool/impl/jsoncontainer/*` | JSON 容器工具（create/append/replace/remove/replace-metadata），用于结构化输出 |
 | `agent/core/ToolExecutionTimeout` | 工具超时控制（普通 180s，工作流 600s） |
 | `agent/adapter/SseChatAdapter` | SSE 流式响应适配器（超时 30 分钟，覆盖澄清等待） |
 
-### 工具与技能注册中心
+#### 工具与技能注册中心
 
 - `agent/tool/ToolRegistry` — Spring 自动发现所有 `Tool` Bean 并注册，生成 LangChain4j `ToolSpecification`
-- `agent/skill/SkillRegistry` — 扫描 `skills/` 目录下的 `SKILL.md`（YAML frontmatter），三阶段加载：
-  - Phase 1：启动时全量解析 frontmatter 到内存
-  - Phase 2：正文按需从磁盘读取，Caffeine LRU 缓存（30 分钟）
-  - Phase 3：`references/` 与 `assets/` 资源文件按需读取，不缓存
-- `agent/catalog/CatalogProvider` — `ToolRegistry` 与 `SkillRegistry` 共同实现，统一渲染为系统提示词中的「可用能力」目录
+- `agent/skill/SkillRegistry` — 扫描 `skills/` 目录下的 `SKILL.md`（YAML frontmatter），三阶段按需加载使用
 - **渐进披露模式**：当工具 + 技能总数超过 `agent.disclosure.threshold`（默认 5）时，LLM 仅看到 `resolve` 元工具；调用 `resolve` 后对应工具规格动态注入下一轮
+- 当前注册的工具位于Linxing_Agent\src\main\java\org\linxing\linxing_agent\agent\tool
+- 当前注册的技能位于Linxing_Agent\src\main\java\org\linxing\linxing_agent\agent\skill
 
-### 当前注册的 12 个工具
-
-| 工具 | 说明 |
-|---|---|
-| `search_knowledge_base` | 检索用户知识库（封装 RAG 检索） |
-| `web_search` | Tavily 联网搜索 |
-| `start_study_plan_workflow` | 触发 study_plan 多 Agent 工作流（工作流超时 600s） |
-| `save_study_plan` / `save_exam` | 持久化计划 / 测验 |
-| `resolve` / `catalog` | 渐进披露元工具 |
-| `create_container` / `append_to_container` / `replace_in_container` / `remove_from_container` / `replace_container_metadata` | JSON 容器操作（结构化输出） |
-
-### 当前技能（位于 `src/main/resources/skills/`）
-
-- `study_plan` — 学习计划制定（关联工具：search_knowledge_base / web_search / start_study_plan_workflow）
-- `exam` — 知识测验出题（含 `references/question-types.md` 资源）
-- `_shared/references/batch-json-pattern.md` — 共享资源
-
-### 多 Agent 工作流（`agent/subagent/`，基于 `langchain4j-agentic`）
+#### 多 Agent 工作流（`agent/subagent/`，基于 `langchain4j-agentic`）
 
 `study_plan` 工作流采用两阶段顺序编排（`sequenceBuilder`）：
 
@@ -103,7 +48,7 @@ yarn lint                                 # ESLint
 
 关键类：`StudyPlanWorkflowAgent`（`@Agent` 接口）、`SubAgentContext`（线程上下文，对 LLM 不可见）、`PendingClarificationRegistry`（HumanInTheLoop 唤醒）、`JsonSanitizer`、`KnowledgeSearchTools`。
 
-### Agent 记忆（`agent/memory/`）
+#### Agent 记忆（`agent/memory/`）
 
 - `AgentMemory` 接口 + `AgentMemoryFactory`（按 `agent.memory.type` 创建）
 - `WindowMemory` — 滑动窗口（默认 40 条），系统提示词独立存储
@@ -129,48 +74,23 @@ JWT 拦截器 `addPathPatterns("/**")`，仅排除 `/user/login` 与 `/user/regi
 ### `application-dev.yaml` 被忽略但必需
 包含 DB 密码、各 LLM API key、`TAVILY_API_KEY`、`JWT_SECRET_KEY`、模型路径。本地必须存在。非密钥配置项可见于 `application.yaml`。
 
-### 模型文件与文件存储被忽略
-`models/`（ONNX reranker 模型 `ms-marco-MiniLM-L-6-v2`）与 `files_store/`（上传文档 + Python 解析出的图片 `chunk_images/`）在 `.gitignore` 中。本地路径在 `application-dev.yaml` 配置（`rag.reranker.model-path`、`rag.store-path`）；Python 侧 `IMAGE_STORE_DIR` 默认指向 `D:/JavaProjects/Linxing/files_store/chunk_images`，应与 `rag.store-path/chunk_images` 一致。
-
-### 技能目录位置
-默认从 classpath 解析，开发环境指向 `target/classes/skills/`，对应源码 `src/main/resources/skills/`。如需指向外部目录，配置 `agent.skills.path`。每个技能一个子目录，内含 `SKILL.md` + 可选 `references/`、`assets/`。
-
 ### LLM 配置
-通过 `rag.llm.default-provider` 选择（`minimax` / `deepseek` / `glm` / `kimi`），均走 OpenAI 兼容 API。DeepSeek 支持 thinking tokens（`return-thinking: true`、`send-thinking`）。`LlmManager` 统一管理 `CHAT_MODEL` 类型。
-
-`common/constant/LlmType` 定义各用途的模型 provider 常量：
-- `CHAT_MODEL`（deepseek）— Agent 主对话
-- `VISION_MODEL`（other1）— VLM 图片描述（语义增强）
-- `CODE_ENHANCE_MODEL` / `TABLE_ENHANCE_MODEL`（deepseek）— 语义增强
-- `QUERY_REWRITE`（minimax）— 查询改写
-- `CONTEXT_ENRICH_MODEL`（deepseek）— 补全短 chunk 上下文
-- `SUMMARY_MODEL`（deepseek）— 摘要记忆
-- `SEMANTIC_CHUNK_MODEL`（glm）— 语义分块（旧路径，Node 体系下未使用）
+通过 `rag.llm.default-provider` 选择（`minimax` / `deepseek` / `glm` / `kimi`等），均走 OpenAI 兼容 API。DeepSeek 支持 thinking tokens（`return-thinking: true`、`send-thinking`）。`LlmManager` 统一管理 `CHAT_MODEL` 类型。`common/constant/LlmType` 定义各用途的模型 provider 常量
 
 ### Python 文档解析服务
-`document_analysis_service` 是 Node-Based RAG 的唯一解析入口，通过 `rag.python-service.url`（默认 `http://localhost:8000`）调用。需先于后端启动：
-- `router.py` 按扩展名 + 内容特征二次判定类型，派发到 pdf/docx/markdown/html/code/linebased parser
+`document_analysis_service` 是 Node-Based RAG 的唯一解析入口，通过 `rag.python-service.url`调用。需先于后端启动：
 - pdf/docx 单例懒加载并注入图片目录（`IMAGE_STORE_DIR`），避免未用时强制加载 fitz/pdfplumber/python-docx
 - 图片直接保存到 Java 的 `storePath/chunk_images/{userId}/{docId}/`，Java 无需搬运
 - 详见 [document_analysis_service/README.md](document_analysis_service/README.md)
 
 ### Redis 语义缓存
-Redis 同时承担会话消息缓存（`RAG_CACHE_SESSION_MSGS_TTL`）与基于 Vector Set 的语义缓存（`RAG_SEMANTIC_CACHE_ENABLED`、`threshold`、`quantization`）。Jedis 客户端单独配置（版本 6.2.0）。
+Redis 同时承担会话消息缓存（`RAG_CACHE_SESSION_MSGS_TTL`）与基于 Vector Set 的语义缓存（`RAG_SEMANTIC_CACHE_ENABLED`、`threshold`、`quantization`）。
 
 ### ONNX runtime
 重排序器使用 `langchain4j-onnx-scoring` + `ms-marco-MiniLM-L-6-v2`。ONNX 原生库由 Java 库自动下载，无需手动安装。
 
-### SSE 超时与工作流澄清
-`SseChatAdapter` 超时 30 分钟，需大于工作流澄清等待时长（25 分钟）。`start_study_plan_workflow` 工作流执行时间较长，单独放宽到 600s（`agent.tool.workflow-timeout-seconds`），其他工具默认 180s（`agent.tool.timeout-seconds`）。
-
-### `agent_steps` 表不存储 final 步骤
-ReAct 循环的最终回答仅写入 `chat_messages`，`agent_steps` 只记录 thinking / tool_call / tool_result / error。前端按消息 ID 懒加载步骤。
-
 ### Maven 显式声明源码目录
 `pom.xml` 显式设置 `<sourceDirectory>src/main/java</sourceDirectory>` 与 `<testSourceDirectory>src/test/java</testSourceDirectory>`。这是默认值但被显式声明，勿改动。
-
-### Vue CLI 5 + yarn
-使用 `yarn` 不要用 `npm`，锁文件为 `yarn.lock`。
 
 ## Key dependencies
 

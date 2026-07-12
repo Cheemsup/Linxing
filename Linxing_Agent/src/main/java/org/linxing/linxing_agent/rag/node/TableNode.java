@@ -41,6 +41,12 @@ public class TableNode implements DocumentNode {
     }
 
     @Override
+    public String backgroundContent() {
+        // 全篇文档背景需要真实表格 HTML（占位符 LLM 无法理解）
+        return html != null ? html : "无表格内容";
+    }
+
+    @Override
     public String semanticText() {
         // 增强后返回 LLM 总结；未增强时返回占位信息
         if (semanticSummary != null && !semanticSummary.isBlank()) {

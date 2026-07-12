@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * TODO：后续考虑将这些所有的配置项都移入application.yaml（以及dev）
@@ -138,6 +139,16 @@ public class RagProperties {
             /** 单个邻居节点文本渲染的字符上限（超出截断，0 表示不截断） */
             //TODO：该参数未被使用，后续可作为增强参数，可选
             private int maxNeighborChars = 200;
+            /**
+             * 走"全篇原文"上下文注入的文件类型集合。
+             * 命中的文件类型在语义增强时整体注入全篇原文作为背景
+             */
+            private Set<String> fullContextFileTypes = Set.of(
+                    "java", "c", "cpp", "cc", "cxx", "h", "hpp", "hxx",
+                    "cs", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx",
+                    "go", "rs", "rb", "php", "kt", "kts", "swift", "scala",
+                    "sh", "bash", "zsh", "bat", "cmd", "ps1",
+                    "sql", "html", "htm");
         }
     }
 }

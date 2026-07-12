@@ -37,6 +37,7 @@ from ._common import (
     detect_code_language,
     guess_image_ext,
     make_node_seq,
+    should_flush_under_elastic,
     table_to_html,
 )
 
@@ -507,9 +508,7 @@ class DocxParser:
     @staticmethod
     def _accumulate_with_threshold(chunks: List[str], threshold: int) -> List[str]:
         """将拆分后的子块累加到阈值后输出，子块间以单换行连接。
-
-        （与 markdown_parser._accumulate_with_threshold / Java accumulateWithThreshold 一致）
-        """
+        累加采用弹性区间（减少人为切断强关联语义）。"""
         results: List[str] = []
         if not chunks:
             return results
@@ -520,7 +519,7 @@ class DocxParser:
                 continue
             trimmed = chunk.strip()
             add_len = len(trimmed) + (1 if buffer else 0)
-            if buffer and len(buffer) + add_len > threshold:
+            if should_flush_under_elastic(len(buffer), add_len, threshold):
                 results.append(buffer.strip())
                 buffer = trimmed
             else:
@@ -535,9 +534,7 @@ class DocxParser:
 
     def _split_by_sentence_with_threshold(self, text: str, threshold: int) -> List[str]:
         """按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
-
-        （与 markdown_parser._split_by_sentence_with_threshold / Java splitBySentenceWithThreshold 一致）
-        """
+        累加采用弹性区间（减少对强关联句的人为切断）。"""
         results: List[str] = []
         if not text or not text.strip():
             return results
@@ -549,7 +546,7 @@ class DocxParser:
             if not sentence.strip():
                 continue
             add_len = len(sentence)
-            if buffer and len(buffer) + add_len > threshold:
+            if should_flush_under_elastic(len(buffer), add_len, threshold):
                 results.append(buffer.strip())
                 buffer = sentence
             else:

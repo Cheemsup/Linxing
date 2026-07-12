@@ -83,7 +83,8 @@ class NodeBasedRagFlowTest {
         System.out.println("\n=== Step 3: 语义增强（VLM/LLM）===");
         System.out.println("\n--- 第一个 IMAGE Node 的增强 prompt（验证邻居上下文注入）---");
         printFirstImagePrompt(nodes);
-        semanticEnhancementService.enhance(nodes);
+        // 透传 fileType=null 表示走邻居路径（与改造前行为一致）
+        semanticEnhancementService.enhance(nodes, null);
         printEnhancedNodeInfo(nodes);
 
         // ── Step 4: Node 序列 → Chunk 序列 ──

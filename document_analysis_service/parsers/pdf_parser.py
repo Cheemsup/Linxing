@@ -44,6 +44,7 @@ from ._common import (
     detect_code_language,
     guess_image_ext,
     make_node_seq,
+    should_flush_under_elastic,
     table_to_html,
 )
 
@@ -571,10 +572,7 @@ class PdfParser:
 
     def _split_by_sentence_with_threshold(self, text: str, threshold: int) -> List[str]:
         """按句子分隔符拆分文本，累加句子直到最接近阈值，不切断单个句子。
-
-        （与 docx_parser._split_by_sentence_with_threshold / markdown_parser / html_parser 一致）
-        用于超长 fitz 文本块的内部二次切分：拆出的小 Node 由调用方写同一 groupId。
-        """
+        累加采用弹性区间（减少对强关联句的人为切断）。"""
         results: List[str] = []
         if not text or not text.strip():
             return results
@@ -586,7 +584,7 @@ class PdfParser:
             if not sentence.strip():
                 continue
             add_len = len(sentence)
-            if buffer and len(buffer) + add_len > threshold:
+            if should_flush_under_elastic(len(buffer), add_len, threshold):
                 results.append(buffer.strip())
                 buffer = sentence
             else:

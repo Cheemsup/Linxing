@@ -48,10 +48,16 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
     private final SemanticContextBuilder semanticContextBuilder;//打包临近上下文
 
     @Override
-    public void enhance(List<DocumentNode> nodes) {
+    public void enhance(List<DocumentNode> nodes, String fileType) {
         if (nodes == null || nodes.isEmpty()) {
             return;
         }
+
+        // 按文件类型一次性判定本批 Node 走"全篇原文"还是"前后邻居"上下文路径
+        // 决策粒度为文件类型：code/html 类整体走全文注入，其余整体走邻居注入
+        boolean useFullDocumentContext = shouldUseFullDocumentContext(fileType);
+        log.debug("文档 fileType={} 语义增强上下文路径: {}", fileType,
+                useFullDocumentContext ? "全篇原文" : "前后邻居");
 
         NeighborNodeRenderer renderer = new NeighborNodeRenderer(getContext());
 
@@ -62,8 +68,9 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
                 continue;
             }
             try {
-                // 通过 ContextBuilder 构造包含前后邻居的上下文（打包），然后一同发送到模型以增强语义
-                SemanticContext ctx = semanticContextBuilder.build(nodes, i);
+                // 通过 ContextBuilder 构造上下文（打包），然后一同发送到模型以增强语义
+                // useFullDocumentContext=true 时走全文路径（注入全篇原文背景、邻居置空），否则走邻居路径
+                SemanticContext ctx = semanticContextBuilder.build(nodes, i, useFullDocumentContext);
                 enhanceNode(ctx, renderer);//根据Node类型进行模型调用、语义丰富
             } catch (Exception e) {
                 // 增强彻底失败（重试耗尽或不可重试异常）——Node 会 fallback 到默认 semanticText，
@@ -190,12 +197,19 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
     }
 
     /**
-     * 构建统一增强 Prompt（注入邻居上下文 + 当前 Node 内容）。
+     * 构建增强 Prompt，按上下文路径分支：
+     * - 全文路径：注入全篇文档背景 + 当前 Node 内容（用 buildFullDocumentPrompt）
+     * - 邻居路径：注入前后邻居 + 当前 Node 内容（用 buildPrompt）
      * 各类 Node 共用同一模板，仅 current_node 内容渲染方式不同。
      */
     private String buildUnifiedPrompt(SemanticContext ctx, NeighborNodeRenderer renderer) {
-        String previousText = renderer.renderNeighbors(ctx.getPreviousNodes());
         String currentText = SemanticEnhancementPrompts.renderCurrentNodeContent(ctx.getTarget());
+        if (ctx.useFullDocumentContext()) {
+            // 全文路径：fullDocumentBackground 已由 SemanticContextBuilder 拼好并缓存
+            return SemanticEnhancementPrompts.buildFullDocumentPrompt(ctx.getFullDocumentBackground(), currentText);
+        }
+        // 邻居路径
+        String previousText = renderer.renderNeighbors(ctx.getPreviousNodes());
         String nextText = renderer.renderNeighbors(ctx.getNextNodes());
         return SemanticEnhancementPrompts.buildPrompt(previousText, currentText, nextText);//结合上下文情况、本节点情况、指导提示词，生成最终的发往大模型的内容
     }
@@ -303,6 +317,27 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
             return "image/bmp";
         }
         return "image/png";
+    }
+
+    /**
+     * 判断本批 Node 是否走"全篇原文"上下文路径。
+     * 决策粒度为文件类型：fileType 命中配置的 fullContextFileTypes 集合即走全文注入，否则走邻居注入。
+     * fileType 为空或配置缺失时安全降级为邻居路径。
+     */
+    private boolean shouldUseFullDocumentContext(String fileType) {
+        if (fileType == null || fileType.isBlank()) {
+            return false;
+        }
+        RagProperties.SemanticEnhancement.Context context = getContext();
+        if (context == null || context.getFullContextFileTypes() == null) {
+            return false;
+        }
+        // 文件类型按扩展名匹配，统一小写比较，忽略可能带的前导点
+        String normalized = fileType.trim().toLowerCase();
+        if (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
+        }
+        return context.getFullContextFileTypes().contains(normalized);
     }
 
     /**

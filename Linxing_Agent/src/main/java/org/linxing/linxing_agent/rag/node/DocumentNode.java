@@ -26,14 +26,35 @@ public interface DocumentNode {
     /**
      * 原始内容（用于 Display Render）
      *
-     * TEXT/HEADING/CODE: 返回文本原文
-     * IMAGE: 返回图片 URL 或占位符
-     * TABLE: 返回表格 HTML 或原文
-     * FORMULA: 返回 LaTeX 原文
+     * TEXT/HEADING: 返回文本原文
+     * IMAGE: 返回占位符 [[LINXING:IMAGE:id]]
+     * CODE: 返回占位符 [[LINXING:CODE:id]]
+     * TABLE: 返回占位符 [[LINXING:TABLE:id]]
+     * FORMULA: 返回占位符 [[LINXING:FORMULA:id]]
+     *
+     * 注：Rich Node 的占位符供前端按 nodeId 关联 nodeMetadata 还原显示；
+     * 若需真实载体原文（代码/HTML/LaTeX）喂给 LLM，请用 {@link #backgroundContent()}。
      *
      * @return 原始内容字符串
      */
     String originalContent();
+
+    /**
+     * 背景原文（用于喂给 LLM 的上下文背景，区别于 Display 占位符职责）。
+     *
+     * 设计动机：{@link #originalContent()} 对 Rich Node（CODE/IMAGE/TABLE/FORMULA）
+     * 返回的是 Display 占位符（如 {@code [[LINXING:CODE:id]]}），供前端按 nodeId 关联
+     * nodeMetadata 还原显示。但语义增强的"全篇文档背景"需要的是真实原文（代码、表格 HTML、
+     * 公式 LaTeX），占位符拼出来的背景 LLM 无法理解。
+     *
+     * 默认返回 {@code originalContent()}（TEXT/HEADING 本就是原文，二者等价）；
+     * Rich Node 各自 override 返回真实载体内容。
+     *
+     * @return 背景原文字符串
+     */
+    default String backgroundContent() {
+        return originalContent();
+    }
 
     /**
      * 语义增强文本（用于 Index Render：Embedding + BM25）

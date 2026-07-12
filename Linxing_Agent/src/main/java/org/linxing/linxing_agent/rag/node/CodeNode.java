@@ -44,6 +44,14 @@ public class CodeNode implements DocumentNode {
     }
 
     @Override
+    public String backgroundContent() {
+        // 全篇文档背景需要真实代码原文（占位符 LLM 无法理解）；
+        // 带语言前缀与 SemanticEnhancementPrompts.renderCurrentNodeContent 的 CODE 分支口径一致
+        String lang = language != null ? language : "未知语言";
+        return "[代码语言: " + lang + "]\n" + (code != null ? code : "无代码内容");
+    }
+
+    @Override
     public String semanticText() {
         // 增强后返回 LLM 解释；未增强时返回语言标识 + 占位信息
         if (semanticExplanation != null && !semanticExplanation.isBlank()) {

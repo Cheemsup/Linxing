@@ -93,8 +93,9 @@ public class ChunkIngestCoordinator {
         }
 
         // 语义增强：对 IMAGE/CODE/TABLE 等需要的节点调用 VLM/LLM 生成 semanticText（增强失败会fallback到默认semanticText）
+        // 透传 fileType 用于按文件类型选择上下文构建路径（code/html 走全文注入，其余走邻居注入）
         log.info("文档 {} 开始语义增强，共 {} 个 Node", doc.getId(), nodes.size());
-        semanticEnhancementService.enhance(nodes);
+        semanticEnhancementService.enhance(nodes, doc.getFileType());
 
         int maxChunkSize = ragProperties.getEmbedding().getChunkSize();
 

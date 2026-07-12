@@ -11,10 +11,14 @@ import java.util.stream.Collectors;
  * 将邻居节点渲染为简短文本，用于构建 LLM prompt 的上下文部分。
  *
  * 渲染规则：
- * - TEXT/HEADING：返回原文（可选截断）
- * - IMAGE/CODE/TABLE/FORMULA：返回占位符（如 [图片]、[代码块]）
+ * - TEXT/HEADING：返回原文（按 maxNeighborChars 截断）
+ * - IMAGE：返回占位符（[图片: caption]），图片字节由 VLM 处理当前 Node 时直接消费，邻居不重复送图
+ * - CODE：返回实际代码片段（按 maxNeighborChars 截断），消解当前 Node 对相邻代码的指代
+ * - TABLE：返回占位符（[表格]），避免把相邻表格 HTML 全量塞入上下文
+ * - FORMULA：返回公式文本（截断）
  *
  * TODO：对于相邻Node也是图片、code等需要语义增强的情况，处理方式还待定
+ * （当前策略：邻居图片只送 caption 占位符、邻居代码送截断片段，不送原始二进制/全量内容）
  */
 public class NeighborNodeRenderer {
 
@@ -71,9 +75,14 @@ public class NeighborNodeRenderer {
                         : "[图片]";
             }
             case CODE -> {
+                // 渲染实际代码片段（而非仅占位符），消解当前 Node 对相邻代码符号/调用的指代；
+                // 按 maxNeighborChars 截断避免邻居代码过长挤占上下文
                 CodeNode codeNode = (CodeNode) node;
                 String lang = codeNode.getLanguage() != null ? codeNode.getLanguage() : "";
-                yield "[代码块" + (lang.isEmpty() ? "" : "(" + lang + ")") + "]";
+                String code = codeNode.getCode();
+                yield code != null && !code.isBlank()
+                        ? "[代码块" + (lang.isEmpty() ? "" : "(" + lang + ")") + "]\n" + code
+                        : "[代码块" + (lang.isEmpty() ? "" : "(" + lang + ")") + "]";
             }
             case TABLE -> "[表格]";
             case FORMULA -> {

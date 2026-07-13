@@ -73,10 +73,6 @@ public class ExamController {
     }
 
     private static Integer getCurrentUserId() {
-        Long userId = BaseContext.getCurrentId();
-        if (userId == null) {
-            throw new IllegalStateException("用户未登录");
-        }
-        return userId.intValue();
+        return BaseContext.requireCurrentUserId();
     }
 }

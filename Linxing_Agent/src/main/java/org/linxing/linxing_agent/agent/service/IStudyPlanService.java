@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.service;
 
+import org.linxing.linxing_agent.agent.dto.StudyPlanExportResult;
 import org.linxing.linxing_agent.agent.dto.StudyPlanProgressUpdateRequest;
 import org.linxing.linxing_agent.agent.vo.StudyPlanDetailVO;
 import org.linxing.linxing_agent.agent.vo.StudyPlanVO;
@@ -26,12 +27,9 @@ public interface IStudyPlanService {
     void updatePhaseStatus(Integer userId, Integer planId, Integer phaseId, StudyPlanProgressUpdateRequest body);
 
     /**
-     * 导出学习计划为 Markdown 字符串
+     * 导出学习计划（支持 Markdown / HTML），返回内容与文件元信息
+     * @param format 导出格式：md（默认）/ html
+     * @return 导出结果
      */
-    String exportAsMarkdown(Integer userId, Integer planId);
-
-    /**
-     * 导出学习计划为 HTML 字符串
-     */
-    String exportAsHtml(Integer userId, Integer planId);
+    StudyPlanExportResult export(Integer userId, Integer planId, String format);
 }

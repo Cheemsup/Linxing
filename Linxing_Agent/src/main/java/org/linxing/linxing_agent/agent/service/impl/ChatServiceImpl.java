@@ -1,18 +1,14 @@
 package org.linxing.linxing_agent.agent.service.impl;
 
-import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.core.AgentExecutor;
 import org.linxing.linxing_agent.agent.core.AgentResult;
-import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepListener;
-import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
 import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
@@ -27,31 +23,30 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.rag.entity.ActivityLog;
 import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
+import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
+import org.linxing.linxing_agent.agent.service.IChatMessageService;
 import org.linxing.linxing_agent.agent.service.IChatService;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
 
-    private final EmbeddingModel embeddingModel;
     private final LlmManager llmManager;
     private final ActivityLogMapper activityLogMapper;
-    private final ChatMessageServiceImpl chatMessageService;
-    private final ChatMessageCacheServiceImpl chatMessageCacheService;
-    private final SemanticCacheServiceImpl semanticCacheService;
+    private final IChatMessageService chatMessageService;
+    private final IChatMessageCacheService chatMessageCacheService;
     private final SourceExtractor sourceExtractor;
     private final AgentExecutor agentExecutor;
     private final AgentMemoryFactory memoryFactory;
     private final AgentStepMapper agentStepMapper;
 
     /**
-     * 核心对话入口：解析会话→保存用户消息→溯源历史→语义缓存查找→Agent循环→写入缓存→记录日志
+     * 核心对话入口：解析会话→保存用户消息→溯源历史→Agent循环→记录日志
      * @param request
      * @param listener
      * @return
@@ -77,20 +72,7 @@ public class ChatServiceImpl implements IChatService {
                 history = chatMessageService.loadRecentMessages(sessionId);//溯源失败时加载最近消息作为兜底
             }
 
-            Embedding queryEmbedding = embeddingModel.embed(originalQuery).content();//向量化query进行redis缓存查找
-
-            SemanticCacheServiceImpl.CacheResult cacheResult =
-                    semanticCacheService.lookup(userId, queryEmbedding.vector());//语义缓存查找
-
-            if (cacheResult.isHit()) {
-                return buildCachedResponse(userId, sessionId, userMsg, cacheResult, recorder);
-            }
-
             ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, history, originalQuery, listener, recorder);//执行ReAct Agent循环
-
-            semanticCacheService.store(userId, queryEmbedding.vector(), originalQuery,
-                    agentResponse.getAnswer(),
-                    sourceExtractor.toSourcesJson(agentResponse.getSourceDetails()));//写入语义缓存
 
             chatMessageService.touchSession(sessionId);//更新会话最近修改时间
 
@@ -158,60 +140,6 @@ public class ChatServiceImpl implements IChatService {
                 .answer(result.getAnswer())
                 .sources(sourceExtractor.parseSourceList(sourcesJson))
                 .sourceDetails(sourceExtractor.parseSourceDetails(sourcesJson))
-                .sessionId(sessionId)
-                .messageId(assistantMsg.getId())
-                .build();
-    }
-
-    /**
-     * 从语义缓存中构建响应
-     * @param userId
-     * @param sessionId
-     * @param userMsg
-     * @param cacheResult
-     * @return
-     */
-    private ChatResponse buildCachedResponse(Integer userId, Integer sessionId,
-                                              ChatMessage userMsg,
-                                              SemanticCacheServiceImpl.CacheResult cacheResult,
-                                              StepRecorder recorder) {
-        // 缓存命中：推送 SSE + 入库（cache_hit 按 schema 设计入库，finalStep=true 仅影响 SSE 语义）
-        recorder.record(AgentStepEvent.builder()
-                .eventType(AgentStepTypes.CACHE_HIT)
-                .stepNumber(0)
-                .phase(AgentStepTypes.PHASE_CACHE)
-                .label("已为你快速回答")
-                .answer(cacheResult.getEntry().getAnswer())
-                .finalStep(true)
-                .build());
-
-        SemanticCacheServiceImpl.CacheEntry cached = cacheResult.getEntry();
-
-        List<ChatResponse.SourceDetail> cachedSourceDetails =
-                sourceExtractor.parseSourceDetails(cached.getSources());//反序列化缓存的来源详情
-
-        List<String> cachedSources = cachedSourceDetails.stream()
-                .map(sd -> sd.getFileName()
-                        + (sd.getTitlePath() != null ? " > " + sd.getTitlePath() : ""))
-                .distinct()
-                .collect(Collectors.toList());//拼接来源路径
-
-        ChatMessage assistantMsg = chatMessageService.saveAssistantMessage(
-                userId, sessionId, userMsg.getId(), cached.getAnswer(), cached.getSources());//持久化缓存中的助手消息
-
-        chatMessageCacheService.appendMessages(sessionId, List.of(
-                chatMessageService.toMessageVO(userMsg),
-                chatMessageService.toMessageVO(assistantMsg)
-        ));
-
-        recordActivityLog(userId, cachedSourceDetails.size());
-
-        log.info("[用户{}] 语义缓存命中，跳过Agent流程，score={}", userId, cacheResult.getScore());
-
-        return ChatResponse.builder()
-                .answer(cached.getAnswer())
-                .sources(cachedSources)
-                .sourceDetails(cachedSourceDetails)
                 .sessionId(sessionId)
                 .messageId(assistantMsg.getId())
                 .build();

@@ -16,7 +16,7 @@ webconsole (Vue) ──/api 代理剥离──▶ Linxing_Agent (8080)
                    ┌────────────────────┼────────────────────┐
                    ▼                    ▼                    ▼
         document_analysis_service   PostgreSQL/pgvector        Redis
-              (8000, /parse)        chunks/embeddings       会话/语义缓存
+              (8000, /parse)        chunks/embeddings       会话/预览/步骤缓存
 ```
 
 **为什么存在**：把"检索个人笔记"封装成 Agent 可调用的工具，让对话、出题、学习计划生成等学习场景都建立在用户自己的笔记之上。Python 服务只负责文档结构化解析，向量存储、检索、Agent 编排、业务持久化均由本服务承担。
@@ -47,7 +47,7 @@ webconsole (Vue) ──/api 代理剥离──▶ Linxing_Agent (8080)
 | langchain4j-web-search-engine-tavily 1.13.0-beta23 | 联网搜索 |
 | MyBatis 4.0.0 + Druid 1.2.28 | ORM（XML mapper）与连接池 |
 | PostgreSQL 42.7.4 + pgvector 0.1.6 | 主库与向量库 |
-| Spring Data Redis + Jedis 6.2.0 | 会话缓存 / 语义缓存 |
+| Spring Data Redis (Lettuce) | 会话消息 / 文档预览 / Agent 步骤缓存 |
 | Caffeine | 技能指令 LRU 缓存 |
 | jjwt 0.12.6 | JWT 认证 |
 | onnxruntime 1.20.0 | 本地重排序推理 |
@@ -118,7 +118,7 @@ Linxing_Agent/
 - Agent 对话：ReAct 主循环、工具调度、技能加载、记忆管理、SSE 流式推送
 - 多 Agent 工作流：study_plan 两阶段编排 + HumanInTheLoop 澄清
 - 业务持久化：会话/消息/推理步骤/测验/学习计划及其阶段与进度
-- 多 LLM 供应商统一管理与 Redis 语义缓存
+- 多 LLM 供应商统一管理与 Redis 多级缓存（会话消息 / 文档预览 / Agent 步骤）
 
 **本服务不负责**：
 

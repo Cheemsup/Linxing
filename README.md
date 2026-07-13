@@ -36,7 +36,7 @@ Agent 驱动的个人学习平台。基于自研 ReAct Agent 主循环与多 Age
 | langchain4j-web-search-engine-tavily | 联网搜索 |
 | MyBatis 4.0.0 + Druid | ORM 与连接池 |
 | PostgreSQL + pgvector | 主库与向量库 |
-| Redis (Jedis) | 会话缓存 / 语义缓存 |
+| Redis (Lettuce) | 会话消息 / 文档预览 / Agent 步骤缓存 |
 | JWT (jjwt) | 认证 |
 | Vue 3.2.13 + Element Plus 2.13.7 | 前端 |
 | FastAPI 0.115.6 + Uvicorn | Python 文档解析服务 |
@@ -95,7 +95,7 @@ Linxing/
                        ▼                    ▼                    ▼
               ┌────────────────┐   ┌─────────────────┐   ┌──────────────┐
               │ document_      │   │ PostgreSQL /    │   │   Redis      │
-              │ analysis_      │   │ pgvector        │   │ 会话/语义缓存 │
+              │ analysis_      │   │ pgvector        │   │ 会话/预览缓存│
               │ service (8000) │   │ chunks/embeddings│  └──────────────┘
               └────────────────┘   └─────────────────┘
 ```
@@ -195,8 +195,9 @@ yarn serve / npm run serve
 |---|---|---|
 | `rag.reranker.enabled` | true | 是否启用 ONNX 重排序 |
 | `rag.reranker.batch-size` | 8 | 重排序批大小 |
-| `rag.cache.semantic-cache.enabled` | true | Redis 语义缓存 |
-| `rag.cache.semantic-cache.threshold` | 0.95 | 语义缓存相似度阈值 |
+| `rag.cache.session-messages-ttl` | 1800 | 会话消息缓存 TTL（秒） |
+| `rag.cache.doc-preview-ttl` | 3600 | 文档预览缓存 TTL（秒） |
+| `rag.cache.agent-steps-ttl` | 3600 | Agent 步骤缓存 TTL（秒） |
 | `rag.semantic-enhancement.context.previous-nodes` | 2 | 语义增强前文 Node 数 |
 | `rag.semantic-enhancement.context.next-nodes` | 2 | 语义增强后文 Node 数 |
 

@@ -2,7 +2,6 @@ package org.linxing.linxing_agent.rag.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.service.impl.SemanticCacheServiceImpl;
 import org.linxing.linxing_agent.rag.constant.DocumentStatus;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.dto.IngestResponse;
@@ -12,6 +11,7 @@ import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.pipeline.ChunkIngestCoordinator;
 import org.linxing.linxing_agent.rag.parse.DocumentAnalysisFacade;
 import org.linxing.linxing_agent.rag.service.IIngestService;
+import org.linxing.linxing_agent.rag.utils.FileTypeValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -34,7 +34,6 @@ public class IngestServiceImpl implements IIngestService {
     private final ChunkIngestCoordinator chunkIngestCoordinator;
     private final DocumentMapper documentMapper;
     private final RagProperties ragProperties;
-    private final SemanticCacheServiceImpl semanticCacheService;
     private final DocumentAnalysisFacade documentAnalysisFacade;
 
     @Override
@@ -49,6 +48,10 @@ public class IngestServiceImpl implements IIngestService {
         }
 
         String originalFilename = file.getOriginalFilename();
+        if (originalFilename != null && !FileTypeValidator.isAllowed(originalFilename)) {
+            throw new IllegalArgumentException(
+                    "不支持的文件格式，允许的格式: " + String.join(", ", FileTypeValidator.allowedExtensions()));
+        }
         log.info("[用户{}]，文件上传: {}, 大小: {} bytes", userId, originalFilename, file.getSize());
 
         DocRecord docRecord = null;
@@ -56,7 +59,7 @@ public class IngestServiceImpl implements IIngestService {
             Path storedFile = persistFile(file);
             log.debug("文件已持久化到: {}", storedFile);
 
-            String fileType = extractFileType(originalFilename);//根据文件名称，获取文件类型为后续chunk决策做参考
+            String fileType = FileTypeValidator.normalizedType(originalFilename);//根据文件名称，获取文件类型为后续chunk决策做参考
 
             docRecord = DocRecord.builder()
                     .userId(userId)
@@ -77,9 +80,6 @@ public class IngestServiceImpl implements IIngestService {
 
             // 基于 Node 序列进行切分、向量化和持久化
             int chunksCount = chunkIngestCoordinator.processDocumentFromNodes(docRecord, nodes);
-
-            //文档更新完毕，清除对于chunk的缓存
-            semanticCacheService.clearUserCache(userId);
 
             return IngestResponse.builder()
                     .success(true)
@@ -130,24 +130,5 @@ public class IngestServiceImpl implements IIngestService {
 
         Files.copy(file.getInputStream(), targetFile, StandardCopyOption.REPLACE_EXISTING);
         return targetFile;
-    }
-
-    //根据文件名提取文件类型
-    private String extractFileType(String fileName) {
-        if (fileName == null || !fileName.contains(".")) {
-            return "unknown";
-        }
-        String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
-        return switch (extension) {
-            case "pdf" -> "pdf";
-            case "doc", "docx" -> "docx";
-            case "xls", "xlsx" -> "xlsx";
-            case "txt", "text" -> "txt";
-            case "md" -> "md";
-            case "java" -> "java";
-            case "csv" -> "csv";
-            case "html", "htm" -> "html";
-            default -> extension;
-        };
     }
 }

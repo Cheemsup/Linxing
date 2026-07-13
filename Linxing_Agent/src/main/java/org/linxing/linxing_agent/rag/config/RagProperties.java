@@ -90,17 +90,10 @@ public class RagProperties {
 
     @Data
     public static class Cache {
+        // 以下 TTL 单位均为秒
         private int docPreviewTtl;
         private int sessionMessagesTtl;
-        private SemanticCache semanticCache = new SemanticCache();
-    }
-
-    @Data
-    public static class SemanticCache {
-        private boolean enabled;
-        private double threshold;
-        private int quotaPerUser;
-        private String quantization;
+        private int agentStepsTtl;
     }
 
     /**

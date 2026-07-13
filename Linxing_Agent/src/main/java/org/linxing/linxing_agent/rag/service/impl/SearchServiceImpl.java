@@ -16,6 +16,7 @@ import org.linxing.linxing_agent.rag.utils.KeywordExtractor;
 import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.rag.utils.Reranker;
 import org.linxing.linxing_agent.rag.utils.VectorUtils;
+import org.linxing.linxing_agent.rag.vo.SearchResultVO;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.ObjectMapper;
@@ -113,6 +114,31 @@ public class SearchServiceImpl implements ISearchService {
                 .sorted(Comparator.comparingDouble((SearchResult r) -> r.getScore()).reversed()
                         .thenComparingInt(r -> r.getChunkId() != null ? r.getChunkId() : Integer.MAX_VALUE))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 将搜索结果DTO列表转换为VO列表，score保留四位小数
+     * @param results 搜索结果DTO
+     * @return VO列表
+     */
+    @Override
+    public List<SearchResultVO> toVOList(List<SearchResult> results) {
+        return results.stream()
+                .map(this::toVO)
+                .collect(Collectors.toList());
+    }
+
+    private SearchResultVO toVO(SearchResult r) {
+        return SearchResultVO.builder()
+                .chunkId(r.getChunkId())
+                .documentId(r.getDocumentId())
+                .fileName(r.getFileName())
+                .titlePath(r.getTitlePath())
+                .chunkType(r.getChunkType())
+                .chunkText(r.getChunkText())
+                .nodeMetadata(r.getNodeMetadata())
+                .score(Math.round(r.getScore() * 10000.0) / 10000.0)
+                .build();
     }
 
     /**

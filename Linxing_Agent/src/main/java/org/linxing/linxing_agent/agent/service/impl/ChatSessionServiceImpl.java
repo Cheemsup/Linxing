@@ -8,6 +8,7 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
+import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
 import org.linxing.linxing_agent.agent.service.IChatSessionService;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.stereotype.Service;
@@ -23,7 +24,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
-    private final ChatMessageCacheServiceImpl chatMessageCacheService;
+    private final IChatMessageCacheService chatMessageCacheService;
     private final LlmManager llmManager;
 
     @Override

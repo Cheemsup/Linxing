@@ -25,43 +25,17 @@ public class SearchController {
 
     @PostMapping("/search")
     public Result<List<SearchResultVO>> search(@RequestBody SearchRequest request) {
-        Integer userId = getCurrentUserId();
+        Integer userId = BaseContext.requireCurrentUserId();
         int topK = request.getTopK() != null ? request.getTopK() : 0;
-        boolean hybrid = request.getHybrid() != null ? request.getHybrid() : false;
+        boolean hybrid = Boolean.TRUE.equals(request.getHybrid());
 
         log.info("[搜索] 用户{} 查询: {}, hybrid={}", userId, truncate(request.getQuery(), 80), hybrid);
 
         List<SearchResult> results = searchService.search(userId, request.getQuery(), topK, hybrid);
-
-        //将搜索结果进行处理，返回VO性质的最终结果
-        //TODO：后续可考虑将这部分逻辑代码移动到更好的地方而不在controller
-        List<SearchResultVO> vos = results.stream()
-                .map(this::toVO)
-                .toList();
+        List<SearchResultVO> vos = searchService.toVOList(results);
 
         log.info("[搜索] 用户{} 返回{}条结果", userId, vos.size());
         return Result.success(vos);
-    }
-
-    private SearchResultVO toVO(SearchResult r) {
-        return SearchResultVO.builder()
-                .chunkId(r.getChunkId())
-                .documentId(r.getDocumentId())
-                .fileName(r.getFileName())
-                .titlePath(r.getTitlePath())
-                .chunkType(r.getChunkType())
-                .chunkText(r.getChunkText())
-                .nodeMetadata(r.getNodeMetadata())
-                .score(Math.round(r.getScore() * 10000.0) / 10000.0)
-                .build();
-    }
-
-    private Integer getCurrentUserId() {
-        Long currentId = BaseContext.getCurrentId();
-        if (currentId == null) {
-            throw new IllegalStateException("用户未登录");
-        }
-        return currentId.intValue();
     }
 
     private static String truncate(String text, int maxLen) {

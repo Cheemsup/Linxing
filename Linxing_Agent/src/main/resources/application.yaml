@@ -84,11 +84,7 @@ rag:
   cache:
     doc-preview-ttl: ${RAG_CACHE_DOC_PREVIEW_TTL:3600}
     session-messages-ttl: ${RAG_CACHE_SESSION_MSGS_TTL:1800}
-    semantic-cache:
-      enabled: ${RAG_SEMANTIC_CACHE_ENABLED:true}
-      threshold: ${RAG_SEMANTIC_CACHE_THRESHOLD:0.95}
-      quota-per-user: ${RAG_SEMANTIC_CACHE_QUOTA:100}
-      quantization: ${RAG_SEMANTIC_CACHE_QUANT:NOQUANT}
+    agent-steps-ttl: ${RAG_CACHE_AGENT_STEPS_TTL:3600}
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
     timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:120}

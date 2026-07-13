@@ -6,12 +6,19 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
+import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
+import org.linxing.linxing_agent.agent.service.IChatMessageService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 聊天消息与会话的持久化服务
@@ -19,12 +26,13 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ChatMessageServiceImpl {
+public class ChatMessageServiceImpl implements IChatMessageService {
 
     private static final int MAX_HISTORY_ROUNDS = 10;
 
     private final ChatMessageMapper chatMessageMapper;
     private final ChatSessionMapper chatSessionMapper;
+    private final IChatMessageCacheService chatMessageCacheService;
 
     /**
      * 保存用户消息
@@ -147,5 +155,90 @@ public class ChatMessageServiceImpl {
                 .sources(msg.getSources())
                 .createdAt(msg.getCreatedAt())
                 .build();
+    }
+
+    /**
+     * 获取会话消息列表，优先读缓存，缓存与DB不一致时回源DB并刷新缓存
+     * @param sessionId 会话ID
+     * @return 消息VO列表
+     */
+    @Override
+    public List<ChatMessageVO> getMessages(Integer sessionId) {
+        List<ChatMessageVO> cached = chatMessageCacheService.getMessages(sessionId);
+        if (cached != null) {
+            int dbCount = chatMessageMapper.countBySessionId(sessionId);
+            if (cached.size() == dbCount && isValidCache(cached)) {
+                return cached;
+            }
+            chatMessageCacheService.deleteSession(sessionId);//缓存与DB不一致，清除缓存
+        }
+
+        List<ChatMessage> messages = chatMessageMapper.selectBySessionId(sessionId);
+        List<ChatMessageVO> vos = messages.stream().map(this::toMessageVO).collect(Collectors.toList());
+
+        chatMessageCacheService.putMessages(sessionId, vos);//回源后写入缓存
+        return vos;
+    }
+
+    /**
+     * 删除消息及其所有子消息，并同步清除缓存
+     * @param messageId 根消息ID
+     */
+    @Override
+    public void deleteSubtree(Integer messageId) {
+        ChatMessage root = chatMessageMapper.selectById(messageId);
+        List<Integer> ids = collectSubtreeIds(messageId);
+        if (!ids.isEmpty()) {
+            chatMessageMapper.deleteByIds(ids);
+            if (root != null) {
+                chatMessageCacheService.deleteMessages(root.getSessionId(), ids);//同步清除缓存
+            }
+        }
+    }
+
+    /**
+     * 校验缓存有效性：assistant消息必须有parentId
+     * @param messages 缓存消息列表
+     * @return 有效返回true
+     */
+    private boolean isValidCache(List<ChatMessageVO> messages) {
+        return messages.stream().noneMatch(
+                m -> "assistant".equals(m.getRole()) && m.getParentId() == null);
+    }
+
+    /**
+     * BFS收集消息及其所有子消息ID
+     * @param messageId 根消息ID
+     * @return 子树消息ID列表
+     */
+    private List<Integer> collectSubtreeIds(Integer messageId) {
+        ChatMessage root = chatMessageMapper.selectById(messageId);
+        if (root == null) {
+            return List.of();
+        }
+        List<ChatMessage> allMessages = chatMessageMapper.selectBySessionId(root.getSessionId());
+        //构建parentId→children映射
+        Map<Integer, List<Integer>> childrenMap = new HashMap<>();
+        for (ChatMessage msg : allMessages) {
+            if (msg.getParentId() != null) {
+                childrenMap.computeIfAbsent(msg.getParentId(), k -> new ArrayList<>()).add(msg.getId());
+            }
+        }
+        //BFS遍历子树
+        List<Integer> result = new ArrayList<>();
+        Deque<Integer> queue = new ArrayDeque<>();
+        queue.add(messageId);
+        result.add(messageId);
+        while (!queue.isEmpty()) {
+            Integer current = queue.poll();
+            List<Integer> children = childrenMap.get(current);
+            if (children != null) {
+                for (Integer childId : children) {
+                    queue.add(childId);
+                    result.add(childId);
+                }
+            }
+        }
+        return result;
     }
 }

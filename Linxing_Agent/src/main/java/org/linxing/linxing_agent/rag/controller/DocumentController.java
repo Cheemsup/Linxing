@@ -47,31 +47,15 @@ public class DocumentController {
     @DeleteMapping("/documents/{id}")
     public Result<Void> deleteDocument(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
-        try {
-            documentService.deleteDocument(id, userId);
-            return Result.success();
-        } catch (IllegalArgumentException e) {
-            log.warn("删除文档失败: {}", e.getMessage());
-            return Result.error(e.getMessage());
-        } catch (Exception e) {
-            log.error("删除文档异常: {}", e.getMessage(), e);
-            return Result.error("删除文档失败: " + e.getMessage());
-        }
+        documentService.deleteDocument(id, userId);
+        return Result.success();
     }
 
     @GetMapping("/documents/{id}/preview")
     public Result<DocumentPreviewVO> previewDocument(@PathVariable Integer id) {
         Integer userId = getCurrentUserId();
-        try {
-            DocumentPreviewVO vo = documentService.previewDocument(id, userId);
-            return Result.success(vo);
-        } catch (IllegalArgumentException e) {
-            log.warn("预览文档失败: {}", e.getMessage());
-            return Result.error(e.getMessage());
-        } catch (Exception e) {
-            log.error("预览文档异常: {}", e.getMessage(), e);
-            return Result.error("文档预览失败: " + e.getMessage());
-        }
+        DocumentPreviewVO vo = documentService.previewDocument(id, userId);
+        return Result.success(vo);
     }
 
     @GetMapping("/documents/{id}/download")
@@ -95,10 +79,6 @@ public class DocumentController {
     }
 
     private static Integer getCurrentUserId() {
-        Long userId = BaseContext.getCurrentId();
-        if (userId == null) {
-            throw new IllegalStateException("用户未登录");
-        }
-        return userId.intValue();
+        return BaseContext.requireCurrentUserId();
     }
 }

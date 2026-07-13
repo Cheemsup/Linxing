@@ -83,8 +83,8 @@ JWT 拦截器 `addPathPatterns("/**")`，仅排除 `/user/login` 与 `/user/regi
 - 图片直接保存到 Java 的 `storePath/chunk_images/{userId}/{docId}/`，Java 无需搬运
 - 详见 [document_analysis_service/README.md](document_analysis_service/README.md)
 
-### Redis 语义缓存
-Redis 同时承担会话消息缓存（`RAG_CACHE_SESSION_MSGS_TTL`）与基于 Vector Set 的语义缓存（`RAG_SEMANTIC_CACHE_ENABLED`、`threshold`、`quantization`）。
+### Redis 缓存
+Redis 承担三类带 TTL 的缓存：会话消息缓存（`RAG_CACHE_SESSION_MSGS_TTL`，默认 1800s）、文档预览缓存（`RAG_CACHE_DOC_PREVIEW_TTL`，默认 3600s）、Agent 步骤缓存（`RAG_CACHE_AGENT_STEPS_TTL`，默认 3600s）。旧的基于 Vector Set 的语义缓存已删除。
 
 ### ONNX runtime
 重排序器使用 `langchain4j-onnx-scoring` + `ms-marco-MiniLM-L-6-v2`。ONNX 原生库由 Java 库自动下载，无需手动安装。
@@ -107,7 +107,7 @@ Redis 同时承担会话消息缓存（`RAG_CACHE_SESSION_MSGS_TTL`）与基于 
 | `langchain4j-onnx-scoring` | Cross-encoder 重排序 |
 | `mybatis-spring-boot-starter` 4.0.0 | ORM（XML mappers） |
 | `druid-spring-boot-4-starter` 1.2.28 | 连接池 |
-| `spring-boot-starter-data-redis` + `jedis` 6.2.0 | Redis 语义缓存 / 会话消息缓存 |
+| `spring-boot-starter-data-redis`（Lettuce） | Redis 缓存 / 会话消息缓存 |
 | `caffeine` | 技能指令 LRU 缓存 |
 | `jjwt` 0.12.6 | JWT 认证 |
 | `jsoup` 1.18.3 | HTML 解析（旧 HtmlChunkStrategy，Node 体系下未使用） |

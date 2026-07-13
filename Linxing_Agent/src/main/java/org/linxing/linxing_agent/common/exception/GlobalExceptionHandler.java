@@ -1,7 +1,6 @@
 package org.linxing.linxing_agent.common.exception;
 
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.dto.ChatResponse;
 import org.linxing.linxing_agent.agent.exception.ExamNotFoundException;
 import org.linxing.linxing_agent.agent.exception.ExamParseException;
 import org.linxing.linxing_agent.agent.exception.ExamValidationException;
@@ -91,22 +90,14 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(RuntimeException.class)
-    public Result<ChatResponse> handleRuntimeException(RuntimeException ex) {
+    public Result<Void> handleRuntimeException(RuntimeException ex) {
         log.error("运行时异常: {}", ex.getMessage(), ex);
-        ChatResponse errorResponse = ChatResponse.builder()
-                .answer("抱歉，系统处理请求时出现错误，请稍后重试。")
-                .sources(java.util.List.of())
-                .build();
         return Result.error("系统处理请求时出现错误: " + ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
-    public Result<ChatResponse> handleGeneralException(Exception ex) {
+    public Result<Void> handleGeneralException(Exception ex) {
         log.error("系统异常: {}", ex.getMessage(), ex);
-        ChatResponse errorResponse = ChatResponse.builder()
-                .answer("抱歉，系统暂时无法处理您的请求，请稍后重试。")
-                .sources(java.util.List.of())
-                .build();
         return Result.error("系统暂时无法处理您的请求");
     }
 }

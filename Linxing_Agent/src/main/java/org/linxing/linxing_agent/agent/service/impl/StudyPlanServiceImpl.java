@@ -6,6 +6,7 @@ import tools.jackson.databind.node.ArrayNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.dto.QuestionError;
+import org.linxing.linxing_agent.agent.dto.StudyPlanExportResult;
 import org.linxing.linxing_agent.agent.dto.StudyPlanProgressUpdateRequest;
 import org.linxing.linxing_agent.agent.entity.StudyPlan;
 import org.linxing.linxing_agent.agent.entity.StudyPlanPhase;
@@ -187,29 +188,51 @@ public class StudyPlanServiceImpl implements IStudyPlanService {
 
 
     /**
-     * 导出markdown格式的plan内容
-     *
-     * @param userId
-     * @param planId
-     * @return
+     * 导出学习计划（支持 Markdown / HTML），返回内容与文件元信息
+     * @param userId 用户ID
+     * @param planId 学习计划ID
+     * @param format 导出格式：md（默认）/ html
+     * @return 导出结果
      */
     @Override
-    public String exportAsMarkdown(Integer userId, Integer planId) {
+    public StudyPlanExportResult export(Integer userId, Integer planId, String format) {
+        boolean asHtml = "html".equalsIgnoreCase(format);
         StudyPlanDetailVO detail = getPlanDetail(userId, planId);
-        return buildMarkdown(detail);
+        String content = asHtml ? buildHtml(detail) : buildMarkdown(detail);
+        String contentType = asHtml ? "text/html; charset=UTF-8" : "text/markdown; charset=UTF-8";
+        String fileExtension = asHtml ? "html" : "md";
+        String title = extractTitle(content, format);
+        return StudyPlanExportResult.builder()
+                .content(content)
+                .contentType(contentType)
+                .fileExtension(fileExtension)
+                .title(title)
+                .build();
     }
 
     /**
-     * 导出html格式的plan内容
-     *
-     * @param userId
-     * @param planId
-     * @return
+     * 从导出内容中提取标题用于文件命名
      */
-    @Override
-    public String exportAsHtml(Integer userId, Integer planId) {
-        StudyPlanDetailVO detail = getPlanDetail(userId, planId);
-        return buildHtml(detail);
+    private String extractTitle(String content, String format) {
+        try {
+            if ("html".equalsIgnoreCase(format)) {
+                // HTML: <title>xxx</title>
+                int start = content.indexOf("<title>");
+                int end = content.indexOf("</title>");
+                if (start >= 0 && end > start) {
+                    return content.substring(start + 7, end).replace(" - 学习计划", "").trim();
+                }
+            } else {
+                // Markdown: # xxx
+                int start = content.indexOf("# ");
+                int end = content.indexOf("\n", start);
+                if (start >= 0 && end > start) {
+                    return content.substring(start + 2, end).trim();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "学习计划";
     }
 
     // ============================================================

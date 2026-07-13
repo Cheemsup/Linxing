@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.vo.AgentStepVO;
+import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -25,8 +26,7 @@ public class AgentStepServiceImpl {
     private final AgentStepMapper agentStepMapper;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-
-    private static final int CACHE_TTL_SECONDS = 3600;
+    private final RagProperties ragProperties;
 
     /**
      * 按消息ID懒加载agent步骤，优先读缓存
@@ -50,7 +50,8 @@ public class AgentStepServiceImpl {
 
         try {
             String json = objectMapper.writeValueAsString(steps);
-            redisTemplate.opsForValue().set(key, json, CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+            int ttl = ragProperties.getCache().getAgentStepsTtl();
+            redisTemplate.opsForValue().set(key, json, ttl, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("写入步骤缓存失败, messageId={}: {}", messageId, e.getMessage());
         }

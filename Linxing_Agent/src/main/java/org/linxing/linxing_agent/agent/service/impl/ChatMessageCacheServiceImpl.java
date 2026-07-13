@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
+import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -17,19 +18,17 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 对话消息缓存类
- * TODO:这个service的性质更倾向于utils，考虑重构
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ChatMessageCacheServiceImpl {
+public class ChatMessageCacheServiceImpl implements IChatMessageCacheService {
 
     private final StringRedisTemplate redisTemplate;
     private final RagProperties ragProperties;
     private final ObjectMapper objectMapper;
 
-    public List<ChatMessageVO> getMessages(Integer sessionId) {
-        String key = RedisKeysPrefix.SESSION_MSGS + sessionId;
+    public List<ChatMessageVO> getMessages(Integer sessionId) {        String key = RedisKeysPrefix.SESSION_MSGS + sessionId;
         try {
             Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
             if (entries.isEmpty()) {

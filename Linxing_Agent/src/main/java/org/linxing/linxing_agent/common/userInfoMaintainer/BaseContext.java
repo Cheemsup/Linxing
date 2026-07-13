@@ -17,6 +17,18 @@ public class BaseContext {
         return userInfo != null ? userInfo.getUserId() : null;
     }
 
+    /**
+     * 获取当前登录用户ID并转为Integer，未登录则抛IllegalStateException
+     * @return 当前用户ID
+     */
+    public static Integer requireCurrentUserId() {
+        Long id = getCurrentId();
+        if (id == null) {
+            throw new IllegalStateException("用户未登录");
+        }
+        return id.intValue();
+    }
+
     public static void setCurrentUser(UserInfo userInfo) {
         threadLocal.set(userInfo);
     }

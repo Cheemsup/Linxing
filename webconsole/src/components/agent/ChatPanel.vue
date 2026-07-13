@@ -172,7 +172,7 @@
                     <span class="panel-title">思考过程</span>
                     <span class="panel-badge" v-if="stepEvents.length">{{ stepEvents.length }}步</span>
                   </div>
-                  <div v-show="!stepCollapsed" class="panel-body">
+                  <div v-show="!stepCollapsed" class="panel-body" ref="streamingStepBody" @scroll="onStreamingStepScroll">
                     <div v-if="!stepEvents.length && !isStreaming" class="step-placeholder">
                       等待思考开始...
                     </div>
@@ -237,7 +237,7 @@
                       {{ isStreaming ? '生成中' : '已生成' }}
                     </span>
                   </div>
-                  <div v-show="!answerCollapsed" class="panel-body">
+                  <div v-show="!answerCollapsed" class="panel-body" ref="streamingAnswerBody" @scroll="onStreamingAnswerScroll">
                     <div v-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
                     <div v-else-if="streamingText" class="answer" v-html="formatAnswer(streamingText)"></div>
                     <div v-else class="step-placeholder">
@@ -339,7 +339,12 @@ export default {
       // 马上要发起流式请求，不应触发 load（否则与 onResult 的消息追加重复，产生空节点）。
       suppressWatchLoad: false,
       // HumanInTheLoop 澄清输入框状态：{ [stepIdx]: { answer: '', submitting: false, submitted: false } }
-      clarifyInputs: {}
+      clarifyInputs: {},
+      // 流式贴底跟随状态：用户在流式期间上划查看历史内容时为 false，停止跟随；
+      // 回到底部附近时自动恢复为 true，实时跟随最新输出（kimi/智谱清言/deepseek 风格）。
+      // 两个窗口各自独立追踪：stepBody 对应"思考过程"，answerBody 对应"回答"。
+      stepPinned: true,
+      answerPinned: true
     }
   },
   computed: {
@@ -535,6 +540,9 @@ export default {
       // 每次新的流式请求开始时，清空 HumanInTheLoop 澄清输入框状态，
       // 避免同页面会话中上一次工作流的澄清回复被复用到新工作流。
       this.clarifyInputs = {}
+      // 新一轮流式开始，两个窗口默认贴底跟随最新内容
+      this.stepPinned = true
+      this.answerPinned = true
       if (this.flushTimer) {
         clearTimeout(this.flushTimer)
         this.flushTimer = null
@@ -654,7 +662,10 @@ export default {
             }
           }
 
-          vm.$nextTick(() => vm.scrollToBottom())
+          vm.$nextTick(() => {
+            vm.scrollStreamingToBottom()
+            vm.scrollToBottom()
+          })
         },
         onStream(data) {
           if (!vm.isStreaming) {
@@ -712,6 +723,15 @@ export default {
           chatTreeStore.setActiveLeaf(assistantMsg.id)
 
           vm.$nextTick(() => vm.scrollToBottom())
+          // 回答结束：无论流式期间用户是否上划查看过历史，"回答"窗口主动跳到最底部
+          // 展示完整内容（kimi/智谱清言/deepseek 完成后自动滚到底的体验）。
+          // 由于此时模板尚未把 streamingText 切回 formatAnswer 渲染，需在下一帧再次拉到底。
+          vm.answerPinned = true
+          vm.$nextTick(() => {
+            if (vm.$refs.streamingAnswerBody) {
+              vm.$refs.streamingAnswerBody.scrollTop = vm.$refs.streamingAnswerBody.scrollHeight
+            }
+          })
           // 流式已完成、消息已追加，恢复 watch 自动 load 能力
           vm.suppressWatchLoad = false
         },
@@ -738,7 +758,16 @@ export default {
           vm.tempUserMsg = null
           vm.loading = false
           vm.isStreaming = false
-          vm.$nextTick(() => vm.scrollToBottom())
+          vm.$nextTick(() => {
+            // 流式彻底结束后兜底再贴底一次：onResult 的滚动可能早于 DOM 完全渲染完成
+            if (vm.$refs.streamingAnswerBody) {
+              vm.$refs.streamingAnswerBody.scrollTop = vm.$refs.streamingAnswerBody.scrollHeight
+            }
+            if (vm.$refs.streamingStepBody) {
+              vm.$refs.streamingStepBody.scrollTop = vm.$refs.streamingStepBody.scrollHeight
+            }
+            vm.scrollToBottom()
+          })
           vm.fetchSessions()
           // 首轮回答完成后触发 AI 自动命名（KIMI 风格）
           if (needsAutoTitle && vm.activeSessionId) {
@@ -1018,7 +1047,10 @@ export default {
           this.streamingText += this.tokenBuffer
           this.tokenBuffer = ''
         }
-        this.$nextTick(() => this.scrollToBottom())
+        this.$nextTick(() => {
+          this.scrollStreamingToBottom()
+          this.scrollToBottom()
+        })
       }
       this.flushTimer = null
     },
@@ -1123,6 +1155,37 @@ export default {
       const container = this.$refs.messagesContainer
       if (container) {
         container.scrollTop = container.scrollHeight
+      }
+    },
+
+    // 判断某 DOM 容器是否接近底部（容差 48px），用于"贴底跟随"判定。
+    // 流式追加内容时只有贴底的窗口才自动滚到底，用户上划查看历史时不打断。
+    isNearBottom(el, threshold = 48) {
+      if (!el) return true
+      return el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+    },
+
+    // 流式"思考过程"窗口滚动监听：用户上划离开底部时关闭跟随，
+    // 滚回底部附近时恢复跟随。
+    onStreamingStepScroll(e) {
+      if (!this.isStreaming) return
+      this.stepPinned = this.isNearBottom(e.target)
+    },
+
+    // 流式"回答"窗口滚动监听：同上，独立追踪。
+    onStreamingAnswerScroll(e) {
+      if (!this.isStreaming) return
+      this.answerPinned = this.isNearBottom(e.target)
+    },
+
+    // 仅当对应窗口处于贴底状态时，把它的滚动位置拉到底部。
+    // 用户上划查看历史内容时窗口视角保持不动（kimi/智谱清言/deepseek 风格）。
+    scrollStreamingToBottom() {
+      if (this.stepPinned && this.$refs.streamingStepBody) {
+        this.$refs.streamingStepBody.scrollTop = this.$refs.streamingStepBody.scrollHeight
+      }
+      if (this.answerPinned && this.$refs.streamingAnswerBody) {
+        this.$refs.streamingAnswerBody.scrollTop = this.$refs.streamingAnswerBody.scrollHeight
       }
     }
   }

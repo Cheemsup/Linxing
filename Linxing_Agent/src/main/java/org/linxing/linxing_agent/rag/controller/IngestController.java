@@ -12,60 +12,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.Set;
-
-/**
- * TODO：将复杂的逻辑下移到service层
- */
 @Slf4j
 @RestController
 @RequestMapping("/rag")
 @RequiredArgsConstructor
 public class IngestController {
 
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "txt", "md", "text", "pdf", "doc", "docx", "xls", "xlsx",
-            "java", "csv", "html", "htm"
-    );
-
     private final IIngestService ingestService;
 
     @PostMapping("/ingest/file")
     public Result<IngestResponse> ingestFile(@RequestParam("file") MultipartFile file) {
-        Integer userId = getCurrentUserId();
-
-        String originalFilename = file.getOriginalFilename();
-        if (originalFilename != null && !isAllowedFileType(originalFilename)) {
-            return Result.error("不支持的文件格式，允许的格式: " + String.join(", ", ALLOWED_EXTENSIONS));
-        }
-
-        try {
-            IngestResponse response = ingestService.ingestFile(file, userId);
-            if (response.isSuccess()) {
-                return Result.success(response);
-            } else {
-                return Result.error(response.getMessage());
-            }
-        } catch (Exception e) {
-            log.error("文件处理异常: {}", e.getMessage(), e);
-            return Result.error("文件处理失败: " + e.getMessage());
-        }
-    }
-
-    private boolean isAllowedFileType(String fileName) {
-        int dotIndex = fileName.lastIndexOf('.');
-        if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
-            return false;
-        }
-        String ext = fileName.substring(dotIndex + 1).toLowerCase();
-        return ALLOWED_EXTENSIONS.contains(ext);
-    }
-
-    private static Integer getCurrentUserId() {
-        Long userId = BaseContext.getCurrentId();
-        if (userId == null) {
-            throw new IllegalStateException("用户未登录");
-        }
-        return userId.intValue();
+        Integer userId = BaseContext.requireCurrentUserId();
+        IngestResponse response = ingestService.ingestFile(file, userId);
+        return response.isSuccess() ? Result.success(response) : Result.error(response.getMessage());
     }
 }

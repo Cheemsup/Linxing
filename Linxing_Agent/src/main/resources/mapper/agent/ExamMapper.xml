@@ -58,4 +58,9 @@
         UPDATE exams SET status = #{status} WHERE id = #{examId}
     </update>
 
+    <update id="updateLinkedPlanId">
+        UPDATE exams SET linked_plan_id = #{linkedPlanId}
+        WHERE id = #{examId} AND linked_plan_id IS NULL
+    </update>
+
 </mapper>

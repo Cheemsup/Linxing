@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
+import org.linxing.linxing_agent.agent.service.impl.ExamServiceImpl;
 import org.linxing.linxing_agent.agent.tool.impl.SaveExamTool;
 import org.linxing.linxing_agent.agent.tool.impl.SaveStudyPlanTool;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.AppendToContainerTool;
@@ -37,7 +38,6 @@ public class ContentGenerationStage {
     private static final String SAVE_EXAM_DISPLAY_LABEL = "保存测验";
     private static final String PLAN_OUTPUT_KEY = "plan_container_id";
     private static final String EXAM_OUTPUT_KEY = "exam_container_id";
-    private static final String LINKED_PLAN_ID_KEY = "linkedPlanId";
 
     private final ObjectMapper objectMapper;
     private final CreateContainerTool createContainerTool;
@@ -47,6 +47,7 @@ public class ContentGenerationStage {
     private final ReplaceContainerMetadataTool replaceContainerMetadataTool;
     private final SaveStudyPlanTool saveStudyPlanTool;
     private final SaveExamTool saveExamTool;
+    private final ExamServiceImpl examService;
 
     /**
      * 构建内容生成阶段工作流。
@@ -84,7 +85,6 @@ public class ContentGenerationStage {
                         replaceContainerMetadataTool,
                         saveExamTool)
                 .outputKey(EXAM_OUTPUT_KEY)
-                .defaultKeyValue(LINKED_PLAN_ID_KEY, "")
                 .listener(StepRecorder.createListener(
                         EXAM_AGENT_NAME, "exam",
                         EXAM_DISPLAY_LABEL, EXAM_OUTPUT_KEY, recorder,
@@ -125,7 +125,6 @@ public class ContentGenerationStage {
             builder.planSaved(true)
                     .planId(planResult.id())
                     .phaseCount(planResult.count());
-            scope.writeState(LINKED_PLAN_ID_KEY, String.valueOf(planResult.id()));
             recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                     StepRecorder.buildSubAgentData(PLAN_AGENT_NAME, "save_plan",
                             SAVE_PLAN_DISPLAY_LABEL, true, PLAN_OUTPUT_KEY, true,
@@ -144,12 +143,16 @@ public class ContentGenerationStage {
 
         if (generateExam && planResult != null) {
             String examContainerId = extractContainerId(scope.readState(EXAM_OUTPUT_KEY, ""));
-            SaveResult examResult = findExamSaveResult(examContainerId, planResult.id());
+            SaveResult examResult = findExamSaveResult(examContainerId);
 
             if (examResult != null) {
                 builder.examSaved(true)
                         .examId(examResult.id())
                         .questionCount(examResult.count());
+                // 统一关联建立点：编排层回填 exam.linked_plan_id。
+                // exam 工具保持纯被动（LLM 不再传 linked_plan_id，落库时为 NULL），
+                // 关联完全由编排层事后用 linkToPlan 回填，覆盖 LLM 自主保存与兜底保存两条路径。
+                examService.linkToPlan(examResult.id(), planResult.id());
                 recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                         StepRecorder.buildSubAgentData(EXAM_AGENT_NAME, "save_exam",
                                 SAVE_EXAM_DISPLAY_LABEL, true, EXAM_OUTPUT_KEY, true,
@@ -207,8 +210,10 @@ public class ContentGenerationStage {
 
     /**
      * 查找测验保存结果：优先从 SubAgentContext 读取工具副作用，否则用 container_id 兜底保存。
+     * 兜底保存时 linked_plan_id 传空串——exam 工具保持纯被动，关联由 persistResults 统一调
+     * {@link ExamServiceImpl#linkToPlan} 回填，不依赖 LLM 传参或兜底分支传 planId。
      */
-    private SaveResult findExamSaveResult(String containerId, Integer planId) {
+    private SaveResult findExamSaveResult(String containerId) {
         SubAgentContext context = SubAgentContext.current();
         if (context != null) {
             SaveResult result = context.getAttribute(SaveExamTool.ATTR_SAVE_RESULT);
@@ -220,8 +225,7 @@ public class ContentGenerationStage {
 
         if (containerId != null && !containerId.isBlank()) {
             log.info("Exam save result not in context, fallback save by containerId={}", containerId);
-            String linkedPlanId = planId != null ? String.valueOf(planId) : "";
-            String resultJson = saveExamTool.saveExam(containerId, linkedPlanId);
+            String resultJson = saveExamTool.saveExam(containerId, "");
             return parseSaveResult(resultJson);
         }
 

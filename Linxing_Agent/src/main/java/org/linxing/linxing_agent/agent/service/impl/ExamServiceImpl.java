@@ -96,6 +96,20 @@ public class ExamServiceImpl implements IExamService {
     }
 
     /**
+     * 回填 exam 与 plan 的关联关系（编排层统一建立关联的入口）。
+     * 仅当 exams.linked_plan_id 当前为 NULL 时才写入，避免覆盖已正确关联的值。
+     * 用于 study_plan 工作流汇总阶段，exam 已落库但 linked_plan_id 缺失的兜底场景。
+     */
+    @Transactional
+    public void linkToPlan(Integer examId, Integer linkedPlanId) {
+        if (examId == null || linkedPlanId == null) {
+            return;
+        }
+        examMapper.updateLinkedPlanId(examId, linkedPlanId);
+        log.info("回填 exam {} 的 linked_plan_id 为 {}", examId, linkedPlanId);
+    }
+
+    /**
      * 提交试卷，判分，更新 exams.status 为 completed
      */
     @Transactional

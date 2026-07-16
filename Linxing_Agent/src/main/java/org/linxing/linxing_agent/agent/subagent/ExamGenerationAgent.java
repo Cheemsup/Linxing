@@ -37,7 +37,6 @@ public interface ExamGenerationAgent {
             "   - items 为 question 对象的 JSON 数组字符串\n" +
             "3. 所有题目追加完毕后，必须调用 save_exam 工具保存测验：\n" +
             "   - container_id 为第 1 步返回的容器ID\n" +
-            "   - linked_plan_id 为 {{linkedPlanId}}，必须与提供值一致（若无则留空）\n" +
             "4. 调用 save_exam 成功后，最终回复只包含第 1 步返回的容器ID字符串本身，不要输出任何其他内容\n\n" +
             "【question 对象结构】\n" +
             "{\n" +
@@ -64,7 +63,6 @@ public interface ExamGenerationAgent {
     String generateExam(
             @V("topic") String topic,
             @V("sourceType") String sourceType,
-            @V("materials") String materials,
-            @V("linkedPlanId") String linkedPlanId
+            @V("materials") String materials
     );
 }

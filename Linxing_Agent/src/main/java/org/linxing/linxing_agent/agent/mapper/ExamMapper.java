@@ -17,4 +17,9 @@ public interface ExamMapper {
     int countByUserId(@Param("userId") Integer userId, @Param("status") String status);
     int updateStatus(@Param("examId") Integer examId, @Param("status") String status);
     List<Exam> selectByPlanId(@Param("userId") Integer userId, @Param("planId") Integer planId);
+
+    /**
+     * 回填 linked_plan_id（仅当当前值为 NULL 时才写入，避免覆盖已正确关联的值）
+     */
+    int updateLinkedPlanId(@Param("examId") Integer examId, @Param("linkedPlanId") Integer linkedPlanId);
 }

@@ -3,7 +3,7 @@
     <h2>导入笔记</h2>
     <p class="hint">上传后将自动整理为可检索的笔记。</p>
 
-    <div class="upload-area" @click="triggerFileInput" @dragover.prevent @drop.prevent="handleDrop">
+    <div class="upload-area" @click="!loading && triggerFileInput()" @dragover.prevent="!loading && $event.preventDefault()" @drop.prevent="handleDrop">
       <input
         type="file"
         ref="fileInput"
@@ -20,7 +20,7 @@
         <el-icon class="file-icon"><component :is="getFileIcon(selectedFile.name)" /></el-icon>
         <span class="file-name">{{ selectedFile.name }}</span>
         <span class="file-size">({{ formatFileSize(selectedFile.size) }})</span>
-        <button @click.stop="clearFile" class="clear-btn">
+        <button v-if="!loading" @click.stop="clearFile" class="clear-btn">
           <el-icon><Close /></el-icon>
         </button>
       </div>
@@ -28,7 +28,7 @@
 
     <button @click="uploadFile" :disabled="loading || !selectedFile" class="btn-primary">
       <el-icon v-if="loading" class="is-loading"><Loading /></el-icon>
-      <span>{{ loading ? '上传中' : '开始上传' }}</span>
+      <span>{{ loading ? '文档处理中' : '开始上传' }}</span>
     </button>
 
     <div v-if="result && !result.success" class="result-box error">
@@ -38,16 +38,23 @@
     <div v-else-if="uploadSuccess" class="result-box success">
       <el-icon class="result-icon"><CircleCheckFilled /></el-icon>
       <div class="success-content">
-        <p class="success-title">上传成功，已整理为笔记</p>
+        <p class="success-title">{{ successMessage }}</p>
         <button class="goto-notes-btn" @click="goToNotes">
           去笔记管理查看<el-icon><ArrowRight /></el-icon>
         </button>
       </div>
     </div>
+
+    <!-- 上传处理期间的全面板锁遮罩：禁止任何中断操作 -->
+    <div v-if="loading" class="panel-lock-mask">
+      <el-icon class="is-loading mask-spinner"><Loading /></el-icon>
+      <span class="mask-text">文档处理中…</span>
+    </div>
   </div>
 </template>
 
 <script>
+import { ElMessageBox } from 'element-plus'
 import { ingestApi } from '@/api/agent/ingest'
 
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.text', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.java', '.csv', '.html', '.htm']
@@ -59,7 +66,9 @@ export default {
       selectedFile: null,
       loading: false,
       result: null,
-      uploadSuccess: false
+      uploadSuccess: false,
+      successMessage: '',
+      overwriteConfirmed: false //同名确认后置 true，上传完成后复位 false
     }
   },
   methods: {
@@ -78,13 +87,15 @@ export default {
     },
 
     handleDrop(event) {
+      if (this.loading) return
       const file = event.dataTransfer.files[0]
       if (file) {
         this.validateAndSetFile(file)
       }
     },
 
-    validateAndSetFile(file) {
+    //校验文件类型，通过后做同名预检：存在同名则弹窗确认是否覆盖并重新入库
+    async validateAndSetFile(file) {
       const fileName = file.name.toLowerCase()
       const isValidType = ALLOWED_EXTENSIONS.some(type => fileName.endsWith(type))
 
@@ -96,8 +107,45 @@ export default {
         return
       }
 
+      //同名预检：网络失败不阻塞选文件，回退 overwriteConfirmed=false（后端 code=2 兜底仍保证正确）
+      try {
+        const response = await ingestApi.checkDuplicate(file.name)
+        const checkData = response.data?.data
+        if (checkData && checkData.duplicate) {
+          const proceed = await this.confirmOverwriteDialog(file.name)
+          if (!proceed) {
+            this.selectedFile = null
+            this.$refs.fileInput.value = ''
+            this.overwriteConfirmed = false
+            return
+          }
+          this.overwriteConfirmed = true
+          this.selectedFile = file
+          this.result = null
+          this.uploadSuccess = false
+          await this.uploadFile()
+          return
+        }
+      } catch (e) {
+        //预检异常：忽略，按普通新文件处理
+      }
+
+      this.overwriteConfirmed = false
       this.selectedFile = file
       this.result = null
+    },
+
+    //弹出覆盖确认框；返回 true 表示用户确认覆盖，false 表示取消
+    confirmOverwriteDialog(fileName) {
+      return ElMessageBox.confirm(
+        `已存在同名文件「${fileName}」。确认覆盖将删除旧文件、旧笔记与向量，并重新执行完整的解析、切分、向量化流程。是否继续？`,
+        '发现同名笔记',
+        {
+          confirmButtonText: '覆盖并重新导入',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      ).then(() => true).catch(() => false)
     },
 
     clearFile() {
@@ -113,15 +161,30 @@ export default {
       this.uploadSuccess = false
 
       try {
-        const response = await ingestApi.ingestFile(this.selectedFile)
-        const resData = response.data
-        if (resData.code === 1) {
+        const response = await ingestApi.ingestFile(this.selectedFile, this.overwriteConfirmed)
+        const envelope = response.data //Result 信封 { code, msg, data }
+        const biz = envelope.data //IngestResponse | null
+        //业务码取内层 IngestResponse.code（0 失败 / 1 成功 / 2 同名待确认）；data 为空（Result.error）时按信封 code 兜底
+        const bizCode = biz ? biz.code : (envelope.code === 1 ? 1 : 0)
+
+        if (bizCode === 2) {
+          //兜底：预检正常时不应到这里。再弹确认框，确认则 overwrite=true 重传，取消则清空文件
+          const proceed = await this.confirmOverwriteDialog(this.selectedFile.name)
+          if (proceed) {
+            this.overwriteConfirmed = true
+            await this.uploadFile()
+          } else {
+            this.clearFile()
+          }
+        } else if (bizCode === 1) {
           this.uploadSuccess = true
+          this.successMessage = biz?.message || '上传成功，已整理为笔记'
           this.clearFile()
+          this.overwriteConfirmed = false
         } else {
           this.result = {
             success: false,
-            message: resData.msg || '上传失败，请重试'
+            message: biz?.message || envelope.msg || '上传失败，请重试'
           }
         }
       } catch (error) {
@@ -170,6 +233,7 @@ export default {
   padding: 20px;
   background: white;
   border-radius: 8px;
+  position: relative;
 }
 
 .ingest-panel h2 {
@@ -341,5 +405,30 @@ export default {
 
 .goto-notes-btn:hover {
   background: #256528;
+}
+
+/* 上传期间全面板锁遮罩：覆盖所有控件，禁止中断 */
+.panel-lock-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  z-index: 20;
+  cursor: progress;
+  border-radius: 8px;
+}
+
+.mask-spinner {
+  font-size: 36px;
+  color: #b8763d;
+}
+
+.mask-text {
+  font-size: 14px;
+  color: #666;
 }
 </style>

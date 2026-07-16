@@ -2,7 +2,12 @@
   <div class="quiz-panel">
     <!-- 顶部操作栏 -->
     <div class="quiz-toolbar">
-      <h2 class="quiz-title">{{ quizData.title || '知识测验' }}</h2>
+      <div class="quiz-title-wrap">
+        <button class="back-btn" @click="$emit('back')">
+          <el-icon><ArrowLeft /></el-icon><span>返回列表</span>
+        </button>
+        <h2 class="quiz-title">{{ quizData.title || '知识测验' }}</h2>
+      </div>
       <div class="quiz-actions">
         <button class="btn btn-primary" @click="handleSubmit" :disabled="submitted">
           {{ submitted ? '已提交' : '提交答案' }}
@@ -149,6 +154,7 @@
 <script>
 export default {
   name: 'QuizPanel',
+  emits: ['back', 'submit', 'saveDraft'],
   props: {
     quizData: {
       type: Object,
@@ -271,10 +277,41 @@ export default {
   border-bottom: 2px solid #e8e8e8;
 }
 
+.quiz-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: #f5f5f5;
+  color: #555;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.back-btn:hover {
+  background: #b8763d;
+  color: #fff;
+  border-color: #b8763d;
+}
+
 .quiz-title {
   font-size: 20px;
   color: #1a1a1a;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quiz-actions {

@@ -68,7 +68,7 @@
             v-for="s in chatSessions"
             :key="s.id"
             class="history-item"
-            :class="{ active: s.id === activeSessionId }"
+            :class="{ active: isHistoryActive(s.id) }"
             @click="switchToSession(s.id)"
           >
             <el-icon class="history-icon"><ChatLineRound /></el-icon>
@@ -183,13 +183,20 @@ export default {
       localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]))
     }
 
-    // 前缀匹配，使详情页（/quiz/:id、/study-plan/:id）也能高亮父级
+    // 统一的导航项激活判定：所有菜单项（含「新对话」与「对话历史」）共用同一套逻辑，
+    // 保证任一时刻至多一个高亮，避免多区块同时亮起。
+    // - 非对话类项：路由前缀匹配，详情页（/quiz/:id、/study-plan/:id）也能高亮父级。
+    // - 对话类项：首页态（/chat/home 与 redirect 落点 /chat）时高亮「新对话」，
+    //   /chat/:sessionId 下由路由 params 在历史项中二选一（见 isHistoryActive）。
     const isActive = (item) => {
+      if (item.path === '/chat') {
+        return route.path === '/chat' || route.path === '/chat/home'
+      }
       if (route.path === item.path) return true
       return route.path.startsWith(item.path + '/')
     }
 
-    // 点击「智能问答」自动开启新对话（KIMI 风格），其余导航项仅跳转
+    // 点击「新对话」清空活跃会话（KIMI 风格），router-link 随后导航到 /chat，由其固定 redirect 落首页
     const onNavClick = (item) => {
       if (item.path === '/chat') {
         chatSessionStore.startNewChat()
@@ -202,11 +209,17 @@ export default {
 
     // 对话历史（来自共享 store）
     const chatSessions = computed(() => chatSessionStore.state.sessions)
-    const activeSessionId = computed(() => chatSessionStore.state.activeSessionId)
+
+    // 对话历史项激活判定：当前路由落在 /chat/:sessionId，且该会话正是路由 params 对应会话。
+    // 以路由 params 为准（而非 activeSessionId），与「新对话」互斥，与知识库/学习区以路由互斥。
+    const isHistoryActive = (id) => {
+      if (!route.path.startsWith('/chat/')) return false//排除 /chat/home 首页
+      return route.params.sessionId === String(id)
+    }
 
     const switchToSession = (id) => {
       chatSessionStore.setActiveSession(id)
-      router.push('/chat')
+      router.push(`/chat/${id}`)
     }
 
     const deleteSession = async (id) => {
@@ -231,12 +244,12 @@ export default {
       isGroupCollapsed,
       toggleGroup,
       isActive,
+      isHistoryActive,
       onNavClick,
       currentTitle,
       isLoggedIn,
       username,
       chatSessions,
-      activeSessionId,
       switchToSession,
       deleteSession,
       handleLogout

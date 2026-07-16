@@ -13,6 +13,12 @@ public interface DocumentMapper {
 
     Optional<DocRecord> findById(@Param("id") Integer id);
 
+    //按 user_id + file_name 查询，用于上传重名判重
+    Optional<DocRecord> findByUserIdAndFileName(
+            @Param("userId") Integer userId,
+            @Param("fileName") String fileName
+    );
+
     List<DocRecord> findByUserId(@Param("userId") Integer userId);
 
     List<DocRecord> findByUserIdAndStatus(

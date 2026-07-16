@@ -30,6 +30,14 @@
         WHERE id = #{id}
     </select>
 
+    <select id="findByUserIdAndFileName" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumnList"/>
+        FROM documents
+        WHERE user_id = #{userId} AND file_name = #{fileName}
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
     <select id="findByUserId" resultMap="BaseResultMap">
         SELECT <include refid="BaseColumnList"/>
         FROM documents

@@ -12,6 +12,7 @@
     "axios": "^1.15.2",
     "core-js": "^3.8.3",
     "element-plus": "^2.13.7",
+    "markdown-it": "^14.3.0",
     "vue": "^3.2.13",
     "vue-router": "4",
     "vue3-d3-tree": "^1.0.2"

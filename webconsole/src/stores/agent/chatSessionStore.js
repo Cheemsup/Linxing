@@ -10,7 +10,9 @@ import { chatSessionApi } from '@/api/agent/chat'
 const state = reactive({
   sessions: [],
   activeSessionId: null,
-  loading: false
+  loading: false,
+  // 首页发送后、跳转聊天页前透传的待发问题，聊天页 mounted 一次性消费后置空
+  pendingQuestion: null
 })
 
 const ACTIVE_KEY = 'lx_active_session'
@@ -59,6 +61,23 @@ export const chatSessionStore = {
    */
   startNewChat() {
     this.setActiveSession(null)
+    state.pendingQuestion = null//清掉残留的待发问题，避免误发
+  },
+
+  /**
+   * 设置待发问题（首页→聊天页透传）
+   */
+  setPendingQuestion(question) {
+    state.pendingQuestion = question
+  },
+
+  /**
+   * 消费待发问题，读后即置空，防止刷新或重复进入误发
+   */
+  consumePendingQuestion() {
+    const q = state.pendingQuestion
+    state.pendingQuestion = null
+    return q
   },
 
   /**

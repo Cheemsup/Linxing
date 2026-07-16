@@ -5,7 +5,8 @@ import LoginView from '@/views/auth/LoginView.vue'
 
 // 路由懒加载，减少首屏体积
 const SearchView = () => import('@/views/agent/SearchView.vue')
-const ChatView = () => import('@/views/agent/ChatView.vue')
+const ChatHomeView = () => import('@/views/agent/ChatHomeView.vue')
+const ChatSessionView = () => import('@/views/agent/ChatSessionView.vue')
 const IngestView = () => import('@/views/agent/IngestView.vue')
 const NotesView = () => import('@/views/agent/NotesView.vue')
 const ExamListView = () => import('@/views/agent/ExamListView.vue')
@@ -42,11 +43,21 @@ const routes = [
         component: SearchView,
         meta: { title: '搜索笔记', requiresAuth: true }
       },
+      // /chat 本身只做 redirect 收口，固定指向首页；不绑定组件、不读 restoreActive，
+      // 与 ChatGPT/KIMI 一致：关闭窗口重进总是落首页而非恢复上次会话。
+      { path: 'chat', redirect: '/chat/home' },
       {
-        path: 'chat',
-        name: 'Chat',
-        component: ChatView,
+        path: 'chat/home',
+        name: 'ChatHome',
+        component: ChatHomeView,
         meta: { title: '智能问答', requiresAuth: true }
+      },
+      {
+        path: 'chat/:sessionId',
+        name: 'ChatSession',
+        component: ChatSessionView,
+        meta: { title: '智能问答', requiresAuth: true },
+        props: true
       },
       {
         path: 'ingest',

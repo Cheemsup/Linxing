@@ -2,7 +2,7 @@
   <div class="chat-tree-panel">
     <div class="tree-header">
       <h3>对话树</h3>
-      <span class="tree-hint">点击选中节点，再点「确认跳转」切换对话</span>
+      <span class="tree-hint">点击选中节点，再点「确认跳转」定位到该消息</span>
       <button class="btn-close" @click="$emit('close')" title="关闭">
         <el-icon><Close /></el-icon>
       </button>
@@ -30,14 +30,14 @@
               :title="data.fullContent"
               @click.stop="handleNodeClick(data)"
             >
-              {{ data.label }}
+              <span v-if="data.branchIndex" class="tree-node-index">{{ data.branchIndex }}</span>
+              <span class="tree-node-text">{{ data.label }}</span>
             </div>
           </template>
         </VueTree>
       </div>
     </div>
     <div class="tree-toolbar">
-      <button class="btn-reset" @click="resetZoom" title="重置缩放和拖拽位置">重置视图</button>
       <button
         class="btn-confirm"
         :disabled="!selectedNodeId"
@@ -48,6 +48,10 @@
       <span class="current-node-label">
         当前选中：{{ selectedNodeLabel || '未选择' }}
       </span>
+      <div class="tree-legend">
+        <span class="legend-item"><i class="legend-swatch legend-active-path"></i>当前路径</span>
+        <span class="legend-item"><i class="legend-swatch legend-selected"></i>待跳转</span>
+      </div>
     </div>
   </div>
 </template>
@@ -81,19 +85,23 @@ export default {
     treeData() {
       if (!this.roots || this.roots.length === 0) return null
 
-      const mapNode = (node) => {
+      // 为同父的兄弟节点标注分支序号（从 1 起），便于在多分支对话中区分。
+      const mapNode = (node, branchIndex = null) => {
         const mapped = {
           label: this.truncateLabel(node.content || ''),
           nodeId: node.id,
-          fullContent: node.content || ''
+          fullContent: node.content || '',
+          branchIndex
         }
         if (node.children && node.children.length > 0) {
-          mapped.children = node.children.map(mapNode)
+          mapped.children = node.children.map((child, i) =>
+            mapNode(child, node.children.length > 1 ? i + 1 : null)
+          )
         }
         return mapped
       }
 
-      const mapped = this.roots.map(mapNode)
+      const mapped = this.roots.map(r => mapNode(r))
       if (mapped.length === 1) return mapped[0]
 
       return {
@@ -127,9 +135,6 @@ export default {
     confirmSelection() {
       if (!this.selectedNodeId) return
       this.$emit('select', this.selectedNodeId)
-    },
-    resetZoom() {
-      this.$refs.treeRef?.zoom(1)
     }
   }
 }
@@ -201,6 +206,9 @@ export default {
 }
 
 .tree-custom-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 16px;
   border: 2px solid #d0d5dd;
   border-radius: 8px;
@@ -208,13 +216,32 @@ export default {
   font-size: 13px;
   color: #333;
   cursor: pointer;
-  max-width: 220px;
+  max-width: 240px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: all 0.15s;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   user-select: none;
+}
+
+.tree-node-index {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #b8763d;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.tree-node-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tree-custom-node:hover {
@@ -246,21 +273,6 @@ export default {
   flex-shrink: 0;
 }
 
-.btn-reset {
-  padding: 6px 14px;
-  background: #b8763d;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: background 0.2s;
-}
-
-.btn-reset:hover {
-  background: #5a6fd6;
-}
-
 .btn-confirm {
   padding: 6px 14px;
   background: #e65100;
@@ -288,5 +300,38 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tree-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 2px solid;
+}
+
+.legend-active-path {
+  border-color: #b8763d;
+  background: linear-gradient(135deg, #f7eede, #ecd9b8);
+}
+
+.legend-selected {
+  border-color: #e65100;
+  background: linear-gradient(135deg, #fff3e0, #ffe0b2);
 }
 </style>

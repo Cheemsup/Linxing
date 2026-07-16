@@ -4,7 +4,6 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -19,27 +18,27 @@ public class LlmManager {
 
     private final Map<String, OpenAiChatModel> models = new LinkedHashMap<>();
     private final Map<String, OpenAiStreamingChatModel> streamingModels = new LinkedHashMap<>();
-    private final RagProperties ragProperties;
+    private final LlmProperties llmProperties;
     private String defaultProvider;
 
-    public LlmManager(RagProperties ragProperties) {
-        this.ragProperties = ragProperties;
+    public LlmManager(LlmProperties llmProperties) {
+        this.llmProperties = llmProperties;
     }
 
     @PostConstruct
     public void init() {
-        RagProperties.Llm llm = ragProperties.getLlm();
+        LlmProperties llm = llmProperties;
         this.defaultProvider = resolveDefaultProvider(llm);
-        Map<String, RagProperties.LlmProviderConfig> providers = llm.getProviders();
+        Map<String, LlmProperties.LlmProviderConfig> providers = llm.getProviders();
 
         if (providers == null || providers.isEmpty()) {
             log.warn("未配置任何LLM provider");
             return;
         }
 
-        for (Map.Entry<String, RagProperties.LlmProviderConfig> entry : providers.entrySet()) {
+        for (Map.Entry<String, LlmProperties.LlmProviderConfig> entry : providers.entrySet()) {
             String name = entry.getKey();
-            RagProperties.LlmProviderConfig config = entry.getValue();
+            LlmProperties.LlmProviderConfig config = entry.getValue();
 
             OpenAiChatModel.OpenAiChatModelBuilder modelBuilder = OpenAiChatModel.builder()
                     .baseUrl(config.getBaseUrl())
@@ -66,9 +65,9 @@ public class LlmManager {
         }
     }
 
-    private String resolveDefaultProvider(RagProperties.Llm llm) {
+    private String resolveDefaultProvider(LlmProperties llm) {
         String configured = llm.getDefaultProvider();
-        Map<String, RagProperties.LlmProviderConfig> providers = llm.getProviders();
+        Map<String, LlmProperties.LlmProviderConfig> providers = llm.getProviders();
         if (providers != null && providers.containsKey(configured)) {
             return configured;
         }
@@ -98,9 +97,9 @@ public class LlmManager {
             return model;
         }
 
-        RagProperties.Llm llm = ragProperties.getLlm();
-        Map<String, RagProperties.LlmProviderConfig> providers = llm.getProviders();
-        RagProperties.LlmProviderConfig config = providers.get(provider);
+        LlmProperties llm = llmProperties;
+        Map<String, LlmProperties.LlmProviderConfig> providers = llm.getProviders();
+        LlmProperties.LlmProviderConfig config = providers.get(provider);
         if (config == null) {
             throw new IllegalArgumentException("未知的LLM provider: " + provider);
         }

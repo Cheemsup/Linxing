@@ -14,12 +14,8 @@
         </button>
       </div>
       <div class="chat-messages" ref="messagesContainer">
-        <div v-if="!activeSessionId && !chatTreeStore.state.branchParentId" class="welcome-hint">
-          开始新的对话，或在左侧「对话历史」中选择一个会话
-        </div>
-
         <template v-for="item in allMessages" :key="item.id">
-          <div class="message-row">
+          <div class="message-row" :data-msg-id="item.id">
             <div :class="['message', item.role]">
               <div class="message-content">
                 <div v-if="item.role === 'user'" class="user-message">
@@ -218,8 +214,9 @@
                         </div>
                       </div>
                       <div v-else :class="['step-item', getStepClass(step)]">
-                        <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
+                        <el-icon class="step-icon" :class="{ 'is-loading': isStepRunning(step, stepEvents, isStreaming) }"><component :is="getStepIcon(step)" /></el-icon>
                         <span class="step-text">{{ formatStepText(step) }}</span>
+                        <span v-if="isStepRunning(step, stepEvents, isStreaming)" class="step-running-hint">执行中...</span>
                       </div>
                     </template>
                     <div v-if="isStreaming && !stepEvents.length" class="step-item step-thinking">
@@ -238,7 +235,8 @@
                     </span>
                   </div>
                   <div v-show="!answerCollapsed" class="panel-body" ref="streamingAnswerBody" @scroll="onStreamingAnswerScroll">
-                    <div v-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
+                    <div v-if="isStreaming && streamingHtml" class="answer streaming-answer streaming-md" v-html="streamingHtml"></div>
+                    <div v-else-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
                     <div v-else-if="streamingText" class="answer" v-html="formatAnswer(streamingText)"></div>
                     <div v-else class="step-placeholder">
                       等待回答...
@@ -307,6 +305,15 @@ import ChunkContextPanel from './ChunkContextPanel.vue'
 import ChatTreePanel from './ChatTreePanel.vue'
 import { chatTreeStore } from '@/stores/agent/chatTreeStore'
 import { chatSessionStore } from '@/stores/agent/chatSessionStore'
+import { useMarkdownRenderer } from '@/composables/useMarkdownRenderer'
+
+const { renderToHtml } = useMarkdownRenderer()
+// 自定义链接占位：在 markdown 渲染前把内部跳转链接（测验/学习计划）替换为占位符，
+// 渲染完成后再还原为可点击 span，避免被 markdown-it 转义或破坏。
+const EXAM_LINK_PLACEHOLDER = (id, label) => `PH_EXAM_${id}_${label}_EXAM_PH`
+const PLAN_LINK_PLACEHOLDER = (id, label) => `PH_PLAN_${id}_${label}_PLAN_PH`
+const EXAM_LINK_RE = /PH_EXAM_(\d+)_(.+?)_EXAM_PH/g
+const PLAN_LINK_RE = /PH_PLAN_(\d+)_(.+?)_PLAN_PH/g
 
 export default {
   name: 'ChatPanel',
@@ -323,6 +330,10 @@ export default {
       showTreeModal: false,
       streamingText: '',
       isStreaming: false,
+      // 流式期间实时渲染的 markdown HTML（与 streamingText 同步更新，按节流频率重解析）
+      streamingHtml: '',
+      // 渲染节流定时器：流式 token 高频到来时，markdown 重解析按固定节拍进行，避免逐 token 重建 DOM
+      renderTimer: null,
       stepEvents: [],
       stepCollapsed: false,
       answerCollapsed: false,
@@ -469,13 +480,29 @@ export default {
         this.historyStepsCache = {}
         this.loadingSteps = {}
       }
+    },
+    // 侧栏点历史项跳 /chat/:id 时同路由只换 params，组件不重建，靠此 watch 切换会话
+    '$route.params.sessionId'(val, oldVal) {
+      if (!val || val === oldVal) return
+      chatSessionStore.setActiveSession(val)
+      this.switchSession(val)
     }
   },
-  mounted() {
-    // 恢复上次活跃会话（由 AppLayout 负责拉取列表）
-    const restored = chatSessionStore.restoreActive()
-    if (restored) {
-      this.switchSession(restored)
+  async mounted() {
+    const sid = this.$route.params.sessionId
+    if (sid) {
+      // 抑制 watch.activeSessionId 的自动 load：下面手动 switchSession 加载，
+      // 否则 watch 触发的 switchSession 会异步清空 this.question，吞掉 pendingQuestion。
+      this.suppressWatchLoad = true
+      chatSessionStore.setActiveSession(sid)
+      await this.switchSession(sid)
+      this.suppressWatchLoad = false
+    }
+    // 消费首页透传的待发问题，填入输入框后立即发送（chatStream 在本页发起）
+    const pending = chatSessionStore.consumePendingQuestion()
+    if (pending) {
+      this.question = pending
+      this.$nextTick(() => this.sendQuestion())
     }
     window.__examLinkClick = (examId) => {
       this.$router.push({ name: 'ExamDetail', params: { examId } })
@@ -523,12 +550,16 @@ export default {
       } catch (e) {
         console.error('加载消息失败:', e)
         chatTreeStore.clearMessages()
+        // 会话 id 后端已不存在（如直访被删除的书签），兜底回首页
+        chatSessionStore.startNewChat()
+        this.$router.replace('/chat/home')
       }
       this.$nextTick(() => this.scrollToBottom())
     },
 
     resetStreamState() {
       this.streamingText = ''
+      this.streamingHtml = ''
       this.isStreaming = false
       this.stepEvents = []
       this.stepCollapsed = false
@@ -546,6 +577,10 @@ export default {
       if (this.flushTimer) {
         clearTimeout(this.flushTimer)
         this.flushTimer = null
+      }
+      if (this.renderTimer) {
+        clearTimeout(this.renderTimer)
+        this.renderTimer = null
       }
     },
 
@@ -565,28 +600,9 @@ export default {
       this.tempUserMsg = { content: q }
       this.$nextTick(() => this.scrollToBottom())
 
-      // 若无活跃会话，先创建一个（默认标题"新对话"，由 AI 在首轮回答后自动命名）。
-      // 确保 sessionId 在发送前就确定，否则工作流暂停等待澄清时无法提交回复。
-      // 抑制 watch 自动 load：会话刚创建无消息，且马上要发起流式请求，
-      // 由 onResult 负责追加消息即可，避免重复节点。
-      let needsAutoTitle = false
-      if (!this.activeSessionId) {
-        this.suppressWatchLoad = true
-        try {
-          const newSession = await chatSessionStore.createSession('新对话')
-          if (!newSession || !newSession.id) {
-            throw new Error('未返回会话ID')
-          }
-          needsAutoTitle = true
-        } catch (e) {
-          console.error('创建会话失败:', e)
-          this.suppressWatchLoad = false
-          this.loading = false
-          this.tempUserMsg = null
-          alert('创建会话失败: ' + (e.response?.data?.msg || e.message))
-          return
-        }
-      }
+      // 聊天页进来时 activeSessionId 必由路由 params 给定，会话已存在，无需在此创建。
+      // 首条消息发送后触发 AI 自动命名（KIMI 风格）。
+      const needsAutoTitle = chatTreeStore.state.messages.length === 0
 
       let parentMessageId
       if (chatTreeStore.state.branchParentId) {
@@ -685,6 +701,8 @@ export default {
         },
         onResult(data) {
           vm.isStreaming = false
+          // 流式结束：用原文整体渲染一次最终版 markdown，覆盖流式期间的中间态补全
+          vm.streamingHtml = vm.formatAnswer(vm.streamingText)
           vm.stepCollapsed = true
           vm.answerCollapsed = false
 
@@ -805,6 +823,19 @@ export default {
         case 'workflow_end': return 'Flag'
         default: return 'LocationFilled'
       }
+    },
+
+    /**
+     * 判断某个步骤是否正处于"执行中"状态，用于显示转圈加载动画。
+     * tool_call 事件在工具执行前推送、tool_result 在执行后推送，
+     * 因此当最后一个步骤是 tool_call 且流式未结束时，说明工具正在执行中。
+     * 历史消息（已结束）的 tool_call 不会被视为执行中。
+     */
+    isStepRunning(step, steps, isStreaming) {
+      if (!steps || !steps.length) return false
+      if (!isStreaming) return false
+      const last = steps[steps.length - 1]
+      return step === last && step.eventType === 'tool_call'
     },
 
     getStepsForMessage(item) {
@@ -1046,6 +1077,8 @@ export default {
         if (this.tokenBuffer) {
           this.streamingText += this.tokenBuffer
           this.tokenBuffer = ''
+          // 调度节流式 markdown 实时渲染（60ms 节拍），与 token 30ms flush 解耦
+          this.scheduleStreamingRender()
         }
         this.$nextTick(() => {
           this.scrollStreamingToBottom()
@@ -1053,6 +1086,45 @@ export default {
         })
       }
       this.flushTimer = null
+    },
+
+    /**
+     * 节流式 markdown 实时渲染：流式期间按固定节拍把 streamingText 重新解析为 HTML，
+     * 避免每个 token 触发一次 markdown-it 解析造成的卡顿。第一个 token 立即渲染一次，
+     * 后续最多每 60ms 渲染一次。
+     */
+    scheduleStreamingRender() {
+      // 首帧立即渲染，让用户尽早看到格式化效果
+      if (this.streamingHtml === '') {
+        this.streamingHtml = this.renderStreamingMarkdown(this.streamingText)
+      }
+      if (this.renderTimer) return
+      this.renderTimer = setTimeout(() => {
+        this.renderTimer = null
+        this.streamingHtml = this.renderStreamingMarkdown(this.streamingText)
+      }, 60)
+    },
+
+    /**
+     * 对流式中途的半成品 markdown 做轻量补全，再交给 markdown-it 渲染：
+     * - 未闭合的 ``` 代码块补一个闭合围栏，避免后续所有行被当成代码块
+     * - 未闭合的行内 ` 补一个，避免跨段落渲染异常
+     * 仅作用于渲染输入，不修改 streamingText 原文，结束后 onResult 用原文整体渲染一次。
+     */
+    renderStreamingMarkdown(text) {
+      if (!text) return ''
+      let src = text
+      // 统计未闭合的代码围栏 ``` 数量，奇数则补一个闭合围栏
+      const fenceCount = (src.match(/```/g) || []).length
+      if (fenceCount % 2 === 1) {
+        src += '\n```'
+      }
+      // 行内反引号未闭合补一个
+      const inlineTickCount = (src.match(/`/g) || []).length
+      if (inlineTickCount % 2 === 1) {
+        src += '`'
+      }
+      return this.formatAnswer(src)
     },
 
     isPanelCollapsed(messageId, panelType) {
@@ -1102,7 +1174,7 @@ export default {
       const leafId = chatTreeStore.findLeafDescendant(nodeId)
       chatTreeStore.setActiveLeaf(leafId)
       this.showTreeModal = false
-      this.$nextTick(() => this.scrollToBottom())
+      this.$nextTick(() => this.scrollToMessage(nodeId))
     },
     reAsk(messageId, content) {
       chatTreeStore.setBranchParent(messageId)
@@ -1140,20 +1212,46 @@ export default {
     },
     formatAnswer(text) {
       if (!text) return ''
-      let html = text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      html = html.replace(
+      // 先把内部跳转链接替换为占位符，躲过 markdown 转义
+      let masked = text.replace(
         /\[([^\]]+)\]\(\/quiz\/(\d+)\)/g,
-        '<span class="exam-link" data-exam-id="$2" onclick="window.__examLinkClick&&window.__examLinkClick($2)">$1</span>'
+        (_, label, id) => EXAM_LINK_PLACEHOLDER(id, label)
+      )
+      masked = masked.replace(
+        /\[([^\]]+)\]\(\/study-plan\?planId=(\d+)\)/g,
+        (_, label, id) => PLAN_LINK_PLACEHOLDER(id, label)
+      )
+      // markdown 渲染
+      let html = renderToHtml(masked)
+      // 还原为可点击 span
+      html = html.replace(
+        EXAM_LINK_RE,
+        (_, id, label) =>
+          `<span class="exam-link" data-exam-id="${id}" onclick="window.__examLinkClick&&window.__examLinkClick(${id})">${label}</span>`
       )
       html = html.replace(
-        /\[([^\]]+)\]\(\/study-plan\?planId=(\d+)\)/g,
-        '<span class="exam-link" data-plan-id="$2" onclick="window.__studyPlanLinkClick&&window.__studyPlanLinkClick($2)">$1</span>'
+        PLAN_LINK_RE,
+        (_, id, label) =>
+          `<span class="exam-link" data-plan-id="${id}" onclick="window.__studyPlanLinkClick&&window.__studyPlanLinkClick(${id})">${label}</span>`
       )
       return html
     },
     scrollToBottom() {
       const container = this.$refs.messagesContainer
       if (container) {
+        container.scrollTop = container.scrollHeight
+      }
+    },
+
+    // 精确定位到指定消息节点：对话树跳转时使用，取代原来固定的滚到底部。
+    // 借助 data-msg-id 属性在渲染列表中查找对应行；找不到则退化为滚到底部。
+    scrollToMessage(msgId) {
+      const container = this.$refs.messagesContainer
+      if (!container) return
+      const row = container.querySelector(`[data-msg-id="${msgId}"]`)
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else {
         container.scrollTop = container.scrollHeight
       }
     },
@@ -1344,6 +1442,27 @@ export default {
 .answer {
   margin-top: 4px;
   line-height: 1.6;
+  /* 为有序/无序列表的序号/项目符号预留悬挂空间，避免 marker 被容器左边界裁切 */
+  padding-left: 4px;
+}
+
+/* 列表 marker 悬挂在内容区之外，需额外左内边距容纳；
+   outside 定位使序号/符号悬挂于内容块左侧，多行续行与首行正文对齐 */
+.answer :deep(ol),
+.answer :deep(ul) {
+  padding-left: 1.6em;
+  margin-left: 0.4em;
+}
+
+.answer :deep(li) {
+  /* 防止超长 token 撑破宽度导致列表项溢出滚动条 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 代码块横向溢出走内部滚动，不顶破列表/容器 */
+.answer :deep(pre) {
+  overflow-x: auto;
 }
 
 .exam-link {
@@ -1577,6 +1696,23 @@ export default {
   color: #a0682f;
 }
 
+/* 工具执行中：图标转圈加载动画 + "执行中..." 提示 */
+.step-icon.is-loading {
+  animation: step-spin 1s linear infinite;
+}
+
+@keyframes step-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.step-running-hint {
+  margin-left: 4px;
+  font-size: 12px;
+  color: #a0682f;
+  font-style: italic;
+}
+
 .step-thinking .step-text {
   color: #666;
   font-style: italic;
@@ -1698,6 +1834,11 @@ export default {
 
 .streaming-plain {
   white-space: pre-wrap;
+}
+
+/* 流式实时渲染的 markdown 容器：行内格式为主，不做 pre-wrap，否则会与 markdown 的换行冲突 */
+.streaming-md {
+  white-space: normal;
 }
 
 .sub-panel {

@@ -53,7 +53,7 @@ public class StudyPlanner {
             String clarificationQuestion, Integer userId, Integer sessionId,
             StepRecorder recorder) {
 
-        ChatModel chatModel = llmManager.getModel(LlmType.CHAT_MODEL);//TODO：后续需要扩充llmManager的模型注册类型并改用专门的type
+        ChatModel chatModel = llmManager.getModel(LlmType.STUDY_PLAN_MODEL);//学习计划编排专用模型
 
         log.info("study_plan 工作流启动（两阶段编排）: userId={}, sessionId={}, topic='{}', generateExam={}, needsClarification={}",
                 userId, sessionId, topic, generateExam, needsClarification);

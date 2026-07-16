@@ -36,6 +36,36 @@ mybatis:
 server:
   port: 8080
 
+llm:
+  default-provider: ${LLM_DEFAULT_PROVIDER}
+  temperature: 0.3
+  timeout-seconds: 180
+  max-tokens: 8192
+  providers:
+    minimax:
+      model: ${MINIMAX_MODEL}
+      api-key: ${MINIMAX_API_KEY}
+      base-url: ${MINIMAX_BASE_URL}
+      group-id: ${MINIMAX_GROUP_ID}
+    deepseek:
+      model: ${DEEPSEEK_MODEL}
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: ${DEEPSEEK_BASE_URL}
+      return-thinking: true
+      send-thinking: ${DEEPSEEK_SEND_THINKING:true}
+    glm:
+      model: ${GLM_MODEL}
+      api-key: ${GLM_API_KEY}
+      base-url: ${GLM_BASE_URL}
+    kimi:
+      model: ${KIMI_MODEL}
+      api-key: ${KIMI_API_KEY}
+      base-url: ${KIMI_BASE_URL}
+    other1:
+      model: ${OTHER1_MODEL}
+      api-key: ${OTHER1_API_KEY}
+      base-url: ${OTHER1_BASE_URL}
+
 rag:
   store-path: ${RAG_STORE_PATH}
   vector-store:
@@ -46,36 +76,6 @@ rag:
     password: ${RAG_VECTOR_PASSWORD}
     table: embeddings
     dimension: 512
-  llm:
-    default-provider: ${LLM_DEFAULT_PROVIDER}
-    temperature: 0.3
-    timeout-seconds: 180
-    max-tokens: 8192
-    providers:
-      minimax:
-        model: ${MINIMAX_MODEL}
-        api-key: ${MINIMAX_API_KEY}
-        base-url: ${MINIMAX_BASE_URL}
-        group-id: ${MINIMAX_GROUP_ID}
-      deepseek:
-        model: ${DEEPSEEK_MODEL}
-        api-key: ${DEEPSEEK_API_KEY}
-        base-url: ${DEEPSEEK_BASE_URL}
-        return-thinking: true
-        send-thinking: ${DEEPSEEK_SEND_THINKING:true}
-      glm:
-        model: ${GLM_MODEL}
-        api-key: ${GLM_API_KEY}
-        base-url: ${GLM_BASE_URL}
-      kimi:
-        model: ${KIMI_MODEL}
-        api-key: ${KIMI_API_KEY}
-        base-url: ${KIMI_BASE_URL}
-      other1:
-        model: ${OTHER1_MODEL}
-        api-key: ${OTHER1_API_KEY}
-        base-url: ${OTHER1_BASE_URL}
-
   reranker:
     enabled: true
     batch-size: 8

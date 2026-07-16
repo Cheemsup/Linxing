@@ -17,6 +17,7 @@
       :quizData="examData"
       :submitResult="submitResult"
       :draftAnswers="draftAnswers"
+      @back="goList"
       @submit="onSubmit"
       @saveDraft="onSaveDraft"
     />

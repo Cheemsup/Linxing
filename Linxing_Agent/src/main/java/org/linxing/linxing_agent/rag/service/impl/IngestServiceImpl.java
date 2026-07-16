@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.constant.DocumentStatus;
 import org.linxing.linxing_agent.rag.config.RagProperties;
+import org.linxing.linxing_agent.rag.dto.DuplicateCheckResponse;
 import org.linxing.linxing_agent.rag.dto.IngestResponse;
 import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
@@ -38,10 +39,11 @@ public class IngestServiceImpl implements IIngestService {
 
     @Override
     @Transactional
-    public IngestResponse ingestFile(MultipartFile file, Integer userId) {
+    public IngestResponse ingestFile(MultipartFile file, Integer userId, Boolean overwrite) {
         if (file.isEmpty()) {
             return IngestResponse.builder()
                     .success(false)
+                    .code(0)
                     .message("上传文件为空")
                     .chunksCount(0)
                     .build();
@@ -52,10 +54,29 @@ public class IngestServiceImpl implements IIngestService {
             throw new IllegalArgumentException(
                     "不支持的文件格式，允许的格式: " + String.join(", ", FileTypeValidator.allowedExtensions()));
         }
-        log.info("[用户{}]，文件上传: {}, 大小: {} bytes", userId, originalFilename, file.getSize());
+        log.info("[用户{}]，文件上传: {}, 大小: {} bytes, overwrite: {}", userId, originalFilename, file.getSize(), overwrite);
+
+        //重名判重：同 user_id 下已存在同名文件时，未显式确认覆盖则返回待确认状态交由前端提示
+        DocRecord existing = documentMapper.findByUserIdAndFileName(userId, originalFilename).orElse(null);
+        if (existing != null && !Boolean.TRUE.equals(overwrite)) {
+            return IngestResponse.builder()
+                    .success(false)
+                    .code(2)
+                    .message("已存在同名文件「" + originalFilename + "」，确认将覆盖旧文件并重新切分、向量化")
+                    .duplicateDocumentId(existing.getId())
+                    .chunksCount(0)
+                    .build();
+        }
 
         DocRecord docRecord = null;
         try {
+            //覆盖场景：先删除旧文档对应的 chunk / embedding / 元数据，并删除旧磁盘物理文件，再重新入库
+            if (existing != null) {
+                log.info("覆盖旧文档 documentId: {}", existing.getId());
+                chunkIngestCoordinator.deleteByDocumentId(userId, existing.getId());
+                deleteOldPhysicalFile(existing.getFilePath());
+            }
+
             Path storedFile = persistFile(file);
             log.debug("文件已持久化到: {}", storedFile);
 
@@ -81,9 +102,13 @@ public class IngestServiceImpl implements IIngestService {
             // 基于 Node 序列进行切分、向量化和持久化
             int chunksCount = chunkIngestCoordinator.processDocumentFromNodes(docRecord, nodes);
 
+            String successMsg = existing != null
+                    ? String.format("文档 '%s' 已覆盖更新，重新切分 %d 个文本块并完成向量化", originalFilename, chunksCount)
+                    : String.format("文档 '%s' 导入成功，切分 %d 个文本块并完成向量化", originalFilename, chunksCount);
             return IngestResponse.builder()
                     .success(true)
-                    .message(String.format("文档 '%s' 导入成功，切分 %d 个文本块并完成向量化", originalFilename, chunksCount))
+                    .code(1)
+                    .message(successMsg)
                     .chunksCount(chunksCount)
                     .build();
 
@@ -91,6 +116,7 @@ public class IngestServiceImpl implements IIngestService {
             log.error("文件处理IO异常: {}", e.getMessage(), e);
             return IngestResponse.builder()
                     .success(false)
+                    .code(0)
                     .message("文件处理异常: " + e.getMessage())
                     .chunksCount(0)
                     .build();
@@ -101,6 +127,7 @@ public class IngestServiceImpl implements IIngestService {
             }
             return IngestResponse.builder()
                     .success(false)
+                    .code(0)
                     .message("处理失败: " + e.getMessage())
                     .chunksCount(0)
                     .build();
@@ -130,5 +157,39 @@ public class IngestServiceImpl implements IIngestService {
 
         Files.copy(file.getInputStream(), targetFile, StandardCopyOption.REPLACE_EXISTING);
         return targetFile;
+    }
+
+    //删除旧文档对应的磁盘物理文件；文件不存在或删除失败仅记录日志，不影响覆盖入库主流程
+    private void deleteOldPhysicalFile(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            return;
+        }
+        try {
+            Path old = Paths.get(filePath);
+            boolean deleted = Files.deleteIfExists(old);
+            log.info("旧物理文件 {} 删除{}", filePath, deleted ? "成功" : "（文件已不存在）");
+        } catch (IOException e) {
+            log.warn("删除旧物理文件 {} 失败: {}", filePath, e.getMessage());
+        }
+    }
+
+    //上传前同名文件预检：查询当前 user_id 下是否已存在同名文件，返回结果供前端弹出覆盖确认框
+    @Override
+    public DuplicateCheckResponse checkDuplicate(Integer userId, String fileName) {
+        DocRecord existing = documentMapper.findByUserIdAndFileName(userId, fileName).orElse(null);
+        if (existing == null) {
+            return DuplicateCheckResponse.builder()
+                    .duplicate(false)
+                    .documentId(null)
+                    .fileName(fileName)
+                    .createdAt(null)
+                    .build();
+        }
+        return DuplicateCheckResponse.builder()
+                .duplicate(true)
+                .documentId(existing.getId())
+                .fileName(existing.getFileName())
+                .createdAt(existing.getCreatedAt())
+                .build();
     }
 }

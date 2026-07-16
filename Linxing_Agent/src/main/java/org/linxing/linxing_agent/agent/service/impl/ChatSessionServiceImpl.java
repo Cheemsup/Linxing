@@ -3,6 +3,7 @@ package org.linxing.linxing_agent.agent.service.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.common.config.LlmManager;
+import org.linxing.linxing_agent.common.constant.LlmType;
 import org.linxing.linxing_agent.common.result.PageResult;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
@@ -99,7 +100,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
                 + (firstAssistant != null ? "助手：" + truncate(firstAssistant, 200) : "");
 
         try {
-            String title = llmManager.getDefaultModel().chat(prompt);
+            String title = llmManager.getModel(LlmType.TITLE_GENERATION_MODEL).chat(prompt);
             if (title != null) {
                 title = title.trim().replaceAll("^[\"'\u201C\u201D\u2018\u2019]+|[\"'\u201C\u201D\u2018\u2019]+$", "");
                 if (title.length() > 20) {

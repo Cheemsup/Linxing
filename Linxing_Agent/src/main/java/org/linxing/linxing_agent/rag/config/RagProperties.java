@@ -5,8 +5,6 @@ import org.linxing.linxing_agent.rag.constant.RagParameters;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -20,7 +18,6 @@ public class RagProperties {
     private String storePath;//上传文档/被解析出的图片的存储位置
     private Embedding embedding = new Embedding();
     private VectorStore vectorStore = new VectorStore();
-    private Llm llm = new Llm();
     private Search search = new Search();
     private Reranker reranker = new Reranker();
     private Cache cache = new Cache();
@@ -49,25 +46,6 @@ public class RagProperties {
         private String password;
         private String table;
         private int dimension;
-    }
-
-    @Data
-    public static class Llm {
-        private String defaultProvider;
-        private Map<String, LlmProviderConfig> providers = new HashMap<>();
-        private Double temperature;
-        private int timeoutSeconds;
-        private int maxTokens;
-    }
-
-    @Data
-    public static class LlmProviderConfig {
-        private String apiKey;
-        private String baseUrl;
-        private String groupId;
-        private String model;
-        private Boolean returnThinking;
-        private Boolean sendThinking;
     }
 
     @Data

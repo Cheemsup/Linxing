@@ -9,8 +9,8 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
-import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
 import org.linxing.linxing_agent.agent.service.IChatSessionService;
+import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +25,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
-    private final IChatMessageCacheService chatMessageCacheService;
+    private final IRuntimeMirrorService runtimeMirrorService;
     private final LlmManager llmManager;
 
     @Override
@@ -58,7 +58,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
     public void deleteSession(Integer sessionId) {
         chatMessageMapper.deleteBySessionId(sessionId);
         chatSessionMapper.deleteById(sessionId);
-        chatMessageCacheService.deleteSession(sessionId);
+        runtimeMirrorService.deleteSession(sessionId); // P3 Mirror：删 mirror:msgs + mirror:steps 两 Hash
         log.info("删除会话 {} 及其所有消息", sessionId);
     }
 
@@ -82,12 +82,12 @@ public class ChatSessionServiceImpl implements IChatSessionService {
 
         List<ChatMessage> messages = chatMessageMapper.selectBySessionId(sessionId);
         String firstUser = messages.stream()
-                .filter(m -> "user".equals(m.getRole()))
+                .filter(m -> "user".equals(m.getType()))
                 .map(ChatMessage::getContent)
                 .findFirst()
                 .orElse(null);
         String firstAssistant = messages.stream()
-                .filter(m -> "assistant".equals(m.getRole()))
+                .filter(m -> "assistant".equals(m.getType()))
                 .map(ChatMessage::getContent)
                 .findFirst()
                 .orElse(null);

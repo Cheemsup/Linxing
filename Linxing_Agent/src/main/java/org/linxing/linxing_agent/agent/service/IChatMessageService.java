@@ -7,6 +7,10 @@ import java.util.List;
 
 /**
  * 聊天消息持久化与编排服务
+ * <p>
+ * 2-C 起 Recovery（recoverHistory/loadRecentMessages）下沉至
+ * {@code org.linxing.linxing_agent.agent.memory.recovery.HistoryRecoveryService}，
+ * 本接口仅保留消息持久化、缓存与 VO 职责。
  */
 public interface IChatMessageService {
 
@@ -16,11 +20,7 @@ public interface IChatMessageService {
 
     Integer resolveSession(Integer userId, Integer sessionId);
 
-    List<ChatMessage> backtrackHistory(Integer currentUserMsgId);
-
     void touchSession(Integer sessionId);
-
-    List<ChatMessage> loadRecentMessages(Integer sessionId);
 
     ChatMessageVO toMessageVO(ChatMessage msg);
 

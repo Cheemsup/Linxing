@@ -70,8 +70,14 @@ public class RagProperties {
     public static class Cache {
         // 以下 TTL 单位均为秒
         private int docPreviewTtl;
+        /** @deprecated P3 Runtime Mirror 落地后 session:msgs 停写，保留仅供旧键自然过期观察 */
+        @Deprecated
         private int sessionMessagesTtl;
+        /** @deprecated P3 Runtime Mirror 落地后 agent:steps:{messageId} 停写，保留仅供旧键自然过期观察 */
+        @Deprecated
         private int agentStepsTtl;
+        /** P3 Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用），默认 12h。每次写都 expire 续期 */
+        private int mirrorTtl = 43200;
     }
 
     /**

@@ -4,17 +4,12 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.memory.WindowMemory;
-import org.linxing.linxing_agent.agent.memory.SummaryMemory;
-import org.linxing.linxing_agent.agent.catalog.Catalog;
-import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
-import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
+import org.linxing.linxing_agent.agent.memory.builder.ContextBuilder;
 import org.linxing.linxing_agent.agent.skill.SkillMetadata;
 import org.linxing.linxing_agent.agent.skill.SkillRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
@@ -32,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -67,25 +61,21 @@ public class AgentExecutor {
      */
     private static final Set<String> WORKFLOW_TOOL_NAMES = Set.of("start_study_plan_workflow");
 
-    private static final String SYSTEM_PROMPT_TEMPLATE_FULL = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_FULL;
-
-    private static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE = AgentPrompts.SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE;
-
     private final ToolRegistry toolRegistry;
     private final SkillRegistry skillRegistry;
-    private final List<CatalogProvider> catalogProviders;
     private final ObjectMapper objectMapper;
     private final ToolExecutionTimeout toolExecutionTimeout;
+    private final ContextBuilder contextBuilder;
 
     public AgentExecutor(ToolRegistry toolRegistry, SkillRegistry skillRegistry,
-                         List<CatalogProvider> catalogProviders,
                          ObjectMapper objectMapper,
-                         ToolExecutionTimeout toolExecutionTimeout) {
+                         ToolExecutionTimeout toolExecutionTimeout,
+                         ContextBuilder contextBuilder) {
         this.toolRegistry = toolRegistry;
         this.skillRegistry = skillRegistry;
-        this.catalogProviders = catalogProviders;
         this.objectMapper = objectMapper;
         this.toolExecutionTimeout = toolExecutionTimeout;
+        this.contextBuilder = contextBuilder;
     }
 
     /**
@@ -103,15 +93,9 @@ public class AgentExecutor {
         int totalCount = toolRegistry.size() + skillRegistry.size();
         boolean progressiveMode = totalCount > disclosureThreshold;
 
-        //构建系统提示词并注入Agent记忆
-        SystemMessage systemMessage = SystemMessage.from(buildSystemPrompt(progressiveMode));
-        if (context.getMemory() instanceof WindowMemory wm) {
-            wm.setSystemMessage(systemMessage);//WindowMemory及其子类统一使用setSystemMessage，确保系统提示词独立存储且在摘要后可恢复
-        } else {
-            context.getMemory().add(systemMessage);
-        }
-
-        List<ToolSpecification> initialSpecs = buildInitialToolSpecs(progressiveMode);
+        //SystemMessage 不再进 memory（memory 退化为极简累加器），
+        //由 ContextBuilder.buildMessages 每轮幂等置于首位（2-B 起）
+        List<ToolSpecification> initialSpecs = contextBuilder.buildInitialToolSpecs(progressiveMode);
         Set<String> activatedToolNames = new HashSet<>();//渐进模式下已动态激活的工具名集合
 
         int stepNumber = 0;
@@ -128,9 +112,9 @@ public class AgentExecutor {
                     .phase(AgentStepTypes.PHASE_THINKING)
                     .build());
 
-            List<ToolSpecification> roundSpecs = buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
+            List<ToolSpecification> roundSpecs = contextBuilder.buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
 
-            List<ChatMessage> currentMessages = context.getMemory().messages();
+            List<ChatMessage> currentMessages = contextBuilder.buildMessages(context, context.getRecovered());//2-D 起：SystemMessage 幂等首位 + Rule Set 投影（SkipTurn/RewriteTool）+ memory 累加消息
             ChatRequest chatRequest = ChatRequest.builder()
                     .messages(currentMessages)
                     .toolSpecifications(roundSpecs)
@@ -263,11 +247,6 @@ public class AgentExecutor {
                     ToolExecutionResultMessage resultMsg = ToolExecutionResultMessage.from(toolReq, resultText);
                     context.getMemory().add(resultMsg);
                 }
-
-                //SummaryMemory在工具调用后尝试摘要压缩，避免上下文过长
-                if (context.getMemory() instanceof SummaryMemory sm) {
-                    sm.summarizeIfNeeded();
-                }
             } else {
                 //无工具调用 → LLM直接返回文本回答，循环结束
                 String answer = aiMessage.text();
@@ -315,77 +294,6 @@ public class AgentExecutor {
                 .totalSteps(stepNumber)
                 .exceededMaxSteps(true)
                 .build();
-    }
-
-    /**
-     * 动态构建系统提示词，注入工具与技能目录信息
-     * @param progressiveMode true=渐进披露模式，false=全量注入模式
-     */
-    private String buildSystemPrompt(boolean progressiveMode) {
-        List<CatalogEntry> allEntries = new ArrayList<>();
-        for (CatalogProvider provider : catalogProviders) {
-            allEntries.addAll(provider.catalogEntries());
-        }
-
-        List<CatalogEntry> filtered = allEntries.stream()
-                .filter(e -> !Catalog.META_TOOLS.contains(e.getName()))
-                .collect(Collectors.toList());
-
-        StringBuilder dynamicSection = new StringBuilder();
-
-        if (!filtered.isEmpty()) {
-            Catalog catalog = new Catalog(filtered);
-            dynamicSection.append("【可用能力】\n").append(catalog.toPromptText()).append("\n\n");
-        }
-
-        if (!progressiveMode) {
-            List<String> allSkillNames = skillRegistry.getAllNames();
-            if (!allSkillNames.isEmpty()) {
-                String resolved = skillRegistry.resolve(allSkillNames);
-                if (resolved != null && !resolved.isBlank() && !resolved.startsWith("未找到")) {
-                    dynamicSection.append("【可用技能完整说明】\n").append(resolved).append("\n\n");
-                }
-            }
-            dynamicSection.append("所有工具和技能的完整定义已在上方提供，请直接使用。");
-        } else {
-            dynamicSection.append("由于可用工具和技能较多，请先查看上方目录了解可用能力。"
-                    + "如需使用某个工具或技能，请调用 resolve 获取其完整定义。");
-        }
-
-        String template = progressiveMode ? SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE : SYSTEM_PROMPT_TEMPLATE_FULL;
-        return String.format(template, dynamicSection.toString());
-    }
-
-    /**
-     * 构建第一轮的 toolSpecifications 列表。
-     * 全量模式返回所有已注册工具；渐进披露模式仅返回 resolve 元工具。
-     */
-    private List<ToolSpecification> buildInitialToolSpecs(boolean progressiveMode) {
-        if (!progressiveMode) {
-            return toolRegistry.getToolSpecifications();//全量注入
-        }
-        List<ToolSpecification> specs = new ArrayList<>();
-        ToolSpecification resolveSpec = toolRegistry.getToolSpecification("resolve");//渐进披露模式，这一步的初始化只传入“工具之工具”——可用于获取其他工具定义的工具
-        if (resolveSpec != null) {
-            specs.add(resolveSpec);
-        }
-        return specs;
-    }
-
-    /**
-     * 构建每轮对话的 toolSpecifications。
-     * 全量模式始终返回初始规格；渐进披露模式在初始规格基础上追加已动态激活的工具。
-     */
-    private List<ToolSpecification> buildRoundToolSpecs(List<ToolSpecification> initialSpecs,
-                                                        Set<String> activatedToolNames,
-                                                        boolean progressiveMode) {
-        if (!progressiveMode || activatedToolNames.isEmpty()) {
-            return initialSpecs;
-        }
-        List<ToolSpecification> roundSpecs = new ArrayList<>(initialSpecs);
-        List<ToolSpecification> activated = toolRegistry.getToolSpecifications(new ArrayList<>(activatedToolNames));
-        roundSpecs.addAll(activated);
-        return roundSpecs;
     }
 
     /**

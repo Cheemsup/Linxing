@@ -8,32 +8,33 @@
         <result column="user_id" property="userId"/>
         <result column="session_id" property="sessionId"/>
         <result column="parent_id" property="parentId"/>
-        <result column="role" property="role"/>
+        <result column="type" property="type"/>
         <result column="content" property="content"/>
         <result column="sources" property="sources"/>
+        <result column="nearest_summary_message_id" property="nearestSummaryMessageId"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO chat_messages (user_id, session_id, parent_id, role, content, sources, created_at)
-        VALUES (#{userId}, #{sessionId}, #{parentId}, #{role}, #{content},
-                #{sources}::jsonb, NOW())
+        INSERT INTO chat_messages (user_id, session_id, parent_id, type, content, sources, nearest_summary_message_id, created_at)
+        VALUES (#{userId}, #{sessionId}, #{parentId}, #{type}, #{content},
+                #{sources}::jsonb, #{nearestSummaryMessageId}, NOW())
     </insert>
 
     <select id="selectById" resultMap="BaseResultMap">
-        SELECT id, user_id, session_id, parent_id, role, content, sources, created_at
+        SELECT id, user_id, session_id, parent_id, type, content, sources, nearest_summary_message_id, created_at
         FROM chat_messages WHERE id = #{id}
     </select>
 
     <select id="selectBySessionId" resultMap="BaseResultMap">
-        SELECT id, user_id, session_id, parent_id, role, content, sources, created_at
+        SELECT id, user_id, session_id, parent_id, type, content, sources, nearest_summary_message_id, created_at
         FROM chat_messages
         WHERE session_id = #{sessionId}
         ORDER BY created_at ASC
     </select>
 
     <select id="selectLatestBySessionId" resultMap="BaseResultMap">
-        SELECT id, user_id, session_id, parent_id, role, content, sources, created_at
+        SELECT id, user_id, session_id, parent_id, type, content, sources, nearest_summary_message_id, created_at
         FROM chat_messages
         WHERE session_id = #{sessionId}
         ORDER BY created_at DESC
@@ -54,5 +55,25 @@
     <delete id="deleteBySessionId">
         DELETE FROM chat_messages WHERE session_id = #{sessionId}
     </delete>
+
+    <!-- 点查某消息回溯路径上最近的 summary 节点 id（Recovery 加速，thePlan P1-3） -->
+    <select id="selectNearestSummaryId" resultType="java.lang.Integer">
+        SELECT nearest_summary_message_id FROM chat_messages WHERE id = #{id}
+    </select>
+
+    <!-- 批量更新路径后续消息指向新 summary（thePlan P1-2 第 3 步） -->
+    <update id="updateNearestSummaryId">
+        UPDATE chat_messages
+        SET nearest_summary_message_id = #{summaryId}
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <!-- 更新某消息的 parent_id（summary 落盘后挂载用户消息，thePlan P1-2） -->
+    <update id="updateParentId">
+        UPDATE chat_messages SET parent_id = #{parentId} WHERE id = #{id}
+    </update>
 
 </mapper>

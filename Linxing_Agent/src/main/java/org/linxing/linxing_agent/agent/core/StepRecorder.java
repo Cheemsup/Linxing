@@ -7,6 +7,7 @@ import dev.langchain4j.agentic.scope.AgenticScope;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
+import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.vo.AgentStepVO;
 
 import java.util.ArrayList;
@@ -31,13 +32,16 @@ public class StepRecorder {
     private final AgentStepListener listener;
     private final AgentStepMapper agentStepMapper;
     private final Integer sessionId;
+    private final IRuntimeMirrorService runtimeMirrorService; // P3 Runtime Mirror：step 落库后即时镜像（nullable，测试可传 null）
     private final AtomicInteger orderSeq;
     private final List<AgentStepVO> recordedSteps;
 
-    public StepRecorder(AgentStepListener listener, AgentStepMapper agentStepMapper, Integer sessionId) {
+    public StepRecorder(AgentStepListener listener, AgentStepMapper agentStepMapper, Integer sessionId,
+                        IRuntimeMirrorService runtimeMirrorService) {
         this.listener = listener;
         this.agentStepMapper = agentStepMapper;
         this.sessionId = sessionId;
+        this.runtimeMirrorService = runtimeMirrorService;
         this.orderSeq = new AtomicInteger(1);
         this.recordedSteps = new ArrayList<>();
     }
@@ -105,6 +109,7 @@ public class StepRecorder {
                     .stepData(data)
                     .build();
             agentStepMapper.insert(step);
+            mirrorStep(step);
             recordedSteps.add(AgentStepVO.builder()
                     .id(step.getId())
                     .stepOrder(step.getStepOrder())
@@ -145,6 +150,7 @@ public class StepRecorder {
                     .stepData(stepData)
                     .build();
             agentStepMapper.insert(step);
+            mirrorStep(step);
             recordedSteps.add(AgentStepVO.builder()
                     .id(step.getId())
                     .stepOrder(step.getStepOrder())
@@ -157,6 +163,26 @@ public class StepRecorder {
         } catch (Exception e) {
             log.warn("步骤持久化失败，继续执行: eventType={}, sessionId={}, error={}",
                     event.getEventType(), sessionId, e.getMessage());
+        }
+    }
+
+    /**
+     * 把刚落库的 step 即时镜像到 mirror:steps:{sessionId}（thePlan P3 决策：即时写 + 末尾补丁 chatMessageId）。
+     * <p>
+     * 此时 step.chatMessageId 仍为 null（尚未由 {@code updateChatMessageId} 回填），
+     * {@code ChatServiceImpl.runAgentLoop} 末尾会按 assistantMsgId 过滤重写补丁。
+     * <p>
+     * 降级：失败仅 log.warn，绝不影响主流程（Mirror 是性能优化，正确性依赖 DB）。
+     */
+    private void mirrorStep(AgentStep step) {
+        if (runtimeMirrorService == null || step == null || step.getId() == null) {
+            return;
+        }
+        try {
+            runtimeMirrorService.appendStep(sessionId, step);
+        } catch (Exception e) {
+            log.warn("[Mirror] step 即时镜像失败, sessionId={}, stepId={}: {}",
+                    sessionId, step.getId(), e.getMessage());
         }
     }
 

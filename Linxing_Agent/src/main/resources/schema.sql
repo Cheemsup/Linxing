@@ -190,11 +190,12 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     user_id         INT NOT NULL,
     session_id      INT NOT NULL,
     parent_id       INT,
-    role            VARCHAR(10) NOT NULL CHECK (role IN ('user', 'assistant')),
+    type            VARCHAR(10) NOT NULL CHECK (type IN ('user', 'assistant', 'summary')),
     content         TEXT NOT NULL,
     sources         JSONB DEFAULT '[]',
+    nearest_summary_message_id INT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT chat_messages_session_id_fkey 
+    CONSTRAINT chat_messages_session_id_fkey
         FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 
@@ -203,20 +204,24 @@ COMMENT ON COLUMN chat_messages.id IS '消息唯一ID';
 COMMENT ON COLUMN chat_messages.user_id IS '所属用户ID，冗余以支持按用户快速查询';
 COMMENT ON COLUMN chat_messages.session_id IS '所属会话ID（即树的根节点ID），用于一次拉取整棵树的所有消息';
 COMMENT ON COLUMN chat_messages.parent_id IS '直接父消息ID，NULL 表示该消息是树根下的一级节点；沿此字段回溯可得从根到当前节点的完整路径';
-COMMENT ON COLUMN chat_messages.role IS '角色：user=用户提问，assistant=助手回答';
+COMMENT ON COLUMN chat_messages.type IS '消息类型：user=用户提问，assistant=助手回答，summary=对话历史摘要节点（thePlan P1-1：原 role 更名并扩 CHECK）';
 COMMENT ON COLUMN chat_messages.content IS '消息正文内容';
 COMMENT ON COLUMN chat_messages.sources IS '助手回答时引用的来源列表，JSON数组格式，如 [{"chunkId":1,"fileName":"xxx.md","titlePath":"章节"}]';
+COMMENT ON COLUMN chat_messages.nearest_summary_message_id IS '当前节点回溯路径上最近的 summary 节点 id（用于 Recovery 快速定位 summary 停靠点）；只对 summary 之后新增的消息填值，被压缩的旧消息与 summary 自身为 NULL（thePlan P1-1/P1-2）';
 COMMENT ON COLUMN chat_messages.created_at IS '消息创建时间';
 
 -- 索引：按会话拉取所有消息（构造树的核心查询）
-CREATE INDEX idx_chat_messages_session_id 
+CREATE INDEX idx_chat_messages_session_id
     ON chat_messages(session_id);
 -- 索引：按用户+会话过滤
-CREATE INDEX idx_chat_messages_user_session 
+CREATE INDEX idx_chat_messages_user_session
     ON chat_messages(user_id, session_id);
 -- 索引：支持按 parent_id 回溯路径
-CREATE INDEX idx_chat_messages_parent_id 
+CREATE INDEX idx_chat_messages_parent_id
     ON chat_messages(parent_id) WHERE parent_id IS NOT NULL;
+-- 索引：按会话定位 summary 节点（Recovery 点查加速，thePlan P1-1）
+CREATE INDEX idx_chat_messages_summary
+    ON chat_messages(session_id) WHERE type = 'summary';
 
 -- =============================================
 -- 8、Agent执行步骤表 agent_steps

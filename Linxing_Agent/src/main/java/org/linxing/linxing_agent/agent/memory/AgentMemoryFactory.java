@@ -1,45 +1,19 @@
 package org.linxing.linxing_agent.agent.memory;
 
-import dev.langchain4j.model.openai.OpenAiChatModel;
-import org.linxing.linxing_agent.common.config.LlmManager;
-import org.linxing.linxing_agent.common.constant.LlmType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+/**
+ * AgentMemory 工厂（2-B 简化版）。
+ *
+ * <p>2-B 起 memory 退化为极简累加器 {@link ListAgentMemory}，不再有 window/summary 分支，
+ * 不再需要 llmManager / tokenEstimator / maxMessages / maxTokens / memoryType 等依赖。
+ * 摘要走独立持久化路径（{@code SummaryService}，thePlan P1-2），驱逐/Projection 移交
+ * ContextBuilder（Rule Set 驱动，2-D 起）。
+ */
 @Component
 public class AgentMemoryFactory {
 
-    private static final Logger log = LoggerFactory.getLogger(AgentMemoryFactory.class);
-
-    private final LlmManager llmManager;
-
-    @Value("${agent.memory.type:window}")
-    private String memoryType;
-
-    @Value("${agent.memory.max-messages:40}")
-    private int maxMessages;
-
-    @Value("${agent.memory.max-tokens:32000}")
-    private int maxTokens;
-
-    public AgentMemoryFactory(LlmManager llmManager) {
-        this.llmManager = llmManager;
-    }
-
     public AgentMemory create() {
-        if ("summary".equalsIgnoreCase(memoryType)) {
-            try {
-                OpenAiChatModel summaryModel = llmManager.getModel(LlmType.SUMMARY_MODEL);
-                log.info("[AgentMemoryFactory] 创建 SummaryMemory (maxMessages={}, maxTokens={})",
-                        maxMessages, maxTokens);
-                return new SummaryMemory(maxMessages, maxTokens, summaryModel);
-            } catch (Exception e) {
-                log.warn("[AgentMemoryFactory] 创建 SummaryMemory 失败，回退到 WindowMemory: {}", e.getMessage());
-            }
-        }
-        log.info("[AgentMemoryFactory] 创建 WindowMemory (maxMessages={})", maxMessages);
-        return new WindowMemory(maxMessages);
+        return new ListAgentMemory();
     }
 }

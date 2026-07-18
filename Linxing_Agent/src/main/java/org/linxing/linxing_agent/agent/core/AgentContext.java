@@ -1,6 +1,7 @@
 package org.linxing.linxing_agent.agent.core;
 
 import org.linxing.linxing_agent.agent.memory.AgentMemory;
+import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.JsonContainerStore;
 
 import java.util.HashMap;
@@ -21,6 +22,12 @@ public class AgentContext implements JsonContainerStore {
      * 统一步骤记录器：主循环与工作流共享同一实例，保证一次会话内 step_order 单调递增。
      */
     private StepRecorder stepRecorder;
+    /**
+     * Recovery 结果（2-D 起）：携带 history 的 turnBoundaries，供 ContextBuilder.buildMessages
+     * 应用 SkipTurnRule/RewriteToolRule 投影。null 表示无 Recovery（如工作流子 Agent 直接构造），
+     * Builder 退化为零投影。
+     */
+    private RecoveredHistory recovered;
 
     public AgentContext(Integer userId, Integer sessionId, AgentMemory memory, String query) {
         this.userId = userId;
@@ -92,5 +99,13 @@ public class AgentContext implements JsonContainerStore {
 
     public void setStepRecorder(StepRecorder stepRecorder) {
         this.stepRecorder = stepRecorder;
+    }
+
+    public RecoveredHistory getRecovered() {
+        return recovered;
+    }
+
+    public void setRecovered(RecoveredHistory recovered) {
+        this.recovered = recovered;
     }
 }

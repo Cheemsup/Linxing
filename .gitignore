@@ -81,3 +81,6 @@ reference
 *.bak
 *.tmp
 *.orig
+
+# Playwright MCP 工具的本地产物（页面快照/console 日志），临时文件
+.playwright-mcp/

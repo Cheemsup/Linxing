@@ -16,7 +16,8 @@ public class ChatMessageVO {
     private Integer userId;
     private Integer sessionId;
     private Integer parentId;
-    private String role;
+    /** 消息类型：user / assistant / summary。前端对 summary 做特殊 CSS 装饰（thePlan P1-1/P1-D） */
+    private String type;
     private String content;
     private String sources;
     private OffsetDateTime createdAt;

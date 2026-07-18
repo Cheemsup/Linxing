@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.deprecated;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -7,12 +7,21 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.Getter;
+
+import org.linxing.linxing_agent.agent.memory.WindowMemory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 属于旧体系的简单上下文管理机制的一部分，现在由于重新设计了上下文管理机制，已经不再使用。
+ * 
+ * @Deprecated
+ * 
+ */
+@Deprecated
 public class SummaryMemory extends WindowMemory {
 
     private static final Logger log = LoggerFactory.getLogger(SummaryMemory.class);

@@ -3,20 +3,20 @@ package org.linxing.linxing_agent.agent.service.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
+import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
+import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
+import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.vo.AgentStepVO;
-import org.linxing.linxing_agent.rag.config.RagProperties;
-import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
- * TODO:这个service的性质更倾向于utils，考虑重构
+ * P3 起 steps 读取改为 session 粒度 Mirror（mirror:steps:{sessionId}），旧 agent:steps:{messageId} String 停用。
+ * <p>端点保持 messageId 入参不变：内部 selectById 解析 sessionId → HGETALL mirror:steps → 按 chatMessageId 内存过滤；
+ * miss/异常 → DB selectByChatMessageId 兜底（correctness 不依赖 Redis）。
  */
 @Slf4j
 @Service
@@ -24,39 +24,33 @@ import java.util.concurrent.TimeUnit;
 public class AgentStepServiceImpl {
 
     private final AgentStepMapper agentStepMapper;
-    private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
-    private final RagProperties ragProperties;
+    private final ChatMessageMapper chatMessageMapper;
+    private final IRuntimeMirrorService runtimeMirrorService;
 
     /**
-     * 按消息ID懒加载agent步骤，优先读缓存
+     * 按消息ID加载 agent 步骤：优先读 session 粒度 Mirror，按 chatMessageId 内存过滤；miss → DB 兜底。
      */
     public List<AgentStepVO> getStepsByMessageId(Integer messageId) {
-        String key = RedisKeysPrefix.AGENT_STEPS + messageId;
-        try {
-            String cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
-                return objectMapper.readValue(cached,
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, AgentStepVO.class));
-            }
-        } catch (Exception e) {
-            log.warn("读取步骤缓存失败, messageId={}: {}", messageId, e.getMessage());
+        org.linxing.linxing_agent.agent.entity.ChatMessage msg = chatMessageMapper.selectById(messageId);
+        if (msg == null || msg.getSessionId() == null) {
+            return List.of();
+        }
+        Integer sessionId = msg.getSessionId();
+
+        // Mirror：HGETALL mirror:steps:{sessionId}，按 chatMessageId 内存过滤
+        List<AgentStep> all = runtimeMirrorService.loadSteps(sessionId);
+        if (all != null) {
+            return all.stream()
+                    .filter(s -> messageId.equals(s.getChatMessageId()))
+                    .map(this::toVO)
+                    .toList();
         }
 
-        List<AgentStepVO> steps = agentStepMapper.selectByChatMessageId(messageId)
+        // Mirror miss/异常 → DB selectByChatMessageId 兜底
+        return agentStepMapper.selectByChatMessageId(messageId)
                 .stream()
                 .map(this::toVO)
                 .toList();
-
-        try {
-            String json = objectMapper.writeValueAsString(steps);
-            int ttl = ragProperties.getCache().getAgentStepsTtl();
-            redisTemplate.opsForValue().set(key, json, ttl, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.warn("写入步骤缓存失败, messageId={}: {}", messageId, e.getMessage());
-        }
-
-        return steps;
     }
 
     private AgentStepVO toVO(org.linxing.linxing_agent.agent.entity.AgentStep step) {
@@ -73,7 +67,6 @@ public class AgentStepServiceImpl {
                 .build();
     }
 
-    @SuppressWarnings("unchecked")
     private String extractDisplayLabel(Map<String, Object> stepData) {
         if (stepData == null) {
             return null;

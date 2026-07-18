@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.deprecated;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -10,6 +10,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.linxing.linxing_agent.agent.memory.AgentMemory;
+
+/**
+ * 属于旧体系的简单上下文管理机制的一部分，现在由于重新设计了上下文管理机制，已经不再使用。
+ * 
+ * WindowMemory
+ * 
+ * @Deprecated
+ */
+@Deprecated
 public class WindowMemory implements AgentMemory {
 
     private final int maxMessages;

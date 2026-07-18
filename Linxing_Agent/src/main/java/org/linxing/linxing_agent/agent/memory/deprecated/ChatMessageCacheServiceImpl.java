@@ -1,10 +1,9 @@
-package org.linxing.linxing_agent.agent.service.impl;
+package org.linxing.linxing_agent.agent.memory.deprecated;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.constant.RedisKeysPrefix;
-import org.linxing.linxing_agent.agent.service.IChatMessageCacheService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -17,8 +16,13 @@ import java.util.concurrent.TimeUnit;
 
 
 /**
+ * 属于旧体系的简单上下文管理机制的一部分，现在由于重新设计了上下文管理机制，已经不再使用。原位置：org.linxing.linxing_agent.agent.service.impl.ChatMessageCacheServiceImpl
+ * 
  * 对话消息缓存类
+ * 
+ * @Deprecated
  */
+@Deprecated
 @Slf4j
 @Service
 @RequiredArgsConstructor

@@ -1,28 +1,41 @@
 package org.linxing.linxing_agent.agent.memory.projection.snip;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
 import java.util.Set;
 
 /**
- * 读性质工具白名单（thePlan P2-2 / nowRefact §5）。
+ * 读性质工具白名单。
  *
  * <p>用于 {@link RewriteRuleAnalyzer} 判定哪些 tool 的结果可被 Rewrite 精简。
  * 读性质工具（检索/解析类）返回大段文本，结果在后续轮次可精简为占位符而不损失关键推理线索；
- * 写性质工具（如 save_exam、create_container 等）结果含状态/副作用，精简会破坏后续引用，不纳入。
+ * 写性质工具结果含状态/副作用，精简会破坏后续引用，不纳入。
  *
- * <p>已核实三工具 {@code name()}：RagSearchTool={@code search_knowledge_base}、
- * WebSearchTool={@code web_search}、ResolveTool={@code resolve}（resolve 为元工具，结果为工具定义 JSON，可精简）。
- *
- * <p>后续可改为 application.yaml 列表注入；本期硬编码常量足够。
+ * <p>白名单由 {@code agent.projection.snip.rewrite.read-only-tools} 列表注入，
+ * yaml 缺省时回退到 {@link #DEFAULT_READ_ONLY_TOOLS}。
  */
-public final class RewriteRuleWhitelist {
+@Component
+public class RewriteRuleWhitelist {
 
-    /** 读性质工具 name 集合。 */
-    public static final Set<String> READ_ONLY_TOOLS = Set.of(
+    /** 默认读性质工具 name 集合（yaml 未配置时回退）。 */
+    public static final Set<String> DEFAULT_READ_ONLY_TOOLS = Set.of(
             "search_knowledge_base",
             "web_search",
             "resolve"
     );
 
-    private RewriteRuleWhitelist() {
+    private final Set<String> readOnlyTools;
+
+    public RewriteRuleWhitelist(
+            @Value("${agent.projection.snip.rewrite.read-only-tools:}") Set<String> readOnlyTools) {
+        this.readOnlyTools = (readOnlyTools == null || readOnlyTools.isEmpty())
+                ? DEFAULT_READ_ONLY_TOOLS
+                : readOnlyTools;
+    }
+
+    /** 判定某 tool 是否为读性质工具（结果可被 Rewrite 精简）。 */
+    public boolean contains(String toolName) {
+        return toolName != null && readOnlyTools.contains(toolName);
     }
 }

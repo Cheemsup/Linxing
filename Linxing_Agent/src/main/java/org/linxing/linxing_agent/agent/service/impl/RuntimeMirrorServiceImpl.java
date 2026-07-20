@@ -43,19 +43,20 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
     public List<ChatMessage> loadMessages(Integer sessionId) {
         String key = RedisKeysPrefix.MIRROR_MSGS + sessionId;
         try {
-            Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+            Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);//拉取整个 msgs Hash
             if (entries.isEmpty()) {
                 return null;
             }
             List<ChatMessage> result = new ArrayList<>(entries.size());
             for (Map.Entry<Object, Object> entry : entries.entrySet()) {
                 try {
-                    ChatMessage msg = objectMapper.readValue((String) entry.getValue(), ChatMessage.class);
+                    ChatMessage msg = objectMapper.readValue((String) entry.getValue(), ChatMessage.class);//反序列化单条消息
                     result.add(msg);
                 } catch (Exception e) {
                     log.warn("[Mirror] 反序列化 mirror:msgs 失败, msgId={}: {}", entry.getKey(), e.getMessage());
                 }
             }
+            //按 createdAt 升序排列，空值前置，保证 Recovery 按时序回放
             result.sort(Comparator.nullsFirst(Comparator.comparing(ChatMessage::getCreatedAt,
                     Comparator.nullsFirst(Comparator.naturalOrder()))));
             return result;
@@ -69,20 +70,20 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
     public List<AgentStep> loadSteps(Integer sessionId) {
         String key = RedisKeysPrefix.MIRROR_STEPS + sessionId;
         try {
-            Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+            Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);//拉取整个 steps Hash
             if (entries.isEmpty()) {
                 return null;
             }
             List<AgentStep> result = new ArrayList<>(entries.size());
             for (Map.Entry<Object, Object> entry : entries.entrySet()) {
                 try {
-                    AgentStep step = objectMapper.readValue((String) entry.getValue(), AgentStep.class);
+                    AgentStep step = objectMapper.readValue((String) entry.getValue(), AgentStep.class);//反序列化单条 step
                     result.add(step);
                 } catch (Exception e) {
                     log.warn("[Mirror] 反序列化 mirror:steps 失败, stepId={}: {}", entry.getKey(), e.getMessage());
                 }
             }
-            // 与 AgentStepMapper.selectBySessionId 排序一致：step_order ASC, id ASC
+            //与 AgentStepMapper.selectBySessionId 排序一致：step_order ASC, id ASC
             result.sort(Comparator.comparing(AgentStep::getStepOrder, Comparator.nullsFirst(Comparator.naturalOrder()))
                     .thenComparing(AgentStep::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
             return result;
@@ -100,9 +101,9 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
         String key = RedisKeysPrefix.MIRROR_MSGS + sessionId;
         int ttl = ragProperties.getCache().getMirrorTtl();
         try {
-            String json = objectMapper.writeValueAsString(message);
-            redisTemplate.opsForHash().put(key, String.valueOf(message.getId()), json);
-            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+            String json = objectMapper.writeValueAsString(message);//序列化消息为 JSON
+            redisTemplate.opsForHash().put(key, String.valueOf(message.getId()), json);//以 msgId 为 field 写入 Hash
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);//每次写入刷新 TTL
         } catch (Exception e) {
             log.warn("[Mirror] 写入 mirror:msgs 失败, sessionId={}, msgId={}: {}",
                     sessionId, message.getId(), e.getMessage());
@@ -117,9 +118,9 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
         String key = RedisKeysPrefix.MIRROR_STEPS + sessionId;
         int ttl = ragProperties.getCache().getMirrorTtl();
         try {
-            String json = objectMapper.writeValueAsString(step);
-            redisTemplate.opsForHash().put(key, String.valueOf(step.getId()), json);
-            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+            String json = objectMapper.writeValueAsString(step);//序列化 step 为 JSON
+            redisTemplate.opsForHash().put(key, String.valueOf(step.getId()), json);//以 stepId 为 field 写入 Hash
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);//每次写入刷新 TTL
         } catch (Exception e) {
             log.warn("[Mirror] 写入 mirror:steps 失败, sessionId={}, stepId={}: {}",
                     sessionId, step.getId(), e.getMessage());
@@ -132,7 +133,7 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
         String stepsKey = RedisKeysPrefix.MIRROR_STEPS + sessionId;
         int ttl = ragProperties.getCache().getMirrorTtl();
         try {
-            // 先 DEL 两 Hash，避免旧字段残留（cache-aside 全量重建语义）
+            //先 DEL 两 Hash，避免旧字段残留（cache-aside 全量重建语义）
             redisTemplate.delete(List.of(msgsKey, stepsKey));
 
             if (messages != null && !messages.isEmpty()) {
@@ -142,7 +143,7 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
                     msgEntries.put(String.valueOf(msg.getId()), objectMapper.writeValueAsString(msg));
                 }
                 if (!msgEntries.isEmpty()) {
-                    redisTemplate.opsForHash().putAll(msgsKey, msgEntries);
+                    redisTemplate.opsForHash().putAll(msgsKey, msgEntries);//批量写入 msgs
                     redisTemplate.expire(msgsKey, ttl, TimeUnit.SECONDS);
                 }
             }
@@ -153,7 +154,7 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
                     stepEntries.put(String.valueOf(step.getId()), objectMapper.writeValueAsString(step));
                 }
                 if (!stepEntries.isEmpty()) {
-                    redisTemplate.opsForHash().putAll(stepsKey, stepEntries);
+                    redisTemplate.opsForHash().putAll(stepsKey, stepEntries);//批量写入 steps
                     redisTemplate.expire(stepsKey, ttl, TimeUnit.SECONDS);
                 }
             }
@@ -167,7 +168,7 @@ public class RuntimeMirrorServiceImpl implements IRuntimeMirrorService {
         String msgsKey = RedisKeysPrefix.MIRROR_MSGS + sessionId;
         String stepsKey = RedisKeysPrefix.MIRROR_STEPS + sessionId;
         try {
-            redisTemplate.delete(List.of(msgsKey, stepsKey));
+            redisTemplate.delete(List.of(msgsKey, stepsKey));//清空该会话的全部镜像
         } catch (Exception e) {
             log.warn("[Mirror] 删除会话镜像失败, sessionId={}: {}", sessionId, e.getMessage());
         }

@@ -8,23 +8,6 @@ import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 
-/**
- * 内部 rule 更新 tool：增/删/改 SkipTurnRule（thePlan P2-2 / nowRefact §6-5）。
- *
- * <p><b>不实现主 {@code Tool} 接口、不进 ToolRegistry</b>——主 ToolRegistry 在 ContextRefreshedEvent
- * 扫所有 {@code Tool} bean 全收（无过滤钩子），若本类是 Tool bean 必污染主 Agent 目录。
- * 本类仅提供静态 {@link #SPEC} 供小循环注入 ChatRequest.toolSpecifications，以及静态
- * {@link #execute(SkipTurnReActContext, String)} 供 {@link SkipTurnReActContext#executeTool} 手工分派。
- *
- * <p>参数：
- * <ul>
- *   <li>{@code action}（必填）：add / remove / replace</li>
- *   <li>{@code turnId}：Turn 起始消息的 DB id（add/replace 必填，对应 SkipTurnRule.turnStartMessageId）</li>
- *   <li>{@code ruleId}：待 remove/replace 的 rule id（remove/replace 必填；add 时由 batch 内部生成）</li>
- *   <li>{@code reason}：低价值理由（add/replace 必填，便于审计）</li>
- * </ul>
- * 增量操作而非整体替换——LLM 只动判断有变化的条目，避免重写整份 rule 引入回归（nowRefact §6-5）。
- */
 public final class UpdateSkipTurnRuleTool {
 
     public static final String NAME = "update_skip_turn_rule";
@@ -47,8 +30,10 @@ public final class UpdateSkipTurnRuleTool {
     }
 
     /**
-     * 解析 arguments 并按 action 分派到 batch 的 add/remove/replace。
-     * <p>返回结果文本供 LLM 参考（成功 {@code ok:}，失败 {@code error:}）。
+     * 解析 arguments 并按 action 分派到 batch 的 add/remove/replace
+     * @param ctx
+     * @param arguments
+     * @return
      */
     public static String execute(SkipTurnReActContext ctx, String arguments) {
         String action;
@@ -56,7 +41,7 @@ public final class UpdateSkipTurnRuleTool {
         String ruleId;
         String reason;
         try {
-            JsonNode node = ctx.getObjectMapper().readTree(arguments);
+            JsonNode node = ctx.getObjectMapper().readTree(arguments);//解析 LLM 传入的 JSON 参数
             action = getText(node, "action", null);
             turnId = (node.has("turnId") && !node.get("turnId").isNull())
                     ? node.get("turnId").asInt() : null;
@@ -69,8 +54,8 @@ public final class UpdateSkipTurnRuleTool {
         if (action == null) {
             return "error: action 必填";
         }
-        RuleSetStore.RuleUpdateBatch batch = ctx.getBatch();
-        switch (action) {
+        RuleSetStore.RuleUpdateBatch batch = ctx.getBatch();//取出小循环累计的 batch，统一在循环结束时落库
+        switch (action) {//更改更新rule的batch
             case "add" -> {
                 if (turnId == null || reason == null || reason.isBlank()) {
                     return "error: add 需 turnId 与 reason";
@@ -99,7 +84,13 @@ public final class UpdateSkipTurnRuleTool {
         }
     }
 
-    /** 读取可选字符串字段，缺失或 null 返回 defaultValue（沿用项目 Jackson 3.x 习惯）。 */
+    /**
+     * 读取可选字符串字段，缺失或 null 返回 defaultValue
+     * @param node
+     * @param field
+     * @param defaultValue
+     * @return
+     */
     private static String getText(JsonNode node, String field, String defaultValue) {
         if (node.has(field) && !node.get(field).isNull()) {
             String text = node.get(field).asText();

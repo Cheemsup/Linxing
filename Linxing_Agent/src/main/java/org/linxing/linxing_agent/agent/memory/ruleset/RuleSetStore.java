@@ -11,27 +11,10 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Rule Set 进程内存储（thePlan P2-3，0717 终稿第十~十一节）。
+ * 会话级 RuleSet 存储：按 sessionId 维护一份 SkipTurnRule + RewriteToolRule 集合。
  *
- * <p>每会话一份 {@link RuleSet}，落点为进程内 {@link ConcurrentHashMap}（不落库、不进 Redis Mirror）。
- *
- * <h3>并发模型</h3>
- * <ul>
- *   <li><b>Builder 读</b>（2-D 起）：调 {@link #get(Integer)} 取 Read Lock 读取当前引用；
- *       由于 {@link RuleSet} 不可变，拿到即完整快照，无中间态。</li>
- *   <li><b>Snip/Rewrite 批量提交</b>（2-E 起）：rule 更新 tool 在小循环内攒一批变更到
- *       {@link RuleUpdateBatch}，循环结束时调 {@link #apply(Integer, RuleUpdateBatch)}
- *       取 Write Lock 一次性原子应用——产出新 RuleSet 替换旧引用。
- *       <b>锁仅覆盖引用替换瞬间，不覆盖 LLM 分析与 tool 调用阶段</b>（0717 终稿第十一节）。</li>
- * </ul>
- *
- * <h3>批量原子</h3>
- * {@link RuleUpdateBatch} 攒 add/remove/replace 操作，{@link #apply} 在 WriteLock 内
- * 基于当前 RuleSet 重放出全新 RuleSet 再替换；中途被中断则整批丢弃、RuleSet 保持旧版完整，
- * 避免"改了一半"的破损中间态（thePlan P2-3 与 §6-4 规则 2 一致）。
- *
- * <p>本类只提供数据模型与存储并发骨架；rule 的产出（Snip/Rewrite 小循环）属 2-E，
- * Builder 消费属 2-D，本轮均未接入。
+ * <p>读写分离锁保证：读 {@link #get} 并发无阻塞，写 {@link #apply} 串行化原子应用一批变更。
+ * Snip/Rewrite 小循环通过 {@link RuleUpdateBatch} 攒一批增量改动，结束时一次性提交，避免逐条写 DB。
  */
 @Slf4j
 @Component
@@ -40,10 +23,7 @@ public class RuleSetStore {
     private final ConcurrentHashMap<Integer, RuleSet> store = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, ReadWriteLock> locks = new ConcurrentHashMap<>();
 
-    /**
-     * 读取某会话当前 RuleSet（Builder 消费用，取 Read Lock）。
-     * <p>无记录返回 {@link RuleSet#EMPTY}。
-     */
+    /** 读取会话当前 RuleSet（无记录返回 EMPTY）。 */
     public RuleSet get(Integer sessionId) {
         ReadWriteLock lock = lockFor(sessionId);
         lock.readLock().lock();
@@ -56,12 +36,7 @@ public class RuleSetStore {
     }
 
     /**
-     * 原子应用一批 rule 变更（Snip/Rewrite 小循环结束时调用，取 Write Lock）。
-     * <p>基于当前 RuleSet 重放出新 RuleSet 替换旧引用。整批原子：任一操作失败即整批丢弃、保持旧版。
-     *
-     * @param sessionId 会话 id
-     * @param batch     待提交的一批 add/remove/replace 操作
-     * @return 提交后的新 RuleSet
+     * 取 WriteLock 原子应用一批 rule 变更（空 batch 直接返回当前值）。
      */
     public RuleSet apply(Integer sessionId, RuleUpdateBatch batch) {
         if (batch == null || batch.isEmpty()) {
@@ -83,12 +58,12 @@ public class RuleSetStore {
         }
     }
 
-    /** 生成一个新 rule id（UUID 字符串），供 rule 更新 tool 的 add 操作使用。 */
+    /** 生成新 rule id（UUID）。 */
     public static String newRuleId() {
         return UUID.randomUUID().toString();
     }
 
-    /** 清除某会话的 RuleSet（测试或会话销毁时用）。 */
+    /** 清除会话的 RuleSet（测试/会话销毁用）。 */
     public void clear(Integer sessionId) {
         ReadWriteLock lock = lockFor(sessionId);
         lock.writeLock().lock();
@@ -104,8 +79,9 @@ public class RuleSetStore {
     }
 
     /**
-     * 待提交的 rule 变更批次（Snip/Rewrite 小循环内攒、结束时一次性原子应用）。
-     * <p>不可变记录序列，{@link #applyTo(RuleSet)} 基于 current 重放出全新 RuleSet。
+     * rule 变更批次：攒 add/remove/replace 操作，结束时一次性原子应用。
+     *
+     * <p>提供两类 rule 的增删改接口；{@link #applyTo(RuleSet)} 基于 current 重放出全新 RuleSet（不改 current）。
      */
     public static final class RuleUpdateBatch {
 
@@ -128,7 +104,7 @@ public class RuleSetStore {
             return this;
         }
 
-        /** 按 ruleId 替换（先删后加同 id）。SkipTurnRule 用本方法重设 reason/turn。 */
+        /** 按 ruleId 替换 SkipTurnRule（先删后加同 id）。 */
         public RuleUpdateBatch replaceSkipTurnRule(String ruleId, Integer turnStartMessageId, String reason) {
             ops.add(new Op(OpType.REPLACE_SKIP, ruleId, turnStartMessageId, null, reason, null));
             return this;
@@ -150,7 +126,7 @@ public class RuleSetStore {
             return ops.size();
         }
 
-        /** 基于当前 RuleSet 重放出全新 RuleSet（不修改 current）。 */
+        /** 基于 current 逐条回放 ops，生成全新 RuleSet（不改 current）。 */
         RuleSet applyTo(RuleSet current) {
             List<SkipTurnRule> skips = new ArrayList<>(current.getSkipTurnRules());
             List<RewriteToolRule> rewrites = new ArrayList<>(current.getRewriteToolRules());

@@ -8,7 +8,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.Getter;
 
-import org.linxing.linxing_agent.agent.memory.WindowMemory;
+import org.linxing.linxing_agent.agent.memory.deprecated.WindowMemory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

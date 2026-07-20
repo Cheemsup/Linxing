@@ -56,12 +56,12 @@
         DELETE FROM chat_messages WHERE session_id = #{sessionId}
     </delete>
 
-    <!-- 点查某消息回溯路径上最近的 summary 节点 id（Recovery 加速，thePlan P1-3） -->
+    <!-- 点查某消息回溯路径上最近的 summary 节点 id-->
     <select id="selectNearestSummaryId" resultType="java.lang.Integer">
         SELECT nearest_summary_message_id FROM chat_messages WHERE id = #{id}
     </select>
 
-    <!-- 批量更新路径后续消息指向新 summary（thePlan P1-2 第 3 步） -->
+    <!-- 批量更新路径后续消息指向新 summary-->
     <update id="updateNearestSummaryId">
         UPDATE chat_messages
         SET nearest_summary_message_id = #{summaryId}
@@ -71,7 +71,7 @@
         </foreach>
     </update>
 
-    <!-- 更新某消息的 parent_id（summary 落盘后挂载用户消息，thePlan P1-2） -->
+    <!-- 更新某消息的 parent_id（summary 落盘后挂载用户消息） -->
     <update id="updateParentId">
         UPDATE chat_messages SET parent_id = #{parentId} WHERE id = #{id}
     </update>

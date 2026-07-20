@@ -24,36 +24,21 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
-/**
- * SkipTurn ReAct 精简小循环（thePlan P2-2 / nowRefact §6-4/§6-5）。
- *
- * <p>独立于主 {@code AgentExecutor} 的精简 ReAct 循环：<b>非流式、不落库、不推 SSE</b>。
- * 复用 {@link LlmType#SUMMARY_MODEL}（deepseek 非流式 {@link OpenAiChatModel}，支持 tool_calls）。
- *
- * <p>循环挂两把内部 tool（{@link org.linxing.linxing_agent.agent.memory.projection.snip.rules.UpdateSkipTurnRuleTool}
- * / {@link org.linxing.linxing_agent.agent.memory.projection.snip.rules.ReadCurrentRulesTool}），
- * LLM 读完历史后按条目粒度调 {@code update_skip_turn_rule} 增删改 SkipTurnRule，攒进
- * {@link RuleSetStore.RuleUpdateBatch}。循环结束（final 或达 maxSteps）返回 batch；
- * 任一步异常直接抛出，由 {@link SnipLoopExecutor} catch 后整批丢弃、不应用（避免破损中间态）。
- *
- * <p>小循环工具不进主 ToolRegistry（手工分派，见 {@link SkipTurnReActContext#executeTool}）。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SkipTurnReActLoop {
 
-    /** Snip 小循环系统提示词（初稿，待调）。 */
     private static final String SNIP_SYSTEM_PROMPT =
-            "你是对话上下文压缩助手。给定按 Turn 分段的对话历史，判断哪些 Turn 属于【低价值】"
-                    + "（寒暄/进度确认/重复试错/已失效的中间探索），对每个低价值 Turn 调用 "
-                    + "update_skip_turn_rule(action=add, turnId=..., reason=...) 标记跳过。"
+            "你是对话上下文压缩助手。给定【当前轮用户问题】作为判定锚点，以及按 Turn 分段的对话历史，"
+                    + "判断哪些 Turn 对当前轮【已无价值】——"
+                    + "(1) 低价值：寒暄/进度确认/重复试错/已失效的中间探索；"
+                    + "(2) 已被消化：曾经有用但其关键结论已被后续 Turn 吸收、对回答当前轮已无新信息。"
+                    + "以当前轮问题为参照：若某 Turn 的内容与当前轮主题无关，或其结论已被当前轮直接覆盖/被后续回答吸收，"
+                    + "则对它调用 update_skip_turn_rule(action=add, turnId=..., reason=...) 标记跳过。"
                     + "可先调 read_current_rules 查看已存在的 rule 避免重复。"
-                    + "只标记你确信低价值的 Turn，宁缺毋滥；当前轮与近期 Turn 不应跳过。"
+                    + "只标记你确信对当前轮已无价值的 Turn，宁缺毋滥；当前轮本身不参与历史、不应跳过。"
                     + "完成后直接输出 final 文本（如\"done\"），不再调用工具。";
-
-    /** 每个 Turn 内容截断上限（防 prompt 自身膨胀）。 */
-    private static final int TURN_TEXT_TRUNCATE = 500;
 
     private final LlmManager llmManager;
     private final RuleSetStore ruleSetStore;
@@ -61,18 +46,17 @@ public class SkipTurnReActLoop {
     private final ObjectMapper objectMapper;
 
     @Value("${agent.projection.snip.max-steps:6}")
-    private int maxSteps;
+    private int maxSteps;//模型snip循环的最大次数
 
     /**
-     * 运行 Snip 小循环，把 SkipTurnRule 操作攒进给定 batch（与 RewriteToolRule 共用同一 batch，
-     * 由 SnipLoopExecutor 统一原子应用）。
-     * <p>异常直接抛出——调用方（SnipLoopExecutor）catch 后丢弃 batch，不应用。
-     *
-     * @param recovered Recovery 结果（含 messages + turnBoundaries）；turnBoundaries 为空时直接返回
-     * @param sessionId 会话 id
-     * @param batch     共享批次，SkipTurnRule 操作攒入此 batch
+     * 运行 Snip 小循环，把 SkipTurnRule 操作攒进 batch
+     * @param recovered
+     * @param sessionId
+     * @param currentQuery
+     * @param batch
      */
-    public void run(RecoveredHistory recovered, Integer sessionId, RuleSetStore.RuleUpdateBatch batch) {
+    public void run(RecoveredHistory recovered, Integer sessionId, String currentQuery,
+                    RuleSetStore.RuleUpdateBatch batch) {
         if (recovered == null || recovered.getTurnBoundaries() == null
                 || recovered.getTurnBoundaries().isEmpty()) {
             return;//无 Turn 结构可分析
@@ -84,11 +68,12 @@ public class SkipTurnReActLoop {
                 org.linxing.linxing_agent.agent.memory.projection.snip.rules.UpdateSkipTurnRuleTool.SPEC,
                 org.linxing.linxing_agent.agent.memory.projection.snip.rules.ReadCurrentRulesTool.SPEC);
 
+        //构造上下文
         AgentMemory mem = memoryFactory.create();
         mem.add(SystemMessage.from(SNIP_SYSTEM_PROMPT));
-        mem.add(UserMessage.from(renderHistoryForPrompt(recovered)));
+        mem.add(UserMessage.from(renderHistoryForPrompt(recovered, currentQuery)));
 
-        for (int step = 1; step <= maxSteps; step++) {
+        for (int step = 1; step <= maxSteps; step++) {//ReAct，多轮模型循环
             ChatRequest req = ChatRequest.builder()
                     .messages(mem.messages())
                     .toolSpecifications(specs)
@@ -97,11 +82,11 @@ public class SkipTurnReActLoop {
             AiMessage ai = resp.aiMessage();
 
             if (!ai.hasToolExecutionRequests()) {
-                break;//final → 退出循环，提交 batch
+                break;//final，退出循环
             }
             mem.add(ai);
-            for (dev.langchain4j.agent.tool.ToolExecutionRequest tr : ai.toolExecutionRequests()) {
-                String resultText = ctx.executeTool(tr);
+            for (dev.langchain4j.agent.tool.ToolExecutionRequest tr : ai.toolExecutionRequests()) {//每轮循环可能含有多个tool_call
+                String resultText = ctx.executeTool(tr);//逐个执行
                 mem.add(ToolExecutionResultMessage.from(tr, resultText));
             }
         }
@@ -109,19 +94,28 @@ public class SkipTurnReActLoop {
     }
 
     /**
-     * 把 recovered 的 turnBoundaries + messages 渲染成带 turnId 的文本供 LLM 分析。
-     * 每个 Turn 标注 turnStartMessageId，内容按消息前缀+截断呈现。
+     * 把 turnBoundaries + messages 渲染成带 turnId 的文本供 LLM 分析
+     * @param recovered
+     * @param currentQuery
+     * @return
      */
-    private String renderHistoryForPrompt(RecoveredHistory recovered) {
+    private String renderHistoryForPrompt(RecoveredHistory recovered, String currentQuery) {
         StringBuilder sb = new StringBuilder();
+        if (currentQuery != null && !currentQuery.isBlank()) {
+            sb.append("【当前轮用户问题（判定锚点）】\n")
+                    .append(currentQuery)
+                    .append("\n\n请以上述当前轮问题为参照，判断下方各历史 Turn 对回答它是否仍有价值："
+                            + "若某 Turn 与当前轮主题无关，或其结论已被后续 Turn/当前轮吸收、不再提供新信息，"
+                            + "则标记跳过。\n\n");
+        }
         sb.append("以下是当前会话的对话历史（已按 Turn 分段）。每个 Turn 标注了 turnId（DB 消息 id）。"
-                + "请判断哪些 Turn 低价值并调 update_skip_turn_rule 标记。\n\n");
-        List<ChatMessage> msgs = recovered.getMessages();
+                + "请判断哪些 Turn 对当前轮已无价值并调 update_skip_turn_rule 标记。\n\n");
+        List<ChatMessage> msgs = recovered.getMessages();//历史取自于激活的路径内容
         for (TurnBoundary tb : recovered.getTurnBoundaries()) {
             sb.append("【Turn turnId=").append(tb.getTurnStartMessageId()).append("】\n");
             for (int i = tb.getStartIdx(); i < tb.getEndIdx() && i < msgs.size(); i++) {
                 ChatMessage m = msgs.get(i);
-                sb.append(prefixOf(m)).append(truncate(textOf(m), TURN_TEXT_TRUNCATE)).append("\n");
+                sb.append(prefixOf(m)).append(textOf(m)).append("\n");
             }
             sb.append("\n");
         }
@@ -143,8 +137,4 @@ public class SkipTurnReActLoop {
         return "";
     }
 
-    private String truncate(String text, int maxLen) {
-        if (text == null) return "";
-        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
-    }
 }

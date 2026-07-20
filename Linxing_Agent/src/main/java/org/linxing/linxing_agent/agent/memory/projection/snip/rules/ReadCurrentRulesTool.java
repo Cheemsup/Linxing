@@ -6,13 +6,10 @@ import org.linxing.linxing_agent.agent.memory.projection.snip.SkipTurnReActConte
 import org.linxing.linxing_agent.agent.memory.ruleset.RuleSet;
 
 /**
- * 内部只读 tool：返回当前会话的 RuleSet 供 LLM 决策（thePlan P2-2 / nowRefact §6-5）。
+ * 内部只读 tool：返回当前会话的 RuleSet 供 LLM 决策
  *
- * <p>同 {@link UpdateSkipTurnRuleTool}：不实现主 {@code Tool} 接口、不进 ToolRegistry，
- * 仅提供静态 {@link #SPEC} 与 {@link #execute(SkipTurnReActContext)} 供小循环手工分派。
+ * 不实现主Tool接口、不进 ToolRegistry，仅提供静态模板与SkipTurnReActContext供小循环手工分派。目的是避免注册到主循环的工具体系造成污染
  *
- * <p>让 LLM 在增改 SkipTurnRule 前先查看现状，避免重复添加或误删有效条目
- *（增量操作前提：知晓当前规则集状态，nowRefact §6-5）。
  */
 public final class ReadCurrentRulesTool {
 
@@ -30,9 +27,9 @@ public final class ReadCurrentRulesTool {
 
     /** 返回当前 RuleSet 的 JSON 文本；序列化失败返回简要文本摘要兜底。 */
     public static String execute(SkipTurnReActContext ctx) {
-        RuleSet ruleSet = ctx.getRuleSetStore().get(ctx.getSessionId());
+        RuleSet ruleSet = ctx.getRuleSetStore().get(ctx.getSessionId());//取出RuleSet
         try {
-            return ctx.getObjectMapper().writeValueAsString(ruleSet);
+            return ctx.getObjectMapper().writeValueAsString(ruleSet);//序列化
         } catch (Exception e) {
             // 序列化失败不阻断小循环，返回摘要兜底
             return "skipRules=" + ruleSet.getSkipTurnRules().size()

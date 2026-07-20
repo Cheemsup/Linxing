@@ -10,6 +10,7 @@ import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.common.constant.LlmType;
+import org.linxing.linxing_agent.common.constant.MessageType;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -36,7 +37,7 @@ public class SummaryService {
 
     /** Summary 维护提示词（thePlan 第五节初稿，待调）。 */
     private static final String SUMMARY_SYSTEM_PROMPT =
-            "你是对话压缩器。给定 Root→当前路径末端 的对话，产出一段覆盖事实、决策、工具结论、未决问题的摘要，≤800 token。" +
+            "你是对话压缩器，工作是辅助完成上下文的压缩。给定你需要压缩的内容，产出一段覆盖事实、决策、工具结论、未决问题的摘要。" +
             "要求：保留所有 tool 执行的关键结论（而非过程）、保留用户明确偏好、保留待办。";
 
     private final ChatMessageMapper chatMessageMapper;
@@ -51,8 +52,7 @@ public class SummaryService {
     }
 
     /**
-     * 生成并持久化 Summary，挂在路径末端（thePlan P1-2 第 1~3 步）。
-     * <p>
+     * 生成并持久化 Summary，挂在路径末端
      * 注意：本方法只负责落盘 summary 与刷新 {@code nearest_summary_message_id}；
      * 用户消息的 parentId 指向新 summary 由调用方（{@code ChatServiceImpl.chat}）处理。
      *
@@ -72,11 +72,11 @@ public class SummaryService {
             return null;
         }
         String dialogText = buildDialogText(toSummarizeMessages);
-        String prompt = SUMMARY_SYSTEM_PROMPT + "\n\n以下是需要压缩的对话：\n" + dialogText;
+        String prompt = SUMMARY_SYSTEM_PROMPT + "\n\n以下是需要压缩的内容：\n" + dialogText;
 
         String summaryText;
         try {
-            summaryText = summaryModel.chat(prompt);
+            summaryText = summaryModel.chat(prompt);//发送到模型，执行压缩
         } catch (Exception e) {
             log.warn("[SummaryService] summary 生成失败，降级为不压缩: sessionId={}, error={}",
                     sessionId, e.getMessage());
@@ -86,24 +86,24 @@ public class SummaryService {
             return null;
         }
 
-        // 插入 summary 行：type='summary'，parent_id 指向路径末端，作为路径新叶子
+        // 插入 summary 行：type=MessageType.SUMMARY，parent_id 指向路径末端，作为路径新叶子
         ChatMessage summaryMsg = ChatMessage.builder()
                 .userId(userId)
                 .sessionId(sessionId)
                 .parentId(pathEndMessageId)
-                .type("summary")
+                .type(MessageType.SUMMARY)
                 .content(summaryText)
                 .sources("[]")
                 .nearestSummaryMessageId(null)
                 .createdAt(OffsetDateTime.now())
                 .build();
         chatMessageMapper.insert(summaryMsg);
-        // P3 Mirror：summary 作为 type='summary' 的普通 message 进 mirror:msgs（Recovery 沿 parentId 命中）
+        // redis-Mirror：summary 作为 type='summary' 的普通 message 进 mirror:msgs（Recovery 会沿 parentId 命中）
         runtimeMirrorService.appendMessage(sessionId, summaryMsg);
 
         // 刷新路径后续新消息指向新 summary（被压缩的旧消息不动）
         if (successorIds != null && !successorIds.isEmpty()) {
-            chatMessageMapper.updateNearestSummaryId(successorIds, summaryMsg.getId());
+            chatMessageMapper.updateNearestSummaryId(successorIds, summaryMsg.getId());//TODO：假如后续改造后（0719还未改造），summary先于用户的最新提问消息落盘，这一步应该就不需要了（或者说这一步本身是奇怪的存在）
         }
 
         log.info("[SummaryService] summary 落盘: sessionId={}, summaryId={}, parentId={}, successorCount={}",
@@ -129,7 +129,6 @@ public class SummaryService {
 
     /**
      * 把 langchain4j 消息列表拼成供压缩模型消费的对话文本。
-     * 形态沿用旧 {@code SummaryMemory.buildDialogText}（旧类已于 2-B 删除），保留 user/assistant/工具结果前缀。
      */
     private String buildDialogText(List<dev.langchain4j.data.message.ChatMessage> messages) {
         StringBuilder sb = new StringBuilder();

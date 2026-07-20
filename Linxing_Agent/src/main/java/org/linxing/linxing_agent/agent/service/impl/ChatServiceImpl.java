@@ -77,16 +77,14 @@ public class ChatServiceImpl implements IChatService {
             Integer sessionId = chatMessageService.resolveSession(userId, request.getSessionId());//解析或创建会话
 
             // 统一步骤记录器：主循环与工作流共享同一实例，保证 session 级 step_order 单调递增
+            //TODO：考虑将StepRecorder改为单例模式使用
             StepRecorder recorder = new StepRecorder(listener, agentStepMapper, sessionId, runtimeMirrorService);
 
             ChatMessage userMsg = chatMessageService.saveUserMessage(
-                    userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息
+                    userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息，TODO：后续需要与summary节点做时序调整，不可再先落盘userMessage
 
-            // Recovery（thePlan P1-3，2-C 下沉至 HistoryRecoveryService）：含 summary 点查、tool 回放、token 预算截断
-            // token 预算取 SUMMARY 阈值（90% max-context）以下，留缓冲；Recovery 内部还会按 tool 组保证不切断
-            long recoverBudget = projectionThresholds.getMaxContextTokens()
-                    - projectionThresholds.getSummaryMaxTokens();
-            RecoveredHistory recovered = historyRecoveryService.recoverHistory(userMsg.getId(), recoverBudget);
+            // Recovery：拿回激活路径对应的消息以及step纪录
+            RecoveredHistory recovered = historyRecoveryService.recoverHistory(userMsg.getId());
             if (recovered.getMessages().isEmpty() && request.getParentMessageId() != null) {
                 // 溯源失败兜底：加载最近消息（旧路径，不含 tool 回放，仅回放文本）
                 List<ChatMessage> fallback = historyRecoveryService.loadRecentMessages(sessionId);
@@ -107,44 +105,33 @@ public class ChatServiceImpl implements IChatService {
                         .build();
             }
 
-            // 回答前主动 summary 判定（thePlan P1-2，含二次压缩）：历史超 SUMMARY 阈值时，
-            // 压缩"上一个 Summary 挂点（或 Root）→路径末端"的历史，挂到路径末端，用户消息改挂 summary 节点。
-            // 语义要点（用户 2026-07-17 定调）：
-            //   - nearest_summary_message_id = "summary 之后的所有消息节点指向它之前的最近 summaryID"；
-            //   - 二次压缩时无需修改任何已填好的 nearest_summary_message_id（旧指向不再被 Recovery 使用，
-            //     Recovery 从当前用户消息回溯只会命中最新 summary）；
-            //   - 故 successorIds 恒为 [userMsg.getId()]——仅本次新挂的用户消息需指向新 summary。
-            // summary 生成后，被压缩的旧历史（含旧 summary 本身）不再进 memory，仅以新 summary 摘要作为前文上下文。
+            // 回答前主动 summary 判定历史超 SUMMARY 阈值时压缩"上一个 Summary 挂点（或 Root）→路径末端"的历史，挂到路径末端，用户消息改挂 summary 节点。
             RecoveredHistory recoveredForLoop = recovered;
-            List<dev.langchain4j.data.message.ChatMessage> messagesForMemory = recovered.getMessages();
             long historyTokens = tokenEstimator.estimate(recovered.getMessages());
             if (recovered.getPathEndMessageId() != null
                     && !recovered.getMessages().isEmpty()) {
                 if (projectionThresholds.policyFor(historyTokens) == ProjectionPolicy.SUMMARY) {
-                    // 压缩范围：旧 summary 之后到路径末端（不含旧 summary 自身，它是前次压缩产物）；
-                    // 首条 summary 时为 Root→路径末端 全量。
-                    // 不变式：recovered.summaryEntity != null 时 messages[0] 为旧 summary 摘要（见 recoverHistory L193-205）
-                    List<dev.langchain4j.data.message.ChatMessage> toSummarize =
-                            recovered.getSummaryEntity() != null
-                                    ? recovered.getMessages().subList(1, recovered.getMessages().size())
-                                    : recovered.getMessages();
+                    // 压缩范围："上一个 Summary 挂点（或 Root）→路径末端"的历史
+                    // 不变式：recovered.summaryEntity != null 时 messages[0] 为旧 summary 摘要
+                    List<dev.langchain4j.data.message.ChatMessage> toSummarize = recovered.getMessages();
                     ChatMessage summaryMsg = summaryService.summarizeAndPersist(
                             userId, sessionId, recovered.getPathEndMessageId(),
                             toSummarize, List.of(userMsg.getId()));
                     if (summaryMsg != null) {
                         // 用户消息改挂 summary 节点；刷新其 nearest_summary_message_id 已由 summarizeAndPersist 完成
+                        //TODO：假如后续改造后（0719还未改造），summary先于用户的最新提问消息落盘，这一步应该就不需要了
                         chatMessageMapper.updateParentId(userMsg.getId(), summaryMsg.getId());
                         // DB 已改 parentId，重查以同步内存对象，避免后续 toMessageVO 落 Redis 时 parentId 过时
                         ChatMessage refreshed = chatMessageMapper.selectById(userMsg.getId());
                         if (refreshed != null) {
                             userMsg = refreshed;
-                            // P3 Mirror：updateParentId 只动 DB，mirror:msgs 的 userMsg 字段 parentId 已过时，重写补丁
+                            // redis-Mirror：updateParentId 只动 DB，mirror:msgs 的 userMsg 字段 parentId 已过时，重写补丁
                             runtimeMirrorService.appendMessage(sessionId, refreshed);
                         }
                         // memory 历史替换为仅 summary 摘要（被压缩旧历史丢弃），当前用户消息由 runAgentLoop 末尾追加；
                         // 原 Turn 结构已失效（被压缩），turnBoundaries 置空 → Builder 退化为零投影
-                        messagesForMemory = new ArrayList<>();
-                        messagesForMemory.add(UserMessage.from("【对话历史摘要】\n" + summaryMsg.getContent()));
+                        List<dev.langchain4j.data.message.ChatMessage> messagesForMemory = new ArrayList<>();
+                        messagesForMemory.add(UserMessage.from("【历史内容经过压缩精简，如下是摘要】\n" + summaryMsg.getContent()));
                         recoveredForLoop = RecoveredHistory.builder()
                                 .messages(messagesForMemory)
                                 .pathEntities(recovered.getPathEntities())
@@ -156,13 +143,16 @@ public class ChatServiceImpl implements IChatService {
                 }
             }
 
-            // 2-E：Projection rule 异步产出（thePlan P2-2/P2-3）。历史进入 REWRITE_TOOL/SNIP_LOWVALUE 区间时，
-            // 异步启动小循环产出 RewriteToolRule（纯规则）+ SkipTurnRule（LLM），攒进同一 batch 原子应用。
-            // 主流程不等待、用上一版 RuleSet 继续（允许落后一轮）；SUMMARY 区间走上方同步 Summary，不触发。
-            // per-session CAS 去重；小循环不落库、不推 SSE；异常丢弃 batch 不影响主流程。
+            // Projection rule 异步产出。历史进入 REWRITE_TOOL/SNIP_LOWVALUE 区间时异步启动小循环产出 RewriteToolRule（纯规则）+ SkipTurnRule（LLM），攒进同一 batch 原子应用。
+            // 主流程不等待、用上一版 RuleSet 继续（允许落后一轮）
+            // per-session CAS 避免同时启动多个异步rewrite/snip带来混乱；snip循环不落库、不推 SSE；异常丢弃 batch 不影响主流程。
             ProjectionPolicy policy = projectionThresholds.policyFor(historyTokens);
+            log.info("[Projection] sessionId={}, historyTokens={}, maxContext={}, policy={}, snipEnabled={}",
+                    sessionId, historyTokens, projectionThresholds.getMaxContextTokens(), policy,
+                    snipLoopExecutor.shouldTrigger(policy));
             if (snipLoopExecutor.shouldTrigger(policy) && snipLoopExecutor.tryStart(sessionId)) {
-                snipLoopExecutor.executeAsync(sessionId, recovered);
+                log.info("[SnipLoop] sessionId={} triggered, policy={}", sessionId, policy);
+                snipLoopExecutor.executeAsync(sessionId, recovered, originalQuery);//执行snip循环，将rule注入batch
             }
 
             ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, recoveredForLoop,
@@ -189,7 +179,7 @@ public class ChatServiceImpl implements IChatService {
      * @param sessionId
      * @param userMsg
      * @param recovered 已由 Recovery 重建的历史（含 tool 回放 + turnBoundaries），直接填入 memory；
-     *                  Builder 消费其 turnBoundaries 应用 Rule Set 投影（2-D 起）
+     *                  Builder 消费其 turnBoundaries 应用 Rule Set 投影
      * @param originalQuery
      * @return
      */
@@ -222,8 +212,7 @@ public class ChatServiceImpl implements IChatService {
         //回填 agent_steps 的 chat_message_id
         agentStepMapper.updateChatMessageId(sessionId, assistantMsg.getId());
 
-        // P3 Runtime Mirror 写回：userMsg/assistantMsg 进 mirror:msgs；
-        // 回填后的 steps（chatMessageId 已知）补丁重写进 mirror:steps（即时写时 chatMessageId 为 null）
+        // Runtime Mirror 写回：userMsg/assistantMsg 进 mirror:msgs；
         runtimeMirrorService.appendMessage(sessionId, userMsg);
         runtimeMirrorService.appendMessage(sessionId, assistantMsg);
         patchMirrorStepChatMessageIds(sessionId, assistantMsg.getId());
@@ -238,7 +227,7 @@ public class ChatServiceImpl implements IChatService {
     }
 
     /**
-     * 补丁重写 mirror:steps 中本 assistant 消息所属 step 的 chatMessageId（thePlan P3 决策：即时写 + 末尾补丁）。
+     * 补丁重写 mirror:steps 中本 assistant 消息所属 step 的 chatMessageId
      * <p>
      * StepRecorder 插入时 step.chatMessageId 为 null（尚未回填），镜像字段也是 null。
      * {@code updateChatMessageId} 回填 DB 后，按 assistantMsgId 过滤 session 全量 steps，

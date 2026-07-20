@@ -14,35 +14,21 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * RewriteToolRule 纯规则产出器（thePlan P2-2 / nowRefact §6-4）。
- *
- * <p>REWRITE_TOOL 策略<b>不调 LLM</b>（与 SNIP_LOWVALUE 调 LLM 是不同工作阶段，0717 终稿）。
- * 本类按规则遍历历史中的 {@link ToolExecutionResultMessage}，对"读性质工具 + 结果 token 超阈值"
- * 的条目产 {@code addRewriteToolRule}，丢 content 留 tool_call_id（Builder 占位重建，不破坏配对）。
- *
- * <p>判定依据（消化阶段 2 "待讨论②"）：采 {@code tool_name} 白名单
- *（{@link RewriteRuleWhitelist}）+ 结果 token 阈值，不依赖 ToolSpec 元标记。
- *
- * <p>preserveFields 暂传空列表（Builder 占位符不保留字段；阶段 3 可按需细化保留
- * {@code tool_call_id}/{@code tool_name}/{@code is_success}）。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class RewriteRuleAnalyzer {
 
     private final TokenEstimator tokenEstimator;
+    private final RewriteRuleWhitelist rewriteRuleWhitelist;
 
-    /** 读性质工具结果 token 超此阈值才产 RewriteToolRule。 */
     @Value("${agent.projection.snip.rewrite.result-token-threshold:2000}")
     private long resultTokenThreshold;
 
     /**
-     * 遍历 history 的 ToolExecutionResultMessage，按白名单+阈值产 addRewriteToolRule 到 batch。
-     *
-     * @param recovered Recovery 结果（含 history messages）；为空或无消息直接返回
-     * @param batch     待填充的批次（调用方持有，最终由 SnipLoopExecutor 原子应用）
+     * 按白名单+阈值产出 RewriteToolRule 到 batch
+     * @param recovered
+     * @param batch
      */
     public void analyze(RecoveredHistory recovered, RuleSetStore.RuleUpdateBatch batch) {
         if (recovered == null || recovered.getMessages() == null || recovered.getMessages().isEmpty()) {
@@ -51,7 +37,7 @@ public class RewriteRuleAnalyzer {
         Set<String> seen = new HashSet<>();//本批已产 rewrite 的 toolCallId，避免重复
         int produced = 0;
         for (ChatMessage msg : recovered.getMessages()) {
-            if (!(msg instanceof ToolExecutionResultMessage term)) {
+            if (!(msg instanceof ToolExecutionResultMessage term)) {//rewrite只做tool的精简（0719），后续可能扩充到skill/mcp的精简
                 continue;
             }
             String toolName = term.toolName();
@@ -59,7 +45,7 @@ public class RewriteRuleAnalyzer {
             if (toolCallId == null) {
                 continue;
             }
-            if (!RewriteRuleWhitelist.READ_ONLY_TOOLS.contains(toolName)) {
+            if (!rewriteRuleWhitelist.contains(toolName)) {
                 continue;//仅读性质工具可精简
             }
             if (seen.contains(toolCallId)) {

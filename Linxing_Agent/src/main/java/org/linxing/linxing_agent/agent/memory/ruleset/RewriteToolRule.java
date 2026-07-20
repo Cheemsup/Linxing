@@ -6,15 +6,11 @@ import lombok.Value;
 import java.util.List;
 
 /**
- * Rewrite Tool Rule（thePlan P2-2）。
+ * Rewrite Tool Rule
  *
  * <p>描述"哪个 tool 调用结果需精简"。以 **tool_call_id** 为粒度——丢 {@code content}
  * 留 {@code step_data} 简要字段，重建为占位符版 {@code ToolExecutionResultMessage}
  *（保留 {@code tool_call_id} 不破坏配对）。
- *
- * <p><b>保留字段</b>：{@code preserveFields} 为需保留的 step_data 字段名列表（默认空表示
- * 全占位，仅留 tool_call_id）。具体保留哪些字段（如工具名、简要状态）属 2-D 实现细化，
- * 本轮数据模型只承载意图。
  *
  * <p>本类为不可变值对象。
  */

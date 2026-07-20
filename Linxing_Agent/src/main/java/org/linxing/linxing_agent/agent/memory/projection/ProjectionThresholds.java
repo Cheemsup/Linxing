@@ -4,54 +4,59 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Projection 各级阈值常量（thePlan 第五节，以 {@code MAX_CONTEXT_TOKENS=200_000} 为上限反推）。
- * <p>
- * 阈值与阶段 1 Summary 触发、阶段 2 Runtime Projection 共用——阶段 0 仅声明、不消费，
- * 待阶段 2 ContextBuilder 实装后接入。Summary maxTokens 取 {@code max_context * 0.5}。
- * <p>
- * 比例为占 {@code maxContextTokens} 的百分比，运行时由 {@link #policyFor(long, long)} 解析为策略。
+ * Projection 各级阈值常量
+ *
+ * <p>各级阈值与模型上下文上限均可经 yaml 调整，避免硬编码导致预算/阈值不可调
+ * （见 context-projection-budget-deadlock：Recovery 预算曾卡在 Rewrite 阈值下死锁）。
  */
 @Component
 public class ProjectionThresholds {
 
-    /** 模型上下文最高上限（批注 #2）：200K。 */
+    /** 模型上下文最高上限（200K 待模型选型后调研修正）。 */
+    //TODO：200K只是待定，后续还需要进行调研修正
     @Value("${agent.token.max-context:200000}")
     private long maxContextTokens;
 
     /** FULL → REWRITE_TOOL 线（60%）。 */
-    public static final double FULL_TO_REWRITE = 0.60;
+    @Value("${agent.projection.thresholds.full-to-rewrite:0.60}")
+    private double fullToRewrite;
+
     /** REWRITE_TOOL → SNIP_LOWVALUE 线（80%）。 */
-    public static final double REWRITE_TO_SNIP = 0.80;
+    @Value("${agent.projection.thresholds.rewrite-to-snip:0.80}")
+    private double rewriteToSnip;
+
     /** SNIP_LOWVALUE → SUMMARY 线（90%）。 */
-    public static final double SNIP_TO_SUMMARY = 0.90;
+    @Value("${agent.projection.thresholds.snip-to-summary:0.90}")
+    private double snipToSummary;
+
     /** Summary 压缩后历史约占一半窗口（max_context * 0.5）。 */
-    public static final double SUMMARY_MAX_RATIO = 0.5;
+    @Value("${agent.projection.thresholds.summary-max-ratio:0.5}")
+    private double summaryMaxRatio;
 
     public long getMaxContextTokens() {
         return maxContextTokens;
     }
 
-    /** Summary 压缩目标 token（max_context * 0.5）。 */
+    /** Summary 压缩目标 token（max_context * summaryMaxRatio）。 */
     public long getSummaryMaxTokens() {
-        return (long) (maxContextTokens * SUMMARY_MAX_RATIO);
+        return (long) (maxContextTokens * summaryMaxRatio);
     }
 
     /**
      * 按当前路径历史 token 占比解析应采用的 Projection 策略。
-     * 阶段 0 仅供阶段 2 ContextBuilder 预留，暂无调用方。
      *
      * @param historyTokens 当前路径历史估算 token 数
-     * @return 命中的策略；未超 60% 返回 {@link ProjectionPolicy#FULL}
+     * @return 命中的策略；未超 full-to-rewrite 返回 {@link ProjectionPolicy#FULL}
      */
     public ProjectionPolicy policyFor(long historyTokens) {
         double ratio = (double) historyTokens / maxContextTokens;
-        if (ratio >= SNIP_TO_SUMMARY) {
+        if (ratio >= snipToSummary) {
             return ProjectionPolicy.SUMMARY;
         }
-        if (ratio >= REWRITE_TO_SNIP) {
+        if (ratio >= rewriteToSnip) {
             return ProjectionPolicy.SNIP_LOWVALUE;
         }
-        if (ratio >= FULL_TO_REWRITE) {
+        if (ratio >= fullToRewrite) {
             return ProjectionPolicy.REWRITE_TOOL;
         }
         return ProjectionPolicy.FULL;

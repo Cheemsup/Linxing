@@ -93,8 +93,7 @@ public class AgentExecutor {
         int totalCount = toolRegistry.size() + skillRegistry.size();
         boolean progressiveMode = totalCount > disclosureThreshold;
 
-        //SystemMessage 不再进 memory（memory 退化为极简累加器），
-        //由 ContextBuilder.buildMessages 每轮幂等置于首位（2-B 起）
+        //contextBuilder内部构建工具JSON
         List<ToolSpecification> initialSpecs = contextBuilder.buildInitialToolSpecs(progressiveMode);
         Set<String> activatedToolNames = new HashSet<>();//渐进模式下已动态激活的工具名集合
 
@@ -114,7 +113,7 @@ public class AgentExecutor {
 
             List<ToolSpecification> roundSpecs = contextBuilder.buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
 
-            List<ChatMessage> currentMessages = contextBuilder.buildMessages(context, context.getRecovered());//2-D 起：SystemMessage 幂等首位 + Rule Set 投影（SkipTurn/RewriteTool）+ memory 累加消息
+            List<ChatMessage> currentMessages = contextBuilder.buildMessages(context, context.getRecovered());//SystemMessage 幂等首位 + Rule Set 投影（SkipTurn/RewriteTool）+ memory 累加消息
             ChatRequest chatRequest = ChatRequest.builder()
                     .messages(currentMessages)
                     .toolSpecifications(roundSpecs)

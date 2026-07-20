@@ -124,12 +124,6 @@ public class ChatMessageServiceImpl implements IChatMessageService {
     }
 
     /**
-     * Recovery 已于 2-C 下沉至 {@code HistoryRecoveryService}：
-     * {@code recoverHistory} / {@code loadRecentMessages} 迁出本类，旧的 {@code backtrackHistory}（@Deprecated
-     * 纯文本回放兜底）随之删除——{@code ChatServiceImpl} 的降级路径改走 {@code HistoryRecoveryService.loadRecentMessages}。
-     */
-
-    /**
      * 更新会话的最近更新时间
      */
     public void touchSession(Integer sessionId) {

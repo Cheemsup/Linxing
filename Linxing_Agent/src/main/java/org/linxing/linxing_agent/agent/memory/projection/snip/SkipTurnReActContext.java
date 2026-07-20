@@ -8,7 +8,7 @@ import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * SkipTurn ReAct 小循环的 per-loop 载体（thePlan P2-2 / nowRefact §6-5）。
+ * SkipTurn ReAct 小循环的 per-loop 载体。
  *
  * <p>小循环不构造主 {@code AgentContext}（那是主流程的，含 stepListener/stepRecorder/recovered，
  * 不应混用）。本类是小循环专属轻量载体，持有：

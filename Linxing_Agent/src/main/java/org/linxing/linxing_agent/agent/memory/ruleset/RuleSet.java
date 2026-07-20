@@ -7,18 +7,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Rule Set（0717 Snip 终稿 + thePlan P2-2/P2-3）。
+ * Rule Set
  *
  * <p>每会话一份，统一承载两类 rule：{@link SkipTurnRule}（哪些 Turn 跳过）与
  * {@link RewriteToolRule}（哪些 tool 结果精简）。Builder 每轮消费同一份 Rule Set
  * 构建 Projection。
  *
- * <p><b>不可变快照语义</b>：本类为不可变值对象（final 集合）。{@link RuleSetStore}
- * 每次 apply 一批变更时产出新实例替换旧引用，WriteLock 仅保护引用替换瞬间——
- * Builder 读到的永远是某一刻的完整快照，不存在中间态、无需事务回滚
- *（0717 终稿第十一节、thePlan P2-3）。
- *
- * <p>Rule Set 不落库、不进 Redis Mirror（它是"投影规则"非"事实"，thePlan P2-3）。
+ * <p>Rule Set 不落库、不进 Redis Mirror（它是"投影规则"非"事实"）。
  */
 @Value
 public class RuleSet {

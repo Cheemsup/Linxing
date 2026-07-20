@@ -126,6 +126,11 @@ agent:
     encoding: ${AGENT_TOKEN_ENCODING:cl100k_base}        # jtokkit 编码名：cl100k_base / o200k_base，DeepSeek/GLM/Kimi/Minimax 均走 OpenAI 兼容 BPE，近似可接受
     max-context: ${AGENT_TOKEN_MAX_CONTEXT:200000}       # 模型上下文最高上限，据此反推各级 Projection 阈值
   projection:
+    thresholds:
+      full-to-rewrite: ${AGENT_PROJECTION_FULL_TO_REWRITE:0.60}   # FULL → REWRITE_TOOL 线
+      rewrite-to-snip: ${AGENT_PROJECTION_REWRITE_TO_SNIP:0.80}    # REWRITE_TOOL → SNIP_LOWVALUE 线
+      snip-to-summary: ${AGENT_PROJECTION_SNIP_TO_SUMMARY:0.90}    # SNIP_LOWVALUE → SUMMARY 线
+      summary-max-ratio: ${AGENT_PROJECTION_SUMMARY_MAX_RATIO:0.5} # Summary 压缩目标占 max-context 比例
     snip:
       enabled: ${AGENT_SNIP_ENABLED:true}                                   # Projection rule 异步产出总开关
       skip-turn-llm-enabled: ${AGENT_SNIP_SKIP_TURN_LLM_ENABLED:true}      # SkipTurn LLM ReAct 开关（false=只跑 Rewrite 纯规则）
@@ -137,6 +142,10 @@ agent:
         thread-name-prefix: snip-
       rewrite:
         result-token-threshold: ${AGENT_SNIP_REWRITE_TOKEN_THRESHOLD:2000} # 读性质工具结果 token 超此值才产 RewriteToolRule
+        read-only-tools:                                                       # 读性质工具白名单（结果可被 Rewrite 精简）；写性质工具不在此列
+          - search_knowledge_base
+          - web_search
+          - resolve
   web-search:
     tavily:
       api-key: ${TAVILY_API_KEY}

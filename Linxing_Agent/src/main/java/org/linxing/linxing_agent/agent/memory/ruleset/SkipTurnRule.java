@@ -4,7 +4,7 @@ import lombok.Builder;
 import lombok.Value;
 
 /**
- * Skip Turn Rule（0717 Snip 终稿 + thePlan P2-2）。
+ * Skip Turn Rule
  *
  * <p>描述"哪个 Conversation Turn 可不参与本轮 Prompt 构建"。以 **Conversation Turn** 为
  * 最小原子单元——一个 Turn = UserMessage →（可选 Assistant 中间回复）→ ToolCall → ToolResult

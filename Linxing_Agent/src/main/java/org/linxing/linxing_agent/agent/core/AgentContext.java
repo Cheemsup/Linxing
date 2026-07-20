@@ -23,9 +23,7 @@ public class AgentContext implements JsonContainerStore {
      */
     private StepRecorder stepRecorder;
     /**
-     * Recovery 结果（2-D 起）：携带 history 的 turnBoundaries，供 ContextBuilder.buildMessages
-     * 应用 SkipTurnRule/RewriteToolRule 投影。null 表示无 Recovery（如工作流子 Agent 直接构造），
-     * Builder 退化为零投影。
+     * 携带 history 的 turnBoundaries，供 ContextBuilder.buildMessages应用 SkipTurnRule/RewriteToolRule 投影。
      */
     private RecoveredHistory recovered;
 

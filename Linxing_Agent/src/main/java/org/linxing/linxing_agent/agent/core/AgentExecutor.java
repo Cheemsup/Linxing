@@ -9,7 +9,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.memory.builder.ContextBuilder;
+import org.linxing.linxing_agent.agent.memory.window.builder.ContextBuilder;
 import org.linxing.linxing_agent.agent.skill.SkillMetadata;
 import org.linxing.linxing_agent.agent.skill.SkillRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;

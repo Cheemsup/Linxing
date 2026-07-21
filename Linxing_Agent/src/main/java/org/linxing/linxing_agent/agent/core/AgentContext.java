@@ -1,7 +1,7 @@
 package org.linxing.linxing_agent.agent.core;
 
-import org.linxing.linxing_agent.agent.memory.AgentMemory;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.JsonContainerStore;
 
 import java.util.HashMap;

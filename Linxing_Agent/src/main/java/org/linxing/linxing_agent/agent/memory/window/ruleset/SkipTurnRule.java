@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.ruleset;
+package org.linxing.linxing_agent.agent.memory.window.ruleset;
 
 import lombok.Builder;
 import lombok.Value;

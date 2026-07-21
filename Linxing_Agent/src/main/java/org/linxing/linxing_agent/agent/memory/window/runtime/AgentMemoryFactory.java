@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.window.runtime;
 
 import org.springframework.stereotype.Component;
 
@@ -11,6 +11,6 @@ import org.springframework.stereotype.Component;
 public class AgentMemoryFactory {
 
     public AgentMemory create() {
-        return new ListAgentMemory();
+        return new RuntimeAgentMemory();
     }
 }

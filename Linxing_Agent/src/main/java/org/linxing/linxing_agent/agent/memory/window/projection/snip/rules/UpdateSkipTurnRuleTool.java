@@ -1,9 +1,9 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip.rules;
+package org.linxing.linxing_agent.agent.memory.window.projection.snip.rules;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import org.linxing.linxing_agent.agent.memory.projection.snip.SkipTurnReActContext;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.SkipTurnReActContext;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 import tools.jackson.databind.JsonNode;
 
 import java.util.List;

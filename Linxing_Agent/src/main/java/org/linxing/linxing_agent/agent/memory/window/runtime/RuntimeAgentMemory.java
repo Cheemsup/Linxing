@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.window.runtime;
 
 import dev.langchain4j.data.message.ChatMessage;
 
@@ -19,7 +19,7 @@ import java.util.List;
  *
  * <p>线程说明：单次 {@code AgentExecutor.execute} 调用内单线程读写，无需同步。
  */
-public class ListAgentMemory implements AgentMemory {
+public class RuntimeAgentMemory implements AgentMemory {
 
     private final List<ChatMessage> messages = new ArrayList<>();
 

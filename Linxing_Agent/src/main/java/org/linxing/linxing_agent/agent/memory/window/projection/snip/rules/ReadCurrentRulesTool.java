@@ -1,9 +1,9 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip.rules;
+package org.linxing.linxing_agent.agent.memory.window.projection.snip.rules;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import org.linxing.linxing_agent.agent.memory.projection.snip.SkipTurnReActContext;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSet;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.SkipTurnReActContext;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSet;
 
 /**
  * 内部只读 tool：返回当前会话的 RuleSet 供 LLM 决策

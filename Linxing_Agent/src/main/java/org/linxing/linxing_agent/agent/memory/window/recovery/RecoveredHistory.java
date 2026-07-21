@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.recovery;
+package org.linxing.linxing_agent.agent.memory.window.recovery;
 
 import dev.langchain4j.data.message.ChatMessage;
 import lombok.Builder;
@@ -9,7 +9,10 @@ import java.util.List;
 /**
  * Recovery 结果
  *
- * TODO：观察这个实体的消费链路，分析是否可以瘦身
+ * <p>瘦身说明（0721）：原 {@code pathEntities}（路径原始实体链）已删除——经消费链路核查，
+ * 其实体内容从未被遍历消费，仅用于 {@code !isEmpty()} 判空，而该判空可由
+ * {@code pathEndMessageId} 非空等价表达。路径相关唯一实际消费是 {@code pathEndMessageId}
+ * （Summary 挂载点候选）。删字段后 {@code messages} 与 {@code pathEndMessageId} 职责清晰。
  */
 @Data
 @Builder
@@ -17,9 +20,6 @@ public class RecoveredHistory {
 
     /** 已重建（含 tool 回放）的 langchain4j 消息列表，从旧到新。 */
     private List<ChatMessage> messages;
-
-    /** 路径上每条消息的实体（含 id），从旧到新；供 Summary 判定 successorIds 与挂载点。 */
-    private List<org.linxing.linxing_agent.agent.entity.ChatMessage> pathEntities;
 
     /** 路径上命中的最近 summary 实体（"之前"语义）；无则 null。 */
     private org.linxing.linxing_agent.agent.entity.ChatMessage summaryEntity;

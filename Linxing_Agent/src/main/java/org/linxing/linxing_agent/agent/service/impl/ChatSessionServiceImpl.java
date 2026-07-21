@@ -9,6 +9,7 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.entity.ChatSession;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 import org.linxing.linxing_agent.agent.service.IChatSessionService;
 import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.vo.ChatSessionVO;
@@ -26,6 +27,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
     private final IRuntimeMirrorService runtimeMirrorService;
+    private final RuleSetStore ruleSetStore;
     private final LlmManager llmManager;
 
     @Override
@@ -59,6 +61,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
         chatMessageMapper.deleteBySessionId(sessionId);
         chatSessionMapper.deleteById(sessionId);
         runtimeMirrorService.deleteSession(sessionId); // P3 Mirror：删 mirror:msgs + mirror:steps 两 Hash
+        ruleSetStore.clear(sessionId); // 与 Redis 镜像同步清理 RuleSet（0721：Caffeine TTL 外的显式清理）
         log.info("删除会话 {} 及其所有消息", sessionId);
     }
 

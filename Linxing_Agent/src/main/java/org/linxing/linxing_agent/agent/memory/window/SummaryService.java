@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.window;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
@@ -52,22 +52,17 @@ public class SummaryService {
     }
 
     /**
-     * 生成并持久化 Summary，挂在路径末端
-     * 注意：本方法只负责落盘 summary 与刷新 {@code nearest_summary_message_id}；
-     * 用户消息的 parentId 指向新 summary 由调用方（{@code ChatServiceImpl.chat}）处理。
+     * 生成并持久化 Summary，挂在路径末端。
      *
      * @param userId             用户 id
      * @param sessionId          会话 id
      * @param pathEndMessageId   当前路径末端 message id（summary 的 parent）
      * @param toSummarizeMessages 待压缩的历史 langchain4j 消息（从上一个 summary 挂点或 Root 到路径末端）
-     * @param successorIds       summary 之后需刷新 nearest_summary_message_id 的消息 id 列表
-     *                           （即路径上 summary 之后、当前用户消息之前的消息；首条用户消息尚未入库时不在此列）
      * @return 落盘后的 summary 实体；失败返回 null，调用方应降级为不压缩
      */
     public ChatMessage summarizeAndPersist(Integer userId, Integer sessionId,
                                            Integer pathEndMessageId,
-                                           List<dev.langchain4j.data.message.ChatMessage> toSummarizeMessages,
-                                           List<Integer> successorIds) {
+                                           List<dev.langchain4j.data.message.ChatMessage> toSummarizeMessages) {
         if (toSummarizeMessages == null || toSummarizeMessages.isEmpty()) {
             return null;
         }
@@ -101,22 +96,13 @@ public class SummaryService {
         // redis-Mirror：summary 作为 type='summary' 的普通 message 进 mirror:msgs（Recovery 会沿 parentId 命中）
         runtimeMirrorService.appendMessage(sessionId, summaryMsg);
 
-        // 刷新路径后续新消息指向新 summary（被压缩的旧消息不动）
-        if (successorIds != null && !successorIds.isEmpty()) {
-            chatMessageMapper.updateNearestSummaryId(successorIds, summaryMsg.getId());//TODO：假如后续改造后（0719还未改造），summary先于用户的最新提问消息落盘，这一步应该就不需要了（或者说这一步本身是奇怪的存在）
-        }
-
-        log.info("[SummaryService] summary 落盘: sessionId={}, summaryId={}, parentId={}, successorCount={}",
-                sessionId, summaryMsg.getId(), pathEndMessageId,
-                successorIds != null ? successorIds.size() : 0);
+        log.info("[SummaryService] summary 落盘: sessionId={}, summaryId={}, parentId={}",
+                sessionId, summaryMsg.getId(), pathEndMessageId);
         return summaryMsg;
     }
 
     /**
      * 点查某消息回溯路径上最近的 summary 节点（thePlan P1-3 Recovery 加速）。
-     * <p>
-     * 2-C 起 Recovery 下沉至 {@code HistoryRecoveryService} 后，本方法为 summary 点查的
-     * 统一公共入口（消化原 L4 预留项），Recovery 不再在自身直查 {@code selectNearestSummaryId}。
      * @return 命中的 summary 实体；未填值或指向不存在返回 null
      */
     public ChatMessage findNearestSummary(Integer messageId) {

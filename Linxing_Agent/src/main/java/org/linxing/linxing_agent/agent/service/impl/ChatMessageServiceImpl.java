@@ -9,6 +9,7 @@ import org.linxing.linxing_agent.agent.mapper.ChatSessionMapper;
 import org.linxing.linxing_agent.agent.service.IChatMessageService;
 import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.vo.ChatMessageVO;
+import org.linxing.linxing_agent.common.constant.MessageType;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -48,7 +49,7 @@ public class ChatMessageServiceImpl implements IChatMessageService {
                 .userId(userId)
                 .sessionId(sessionId)
                 .parentId(parentId)
-                .type("user")
+                .type(MessageType.USER)
                 .content(content)
                 .sources("[]")
                 .nearestSummaryMessageId(resolveNearestSummary(parentId))
@@ -74,7 +75,7 @@ public class ChatMessageServiceImpl implements IChatMessageService {
                 .userId(userId)
                 .sessionId(sessionId)
                 .parentId(parentId)
-                .type("assistant")
+                .type(MessageType.ASSISTANT)
                 .content(content)
                 .sources(sourcesJson)
                 .nearestSummaryMessageId(resolveNearestSummary(parentId))
@@ -97,7 +98,7 @@ public class ChatMessageServiceImpl implements IChatMessageService {
         if (parent == null) {
             return null;
         }
-        if ("summary".equals(parent.getType())) {
+        if (MessageType.SUMMARY.equals(parent.getType())) {
             return parent.getId();
         }
         return parent.getNearestSummaryMessageId();

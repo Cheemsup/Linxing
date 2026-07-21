@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip;
+package org.linxing.linxing_agent.agent.memory.window.projection.snip;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -11,11 +11,13 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.memory.AgentMemory;
-import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
-import org.linxing.linxing_agent.agent.memory.recovery.TurnBoundary;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.rules.ReadCurrentRulesTool;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.rules.UpdateSkipTurnRuleTool;
+import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemory;
+import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemoryFactory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.TurnBoundary;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,8 +67,8 @@ public class SkipTurnReActLoop {
 
         OpenAiChatModel model = llmManager.getModel(LlmType.SUMMARY_MODEL);//非流式，支持 tool_calls
         List<ToolSpecification> specs = List.of(
-                org.linxing.linxing_agent.agent.memory.projection.snip.rules.UpdateSkipTurnRuleTool.SPEC,
-                org.linxing.linxing_agent.agent.memory.projection.snip.rules.ReadCurrentRulesTool.SPEC);
+                UpdateSkipTurnRuleTool.SPEC,
+                ReadCurrentRulesTool.SPEC);
 
         //构造上下文
         AgentMemory mem = memoryFactory.create();

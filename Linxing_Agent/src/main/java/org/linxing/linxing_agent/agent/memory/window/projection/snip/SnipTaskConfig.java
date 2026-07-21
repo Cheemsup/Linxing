@@ -1,5 +1,6 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip;
+package org.linxing.linxing_agent.agent.memory.window.projection.snip;
 
+import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionLoopExecutor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,12 +13,12 @@ import java.util.concurrent.ThreadPoolExecutor;
  * Snip/Rewrite 小循环的异步执行器配置，主要是线程池的配置
  *
  * <p>项目原本无 {@code @EnableAsync}，2-E 新增此配置以提供命名线程池 {@code snipTaskExecutor}，
- * 供 {@link SnipLoopExecutor} 异步提交小循环（best-effort，不阻塞主对话流程）。
+ * 供 {@link ProjectionLoopExecutor} 异步提交小循环（best-effort，不阻塞主对话流程）。
  *
  * <p><b>拒绝策略 {@link ThreadPoolExecutor.DiscardPolicy}</b>：队列满时静默丢弃新任务——
  * 小循环是上下文优化、非正确性必需，丢弃不影响主流程
  *
- * <p>本类提供命名线程池 {@code snipTaskExecutor} Bean，被 {@link SnipLoopExecutor}
+ * <p>本类提供命名线程池 {@code snipTaskExecutor} Bean，被 {@link ProjectionLoopExecutor}
  * 通过 {@code @Qualifier("snipTaskExecutor")} 注入，作为异步小循环的执行线程池。
  */
 @Configuration

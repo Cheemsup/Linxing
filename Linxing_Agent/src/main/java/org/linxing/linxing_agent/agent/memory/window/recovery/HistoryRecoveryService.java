@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.recovery;
+package org.linxing.linxing_agent.agent.memory.window.recovery;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -10,7 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
-import org.linxing.linxing_agent.agent.memory.SummaryService;
+import org.linxing.linxing_agent.agent.memory.window.SummaryService;
 import org.linxing.linxing_agent.agent.memory.TokenEstimator;
 import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.common.constant.MessageType;
@@ -45,24 +45,32 @@ public class HistoryRecoveryService {
     private final IRuntimeMirrorService runtimeMirrorService; // redis-mirror-first 读源，miss/异常退化到 DB
 
     /**
-     * Recovery：从当前用户消息沿 parentId 回溯，重建含 tool 调用/结果的历史。
+     * Recovery：以锚点消息为起点沿 parentId 回溯（含锚点自身），重建含 tool 调用/结果的历史。
      * redis镜像数据源查询消息/tool调用记录并组装返回
      * 任意 Redis 异常 → DB Recovery，正确性不受影响
      *
-     * <p>激活路径经 summary 截断后已是"summary + 后续节点全部内容"的最简形态，
-     * token 紧张交由上游 rewrite/snip/summary 消费者处理，Recovery 层不再做 token 截断。
+     * <p>锚点 = request.parentMessageId（上一条已落盘消息，通常是上轮 assistant 回答）
      *
-     * @param currentUserMsgId 当前用户消息 id
-     * @return Recovery 结果；当前消息不存在或无历史返回空结果
+     * <p>激活路径经 summary 截断后已是"summary + 后续节点全部内容"的最简形态
+     * @param anchorMessageId 锚点消息 id（上一条已落盘消息）；null 表示无历史（首次对话）
+     * @param sessionId       会话 id（anchorMessageId 为 null 时用，用于空结果上下文）
+     * @return Recovery 结果；锚点不存在或无历史返回空结果
      *
      * //TODO：此处包含取出redis全部“消息+steps”的步骤，应该而言满足“前端全量复原+builder上下文构建”两条消费链路而不是分开取两次。需要考虑结合二者（构建一个内容保留和共享？）
      */
-    public RecoveredHistory recoverHistory(Integer currentUserMsgId) {
-        // 取出当前消息作为回溯起点（提供 sessionId / parentId / nearestSummaryMessageId）
-        org.linxing.linxing_agent.agent.entity.ChatMessage currentMsg = chatMessageMapper.selectById(currentUserMsgId);
-        if (currentMsg == null) {
+    public RecoveredHistory recoverHistory(Integer anchorMessageId, Integer sessionId) {
+        // 锚点为 null（首次对话）→ 无历史可回溯
+        if (anchorMessageId == null) {
             return RecoveredHistory.builder()
-                    .messages(List.of()).pathEntities(List.of())
+                    .messages(List.of())
+                    .summaryEntity(null).pathEndMessageId(null)
+                    .turnBoundaries(List.of()).build();
+        }
+        // 取出锚点消息作为回溯起点（含自身；提供 sessionId / parentId / nearestSummaryMessageId）
+        org.linxing.linxing_agent.agent.entity.ChatMessage anchorMsg = chatMessageMapper.selectById(anchorMessageId);
+        if (anchorMsg == null) {
+            return RecoveredHistory.builder()
+                    .messages(List.of())
                     .summaryEntity(null).pathEndMessageId(null)
                     .turnBoundaries(List.of()).build();
         }
@@ -70,36 +78,35 @@ public class HistoryRecoveryService {
         // reids-mirror-first：两 Hash 皆命中则内存回溯
         try {
             List<org.linxing.linxing_agent.agent.entity.ChatMessage> allMsgs =
-                    runtimeMirrorService.loadMessages(currentMsg.getSessionId());//从redis取出该session的全量消息
-            List<AgentStep> allSteps = runtimeMirrorService.loadSteps(currentMsg.getSessionId());//从redis取出该session的全量消息
+                    runtimeMirrorService.loadMessages(anchorMsg.getSessionId());//从redis取出该session的全量消息
+            List<AgentStep> allSteps = runtimeMirrorService.loadSteps(anchorMsg.getSessionId());//从redis取出该session的全量消息
             if (allMsgs != null && allSteps != null) {
                 log.debug("[Recovery] using mirror: sessionId={}, msgCount={}, stepCount={}",
-                        currentMsg.getSessionId(), allMsgs.size(), allSteps.size());
-                return recoverFromMirror(currentMsg, allMsgs, allSteps);//构建激活路径的历史消息内容
+                        anchorMsg.getSessionId(), allMsgs.size(), allSteps.size());
+                return recoverFromMirror(anchorMsg, allMsgs, allSteps);//构建激活路径的历史消息内容
             }
         } catch (Exception e) {
             log.warn("[Recovery] mirror 读失败, 退化到 DB: sessionId={}, error={}",
-                    currentMsg.getSessionId(), e.getMessage());
+                    anchorMsg.getSessionId(), e.getMessage());
         }
 
         // redis镜像失效，DB 兜底，同时cache-aside 热身 Mirror
-        RecoveredHistory dbResult = recoverFromDb(currentMsg);
-        if (dbResult.getPathEndMessageId() != null && !dbResult.getPathEntities().isEmpty()) {
+        RecoveredHistory dbResult = recoverFromDb(anchorMsg);
+        if (dbResult.getPathEndMessageId() != null) {
             try {
-                List<AgentStep> sessionSteps = agentStepMapper.selectBySessionId(currentMsg.getSessionId());
-                // mirror 语义不对称说明：mirror:msgs 仅写激活路径（pathEntities），mirror:steps 写全 session。
-                // 消费侧 recoverFromMirror 中 stepsByMsgId 虽含旁支 steps，但 effective 只遍历激活路径消息，
-                // 旁支 steps 因不在遍历范围不会被回放——故不对称是安全的。
-                // 副作用：若下次 userMsg 从旁支回溯，byId 不含旁支祖先会触发 mirror miss → 再次 DB 兜底（已有设计）。
-                //TODO：后续考虑是否在 mirror:msgs 中也写全 session，避免旁支回溯 miss
-                runtimeMirrorService.replaceAll(currentMsg.getSessionId(),
-                        dbResult.getPathEntities(), sessionSteps);
-                log.debug("[Recovery] mirror cache-aside 热身: sessionId={}, msgCount={}, stepCount={}",
-                        currentMsg.getSessionId(), dbResult.getPathEntities().size(),
+                List<AgentStep> sessionSteps = agentStepMapper.selectBySessionId(anchorMsg.getSessionId());
+                // mirror 语义对称说明：mirror:msgs 与 mirror:steps 均写全 session。
+                List<org.linxing.linxing_agent.agent.entity.ChatMessage> sessionMsgs =
+                        chatMessageMapper.selectBySessionId(anchorMsg.getSessionId());
+                runtimeMirrorService.replaceAll(anchorMsg.getSessionId(),
+                        sessionMsgs, sessionSteps);
+                log.debug("[Recovery] mirror cache-aside 热身(全session): sessionId={}, msgCount={}, stepCount={}",
+                        anchorMsg.getSessionId(),
+                        sessionMsgs != null ? sessionMsgs.size() : 0,
                         sessionSteps != null ? sessionSteps.size() : 0);
             } catch (Exception e) {
                 log.warn("[Recovery] mirror 热身失败（无碍，下次读再退化）: sessionId={}, error={}",
-                        currentMsg.getSessionId(), e.getMessage());
+                        anchorMsg.getSessionId(), e.getMessage());
             }
         }
         return dbResult;
@@ -107,10 +114,13 @@ public class HistoryRecoveryService {
 
     /**
      * DB 路径 Recovery
-     * 沿 parentId 回溯路径链 → SummaryService 点查 nearest_summary 截断 →逐条重建 langchain4j 消息（assistant 带 tool 时按 step_data.tool_call_id 配对回放）。
+     * 沿 parentId 回溯路径链（含锚点自身）→ SummaryService 点查 nearest_summary 截断 →逐条重建 langchain4j 消息（assistant 带 tool 时按 step_data.tool_call_id 配对回放）。
+     *
+     * <p>锚点（currentMsg）自身纳入 chain 末端，因其是上一条已落盘消息（通常是上轮 assistant
+     * 回答），必须出现在历史中。pathEndMessageId = chain 末端 = 锚点自身 = summary 的挂载点。
      */
     private RecoveredHistory recoverFromDb(org.linxing.linxing_agent.agent.entity.ChatMessage currentMsg) {
-        // 1. 沿 parentId 回溯路径实体链（从旧到新）
+        // 沿 parentId 回溯路径实体链（从旧到新），锚点自身作为最新端纳入
         List<org.linxing.linxing_agent.agent.entity.ChatMessage> chain = new ArrayList<>();
         Integer parentId = currentMsg.getParentId();
         while (parentId != null) {
@@ -122,15 +132,10 @@ public class HistoryRecoveryService {
             parentId = parentMsg.getParentId();
         }
         Collections.reverse(chain);
-        if (chain.isEmpty()) {
-            return RecoveredHistory.builder()
-                    .messages(List.of()).pathEntities(List.of())
-                    .summaryEntity(null).pathEndMessageId(null)
-                    .turnBoundaries(List.of()).build();
-        }
+        chain.add(currentMsg);//锚点自身入链（最新端）
         Integer pathEndMessageId = chain.get(chain.size() - 1).getId();
 
-        // 2. 经 SummaryService 统一入口点查 nearest_summary：命中则截断到 summary 之后（被压缩旧消息丢弃）
+        // 经 SummaryService 统一入口点查 nearest_summary：命中则截断到 summary 之后（被压缩旧消息丢弃）
         org.linxing.linxing_agent.agent.entity.ChatMessage summaryEntity = summaryService.findNearestSummary(currentMsg.getId());
         Integer summaryId = summaryEntity != null ? summaryEntity.getId() : null;
         List<org.linxing.linxing_agent.agent.entity.ChatMessage> effective;
@@ -148,7 +153,7 @@ public class HistoryRecoveryService {
             effective = new ArrayList<>(chain);
         }
 
-        // 3. 逐条重建 langchain4j 消息（assistant 带 tool 时展开为 AiMessage + ToolExecutionResultMessage 序列）
+        // 逐条重建 langchain4j 消息（assistant 带 tool 时展开为 AiMessage + ToolExecutionResultMessage 序列）
         //    同步产出 TurnBoundary：每遇到 user/summary 起始消息开一个新 Turn，区间左闭右开。
         List<ChatMessage> messages = new ArrayList<>();
         List<TurnBoundary> turnBoundaries = new ArrayList<>();
@@ -182,7 +187,6 @@ public class HistoryRecoveryService {
 
         return RecoveredHistory.builder()
                 .messages(messages)
-                .pathEntities(chain)
                 .summaryEntity(summaryEntity)
                 .pathEndMessageId(pathEndMessageId)
                 .turnBoundaries(turnBoundaries)
@@ -194,8 +198,8 @@ public class HistoryRecoveryService {
      *
      * 接受全量的redis内容，内部选择最终交由上游消费的链路、同时结合chat_messages以及agent_steps两表的映射消息并组装为langchain4j的格式
      *
-     * <p>mirror:msgs 仅含激活路径消息（DB 兜底写入时只放 pathEntities）；若激活链上某祖先
-     * 缺失于 byId，回溯截断 → 退化到 DB 兜底（parentId 链已由 DB 回溯覆盖，截断仅影响 mirror 路径）。
+     * <p>mirror:msgs 含全 session 消息（cache-aside 热身时 replaceAll 写全 session）；
+     * 沿 parentId 链回溯激活路径，若某祖先缺失于 byId，回溯截断 → 退化到 DB 兜底。
      *
      * @param currentMsg
      * @param allMsgs
@@ -213,7 +217,7 @@ public class HistoryRecoveryService {
             }
         }
 
-        //沿 parentId 从当前消息向上回溯激活路径链，旁支消息不会命中 byId 故被自然排除
+        //沿 parentId 从锚点向上回溯激活路径链（含锚点自身），旁支消息不会命中 byId 故被自然排除
         List<org.linxing.linxing_agent.agent.entity.ChatMessage> chain = new ArrayList<>();
         Integer parentId = currentMsg.getParentId();
         while (parentId != null) {
@@ -225,12 +229,7 @@ public class HistoryRecoveryService {
             parentId = parentMsg.getParentId();
         }
         Collections.reverse(chain);
-        if (chain.isEmpty()) {
-            return RecoveredHistory.builder()
-                    .messages(List.of()).pathEntities(List.of())
-                    .summaryEntity(null).pathEndMessageId(null)
-                    .turnBoundaries(List.of()).build();
-        }
+        chain.add(currentMsg);//锚点自身入链（最新端；实体由调用方传入，不依赖 byId 命中）
         Integer pathEndMessageId = chain.get(chain.size() - 1).getId();
 
         //summary 截断——直接读 currentMsg.nearestSummaryMessageId 拿最近 summary 点，在 chain 中定位
@@ -292,11 +291,10 @@ public class HistoryRecoveryService {
                     .build());
         }
 
-        //messages=扁平lc4j序列(直接喂LLM)；pathEntities=激活路径原始实体链(回溯后未截断的chain，供上游元数据判断)；
+        //messages=扁平lc4j序列(直接喂LLM)；
         //summaryEntity=命中的summary节点；pathEndMessageId=链头(最旧端)msgId；turnBoundaries=轮次刻度供Projection按轮决策
         return RecoveredHistory.builder()
                 .messages(messages)
-                .pathEntities(chain)
                 .summaryEntity(summaryEntity)
                 .pathEndMessageId(pathEndMessageId)
                 .turnBoundaries(turnBoundaries)

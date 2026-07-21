@@ -1,10 +1,10 @@
-package org.linxing.linxing_agent.agent.memory.builder;
+package org.linxing.linxing_agent.agent.memory.window.builder;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import org.linxing.linxing_agent.agent.core.AgentContext;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 
 import java.util.List;
 import java.util.Set;

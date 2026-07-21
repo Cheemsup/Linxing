@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.recovery;
+package org.linxing.linxing_agent.agent.memory.window.recovery;
 
 import lombok.Builder;
 import lombok.Value;

@@ -9,11 +9,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.linxing.linxing_agent.agent.memory.TokenEstimator;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
-import org.linxing.linxing_agent.agent.memory.recovery.TurnBoundary;
-import org.linxing.linxing_agent.agent.memory.ruleset.RewriteToolRule;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSet;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
+import org.linxing.linxing_agent.agent.memory.window.builder.DefaultContextBuilder;
+import org.linxing.linxing_agent.agent.memory.window.projection.rewrite.RewriteRuleAnalyzer;
+import org.linxing.linxing_agent.agent.memory.window.projection.rewrite.RewriteRuleWhitelist;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.TurnBoundary;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RewriteToolRule;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSet;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 
 import java.util.List;
 import java.util.Set;
@@ -148,7 +151,7 @@ class RewriteRuleTest {
     }
 
     /**
-     * 复刻 {@link org.linxing.linxing_agent.agent.memory.builder.DefaultContextBuilder#projectToolResult}
+     * 复刻 {@link DefaultContextBuilder#projectToolResult}
      * 的核心契约。原方法 private，此处用同样逻辑验证 RuleSet 命中→占位符重建链路；
      * 真实 Builder 的整链路（buildMessages）在 {@code SnipRuleTest}（@SpringBootTest）端到端验证。
      */

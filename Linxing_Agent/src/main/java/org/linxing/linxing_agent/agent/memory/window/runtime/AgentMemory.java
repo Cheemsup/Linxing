@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory;
+package org.linxing.linxing_agent.agent.memory.window.runtime;
 
 import dev.langchain4j.data.message.ChatMessage;
 

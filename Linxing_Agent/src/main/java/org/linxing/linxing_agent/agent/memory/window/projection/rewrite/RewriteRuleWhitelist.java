@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip;
+package org.linxing.linxing_agent.agent.memory.window.projection.rewrite;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;

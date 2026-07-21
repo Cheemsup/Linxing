@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.projection;
+package org.linxing.linxing_agent.agent.memory.window.projection;
 
 /**
  * 上下文 Projection 策略枚举（

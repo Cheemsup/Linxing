@@ -1,10 +1,10 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip;
+package org.linxing.linxing_agent.agent.memory.window.projection.snip;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import lombok.Getter;
-import org.linxing.linxing_agent.agent.memory.projection.snip.rules.ReadCurrentRulesTool;
-import org.linxing.linxing_agent.agent.memory.projection.snip.rules.UpdateSkipTurnRuleTool;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.rules.ReadCurrentRulesTool;
+import org.linxing.linxing_agent.agent.memory.window.projection.snip.rules.UpdateSkipTurnRuleTool;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 import tools.jackson.databind.ObjectMapper;
 
 /**

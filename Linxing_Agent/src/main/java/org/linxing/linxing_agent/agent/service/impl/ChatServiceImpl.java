@@ -11,19 +11,20 @@ import org.linxing.linxing_agent.agent.core.AgentResult;
 import org.linxing.linxing_agent.agent.core.AgentStepListener;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.entity.ChatMessage;
-import org.linxing.linxing_agent.agent.memory.AgentMemory;
-import org.linxing.linxing_agent.agent.memory.AgentMemoryFactory;
-import org.linxing.linxing_agent.agent.memory.SummaryService;
+import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemory;
+import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemoryFactory;
+import org.linxing.linxing_agent.agent.memory.window.SummaryService;
 import org.linxing.linxing_agent.agent.memory.TokenEstimator;
-import org.linxing.linxing_agent.agent.memory.projection.ProjectionPolicy;
-import org.linxing.linxing_agent.agent.memory.projection.ProjectionThresholds;
-import org.linxing.linxing_agent.agent.memory.projection.snip.SnipLoopExecutor;
-import org.linxing.linxing_agent.agent.memory.recovery.HistoryRecoveryService;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionPolicy;
+import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionThresholds;
+import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionLoopExecutor;
+import org.linxing.linxing_agent.agent.memory.window.recovery.HistoryRecoveryService;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.utils.SourceExtractor;
 import org.linxing.linxing_agent.rag.constant.OperationType;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
 import org.linxing.linxing_agent.common.constant.LlmType;
+import org.linxing.linxing_agent.common.constant.MessageType;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
@@ -58,7 +59,7 @@ public class ChatServiceImpl implements IChatService {
     private final ProjectionThresholds projectionThresholds;
     private final TokenEstimator tokenEstimator;
     private final HistoryRecoveryService historyRecoveryService;
-    private final SnipLoopExecutor snipLoopExecutor;
+    private final ProjectionLoopExecutor projectionLoopExecutor;
 
     /**
      * 核心对话入口：解析会话→保存用户消息→溯源历史→Agent循环→记录日志
@@ -80,61 +81,49 @@ public class ChatServiceImpl implements IChatService {
             //TODO：考虑将StepRecorder改为单例模式使用
             StepRecorder recorder = new StepRecorder(listener, agentStepMapper, sessionId, runtimeMirrorService);
 
-            ChatMessage userMsg = chatMessageService.saveUserMessage(
-                    userId, sessionId, request.getParentMessageId(), originalQuery);//持久化用户消息，TODO：后续需要与summary节点做时序调整，不可再先落盘userMessage
-
-            // Recovery：拿回激活路径对应的消息以及step纪录
-            RecoveredHistory recovered = historyRecoveryService.recoverHistory(userMsg.getId());
+            RecoveredHistory recovered = historyRecoveryService.recoverHistory(request.getParentMessageId(), sessionId);
             if (recovered.getMessages().isEmpty() && request.getParentMessageId() != null) {
                 // 溯源失败兜底：加载最近消息（旧路径，不含 tool 回放，仅回放文本）
                 List<ChatMessage> fallback = historyRecoveryService.loadRecentMessages(sessionId);
                 List<dev.langchain4j.data.message.ChatMessage> fallbackMsgs = new ArrayList<>();
                 for (ChatMessage m : fallback) {
-                    if ("user".equals(m.getType())) {
+                    if (MessageType.USER.equals(m.getType())) {
                         fallbackMsgs.add(UserMessage.from(m.getContent()));
-                    } else if ("assistant".equals(m.getType())) {
+                    } else if (MessageType.ASSISTANT.equals(m.getType())) {
                         fallbackMsgs.add(AiMessage.from(m.getContent()));
                     }
                 }
                 recovered = RecoveredHistory.builder()
                         .messages(fallbackMsgs)
-                        .pathEntities(fallback)
                         .summaryEntity(null)
                         .pathEndMessageId(null)
                         .turnBoundaries(List.of())// fallback 无 Turn 结构，Builder 退化为零投影
                         .build();
             }
 
-            // 回答前主动 summary 判定历史超 SUMMARY 阈值时压缩"上一个 Summary 挂点（或 Root）→路径末端"的历史，挂到路径末端，用户消息改挂 summary 节点。
+            // 回答前主动 summary 判定：历史超 SUMMARY 阈值时压缩"上一个 Summary 挂点（或 Root）→路径末端"的历史，挂到路径末端。
             RecoveredHistory recoveredForLoop = recovered;
             long historyTokens = tokenEstimator.estimate(recovered.getMessages());
+            Integer userMsgParentId = request.getParentMessageId();// userMsg 的 parent，默认指向上一条消息；判定 SUMMARY 后改指 summary
             if (recovered.getPathEndMessageId() != null
                     && !recovered.getMessages().isEmpty()) {
                 if (projectionThresholds.policyFor(historyTokens) == ProjectionPolicy.SUMMARY) {
                     // 压缩范围："上一个 Summary 挂点（或 Root）→路径末端"的历史
                     // 不变式：recovered.summaryEntity != null 时 messages[0] 为旧 summary 摘要
                     List<dev.langchain4j.data.message.ChatMessage> toSummarize = recovered.getMessages();
+                    // summarizeAndPersist 落 summary（parentId=pathEndMessageId），不再需要 successorIds 刷新
                     ChatMessage summaryMsg = summaryService.summarizeAndPersist(
                             userId, sessionId, recovered.getPathEndMessageId(),
-                            toSummarize, List.of(userMsg.getId()));
+                            toSummarize);
                     if (summaryMsg != null) {
-                        // 用户消息改挂 summary 节点；刷新其 nearest_summary_message_id 已由 summarizeAndPersist 完成
-                        //TODO：假如后续改造后（0719还未改造），summary先于用户的最新提问消息落盘，这一步应该就不需要了
-                        chatMessageMapper.updateParentId(userMsg.getId(), summaryMsg.getId());
-                        // DB 已改 parentId，重查以同步内存对象，避免后续 toMessageVO 落 Redis 时 parentId 过时
-                        ChatMessage refreshed = chatMessageMapper.selectById(userMsg.getId());
-                        if (refreshed != null) {
-                            userMsg = refreshed;
-                            // redis-Mirror：updateParentId 只动 DB，mirror:msgs 的 userMsg 字段 parentId 已过时，重写补丁
-                            runtimeMirrorService.appendMessage(sessionId, refreshed);
-                        }
+                        // userMsg 待落盘时 parent 指向新 summary；resolveNearestSummary(summaryId) 会识别 parent 为 summary
+                        // 并预填 nearestSummaryMessageId=summaryId，一次写对，无需事后刷新/改挂
+                        userMsgParentId = summaryMsg.getId();
                         // memory 历史替换为仅 summary 摘要（被压缩旧历史丢弃），当前用户消息由 runAgentLoop 末尾追加；
-                        // 原 Turn 结构已失效（被压缩），turnBoundaries 置空 → Builder 退化为零投影
                         List<dev.langchain4j.data.message.ChatMessage> messagesForMemory = new ArrayList<>();
                         messagesForMemory.add(UserMessage.from("【历史内容经过压缩精简，如下是摘要】\n" + summaryMsg.getContent()));
                         recoveredForLoop = RecoveredHistory.builder()
                                 .messages(messagesForMemory)
-                                .pathEntities(recovered.getPathEntities())
                                 .summaryEntity(summaryMsg)
                                 .pathEndMessageId(recovered.getPathEndMessageId())
                                 .turnBoundaries(List.of())
@@ -143,16 +132,20 @@ public class ChatServiceImpl implements IChatService {
                 }
             }
 
+            // userMsg 在 summary 落盘后持久化：parentId 指向 summary
+            ChatMessage userMsg = chatMessageService.saveUserMessage(
+                    userId, sessionId, userMsgParentId, originalQuery);
+
             // Projection rule 异步产出。历史进入 REWRITE_TOOL/SNIP_LOWVALUE 区间时异步启动小循环产出 RewriteToolRule（纯规则）+ SkipTurnRule（LLM），攒进同一 batch 原子应用。
             // 主流程不等待、用上一版 RuleSet 继续（允许落后一轮）
             // per-session CAS 避免同时启动多个异步rewrite/snip带来混乱；snip循环不落库、不推 SSE；异常丢弃 batch 不影响主流程。
             ProjectionPolicy policy = projectionThresholds.policyFor(historyTokens);
             log.info("[Projection] sessionId={}, historyTokens={}, maxContext={}, policy={}, snipEnabled={}",
                     sessionId, historyTokens, projectionThresholds.getMaxContextTokens(), policy,
-                    snipLoopExecutor.shouldTrigger(policy));
-            if (snipLoopExecutor.shouldTrigger(policy) && snipLoopExecutor.tryStart(sessionId)) {
+                    projectionLoopExecutor.shouldTrigger(policy));
+            if (projectionLoopExecutor.shouldTrigger(policy) && projectionLoopExecutor.tryStart(sessionId)) {
                 log.info("[SnipLoop] sessionId={} triggered, policy={}", sessionId, policy);
-                snipLoopExecutor.executeAsync(sessionId, recovered, originalQuery);//执行snip循环，将rule注入batch
+                projectionLoopExecutor.executeAsync(sessionId, recovered, originalQuery, policy);//执行snip循环，将rule注入batch
             }
 
             ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, recoveredForLoop,

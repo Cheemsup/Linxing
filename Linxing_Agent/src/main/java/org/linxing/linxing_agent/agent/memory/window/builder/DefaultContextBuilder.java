@@ -1,4 +1,4 @@
-package org.linxing.linxing_agent.agent.memory.builder;
+package org.linxing.linxing_agent.agent.memory.window.builder;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
@@ -11,11 +11,11 @@ import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.core.AgentPrompts;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
-import org.linxing.linxing_agent.agent.memory.recovery.TurnBoundary;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSet;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
-import org.linxing.linxing_agent.agent.memory.ruleset.RewriteToolRule;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.recovery.TurnBoundary;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSet;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RewriteToolRule;
 import org.linxing.linxing_agent.agent.skill.SkillRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolRegistry;
 import org.springframework.beans.factory.annotation.Value;

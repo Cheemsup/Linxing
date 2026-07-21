@@ -1,13 +1,12 @@
-package org.linxing.linxing_agent.agent.memory.projection.snip;
+package org.linxing.linxing_agent.agent.memory.window.projection.rewrite;
 
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.TokenEstimator;
-import org.linxing.linxing_agent.agent.memory.recovery.RecoveredHistory;
-import org.linxing.linxing_agent.agent.memory.ruleset.RuleSetStore;
-import org.springframework.beans.factory.annotation.Value;
+import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
 import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
@@ -22,11 +21,10 @@ public class RewriteRuleAnalyzer {
     private final TokenEstimator tokenEstimator;
     private final RewriteRuleWhitelist rewriteRuleWhitelist;
 
-    @Value("${agent.projection.snip.rewrite.result-token-threshold:2000}")
-    private long resultTokenThreshold;
-
     /**
-     * 按白名单+阈值产出 RewriteToolRule 到 batch
+     * 按白名单产出 RewriteToolRule 到 batch
+     * <p>0721 起取消 token 阈值：决定 rewrite（命中白名单）则必定精简，不再设体积门槛。
+     * 保留 tokenEstimator 仅用于 reason 审计文本，便于观察精简量。
      * @param recovered
      * @param batch
      */
@@ -51,18 +49,16 @@ public class RewriteRuleAnalyzer {
             if (seen.contains(toolCallId)) {
                 continue;//本批已产，去重
             }
+            //0721：取消 resultTokenThreshold 阈值——白名单命中即精简
             long tokens = tokenEstimator.estimate(msg);
-            if (tokens < resultTokenThreshold) {
-                continue;//未超阈值不精简
-            }
             batch.addRewriteToolRule(toolCallId,
-                    "自动精简：tool=" + toolName + " 结果 token=" + tokens + " 超阈值 " + resultTokenThreshold,
+                    "自动精简：tool=" + toolName + " 结果 token=" + tokens,
                     List.of());
             seen.add(toolCallId);
             produced++;
         }
         if (produced > 0) {
-            log.info("[RewriteRuleAnalyzer] 产出 {} 条 RewriteToolRule（阈值={}）", produced, resultTokenThreshold);
+            log.info("[RewriteRuleAnalyzer] 产出 {} 条 RewriteToolRule（无阈值，白名单命中即精简）", produced);
         }
     }
 }

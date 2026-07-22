@@ -23,7 +23,6 @@ public class RewriteRuleAnalyzer {
 
     /**
      * 按白名单产出 RewriteToolRule 到 batch
-     * <p>0721 起取消 token 阈值：决定 rewrite（命中白名单）则必定精简，不再设体积门槛。
      * 保留 tokenEstimator 仅用于 reason 审计文本，便于观察精简量。
      * @param recovered
      * @param batch
@@ -49,7 +48,6 @@ public class RewriteRuleAnalyzer {
             if (seen.contains(toolCallId)) {
                 continue;//本批已产，去重
             }
-            //0721：取消 resultTokenThreshold 阈值——白名单命中即精简
             long tokens = tokenEstimator.estimate(msg);
             batch.addRewriteToolRule(toolCallId,
                     "自动精简：tool=" + toolName + " 结果 token=" + tokens,

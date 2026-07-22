@@ -45,6 +45,10 @@ public class ToolRegistry implements ApplicationListener<ContextRefreshedEvent>,
                 log.info("[ToolRegistry] 跳过已废弃工具: {}", beanClass.getSimpleName());
                 return;
             }
+            if (!tool.shouldRegisterToMainAgent()) {
+                log.info("[ToolRegistry] 跳过非主 Agent 工具（仅内部使用）: {}", beanClass.getSimpleName());
+                return;
+            }
             ToolSpec existing = tools.get(tool.name());
             if (existing != null) {
                 throw new IllegalStateException(

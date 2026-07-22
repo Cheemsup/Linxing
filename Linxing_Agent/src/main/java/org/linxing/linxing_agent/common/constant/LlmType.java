@@ -35,6 +35,9 @@ public final class LlmType {
     // Query 改写（标准化用户自然语言问题以利于检索）
     public static final String QUERY_REWRITE = "deepseek";
 
+    // Memory Worker（长期记忆异步判断/改写，非流式轻量调用）
+    public static final String MEMORY_WORKER_MODEL = "deepseek";
+
     private LlmType() {
     }
 }

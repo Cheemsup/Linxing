@@ -122,6 +122,12 @@ agent:
     type: ${AGENT_MEMORY_TYPE:window}
     max-messages: ${AGENT_MEMORY_MAX_MESSAGES:40}
     max-tokens: ${AGENT_MEMORY_MAX_TOKENS:32000}
+    # Long-term Memory Workspace：受限沙盒，按 userId 子目录隔离。与 files_store 同根便于统一备份。
+    longterm:
+      workspace:
+        root-dir: ${AGENT_MEMORY_LONGTERM_ROOT:#{null}}
+      worker:
+        max-steps: ${AGENT_MEMORY_WORKER_MAX_STEPS:6}   # Memory Worker ReAct 小循环最大 LLM 轮次
   token:
     encoding: ${AGENT_TOKEN_ENCODING:cl100k_base}        # jtokkit 编码名：cl100k_base / o200k_base，DeepSeek/GLM/Kimi/Minimax 均走 OpenAI 兼容 BPE，近似可接受
     max-context: ${AGENT_TOKEN_MAX_CONTEXT:200000}       # 模型上下文最高上限，据此反推各级 Projection 阈值

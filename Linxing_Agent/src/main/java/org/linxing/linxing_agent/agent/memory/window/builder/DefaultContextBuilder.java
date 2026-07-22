@@ -11,6 +11,7 @@ import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.core.AgentPrompts;
+import org.linxing.linxing_agent.agent.memory.longterm.injector.LongMemoryInjector;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.memory.window.recovery.TurnBoundary;
 import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSet;
@@ -38,6 +39,7 @@ import java.util.stream.Collectors;
  *
  * <p>关键不变量：SystemMessage 永不进 memory，每轮装配时由本类重新置于首位，
  * 以满足 langchain4j "SystemMessage 幂等首位" 硬约束
+ *
  */
 @Slf4j
 @Component
@@ -58,12 +60,7 @@ public class DefaultContextBuilder implements ContextBuilder {
     private final SkillRegistry skillRegistry;
     private final List<CatalogProvider> catalogProviders;
     private final RuleSetStore ruleSetStore;
-
-    //此方法貌似不必要存在了
-    @Override
-    public SystemMessage buildSystemMessage(boolean progressiveMode) {
-        return SystemMessage.from(buildSystemPrompt(progressiveMode));
-    }
+    private final LongMemoryInjector longMemoryInjector;
 
     /**
      * 历史段读路径（Rule Set 投影版）：消费 {@link RecoveredHistory} 与 {@link RuleSet}，
@@ -83,12 +80,12 @@ public class DefaultContextBuilder implements ContextBuilder {
         // 无 Recovery 或无 Turn 结构 → 退化为零投影版本
         if (recovered == null || recovered.getTurnBoundaries() == null
                 || recovered.getTurnBoundaries().isEmpty()) {
-            return buildMessages(context);
+            return buildMessages(context);//无投影版本
         }
 
         int totalCount = toolRegistry.size() + skillRegistry.size();
         boolean progressiveMode = totalCount > disclosureThreshold;
-        SystemMessage systemMessage = buildSystemMessage(progressiveMode);
+        SystemMessage systemMessage = buildSystemMessage(context, progressiveMode);//先组装system prompt
 
         List<ChatMessage> memoryMessages = context.getMemory().messages();
         int historySize = recovered.getMessages().size();
@@ -116,10 +113,36 @@ public class DefaultContextBuilder implements ContextBuilder {
             }
         }
         // 当前轮追加消息（history 之后），原样保留不投影
+        //注：@ 引用符现阶段仅作为给大模型的提示，不在此处自动读取文件并注入内容——由大模型自行调用工具完成文件读取
         for (int i = historySize; i < memoryMessages.size(); i++) {
             result.add(memoryMessages.get(i));
         }
         return result;
+    }
+
+
+    /**
+     * 历史段读路径（零投影版）：SystemMessage 首位 + memory 全量消息。
+     *
+     */
+    @Override
+    public List<ChatMessage> buildMessages(AgentContext context) {
+        int totalCount = toolRegistry.size() + skillRegistry.size();
+        boolean progressiveMode = totalCount > disclosureThreshold;
+        SystemMessage systemMessage = buildSystemMessage(context, progressiveMode);
+
+        List<ChatMessage> messages = new ArrayList<>(context.getMemory().size() + 1);
+        messages.add(systemMessage);
+        messages.addAll(context.getMemory().messages());
+        return messages;
+    }
+
+    /**
+     * 带 AgentContext 的 SystemMessage 装配：与 {@link #buildMessages} 两个重载共用
+     * TODO：此方法只做了简单的转接，貌似不必要存在了
+     */
+    private SystemMessage buildSystemMessage(AgentContext context, boolean progressiveMode) {
+        return SystemMessage.from(buildSystemPrompt(context, progressiveMode));
     }
 
     /**
@@ -151,42 +174,32 @@ public class DefaultContextBuilder implements ContextBuilder {
     }
 
     /**
-     * 历史段读路径（零投影版）：SystemMessage 首位 + memory 全量消息。
-     *
-     * <p>progressiveMode 在此重算（公式与 AgentExecutor.execute 一致），保证 systemMessage
-     * 与 {@link #buildInitialToolSpecs} 使用的 progressiveMode 同源同步。
+     * 动态构建系统提示词：注入【长期记忆】常驻段 + 【可用能力】目录 + 技能说明（按 progressiveMode）。
+     * <p>Long Memory 段在【可用能力】之前，由 {@link LongMemoryInjector} 产出（Directory 全文 + Agent/User/Current 头部摘要）。
+     * userId 为空（如测试 / 无上下文场景）时跳过 Long Memory 段。
      */
-    @Override
-    public List<ChatMessage> buildMessages(AgentContext context) {
-        int totalCount = toolRegistry.size() + skillRegistry.size();
-        boolean progressiveMode = totalCount > disclosureThreshold;
-        SystemMessage systemMessage = buildSystemMessage(progressiveMode);
-
-        List<ChatMessage> messages = new ArrayList<>(context.getMemory().size() + 1);
-        messages.add(systemMessage);
-        messages.addAll(context.getMemory().messages());
-        return messages;
-    }
-
-    /**
-     * 动态构建系统提示词：聚合所有 CatalogProvider 的能力目录注入【可用能力】段，
-     * 再按 progressiveMode 决定是全量展开技能说明还是仅提示"调 resolve 获取"。
-     */
-    private String buildSystemPrompt(boolean progressiveMode) {
+    private String buildSystemPrompt(AgentContext context, boolean progressiveMode) {
         List<CatalogEntry> allEntries = new ArrayList<>();
         for (CatalogProvider provider : catalogProviders) {
             allEntries.addAll(provider.catalogEntries());
         }
 
-        // 过滤掉元工具（META_TOOLS），这些不作为显式能力向 LLM 披露
+        // 过滤掉元工具（META_TOOLS），这些不作为目录内容向 LLM 披露
         List<CatalogEntry> filtered = allEntries.stream()
                 .filter(e -> !Catalog.META_TOOLS.contains(e.getName()))
                 .collect(Collectors.toList());
 
         StringBuilder dynamicSection = new StringBuilder();
 
+        // 【长期记忆】段：在【可用能力】之前
+        Integer userId = context != null ? context.getUserId() : null;
+        String residentSection = longMemoryInjector.buildResidentSection(userId);//读取注入长期记忆的md文档内容
+        if (!residentSection.isBlank()) {
+            dynamicSection.append(residentSection).append("\n\n");
+        }
+
         if (!filtered.isEmpty()) {
-            Catalog catalog = new Catalog(filtered);
+            Catalog catalog = new Catalog(filtered);//将工具目录内容写到system prompt
             dynamicSection.append("【可用能力】\n").append(catalog.toPromptText()).append("\n\n");
         }
 
@@ -207,7 +220,7 @@ public class DefaultContextBuilder implements ContextBuilder {
         }
 
         String template = progressiveMode ? SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE : SYSTEM_PROMPT_TEMPLATE_FULL;
-        return String.format(template, dynamicSection.toString());
+        return String.format(template, dynamicSection);
     }
 
     @Override

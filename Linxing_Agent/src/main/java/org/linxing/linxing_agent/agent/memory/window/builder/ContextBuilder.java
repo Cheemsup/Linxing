@@ -2,7 +2,6 @@ package org.linxing.linxing_agent.agent.memory.window.builder;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 
@@ -21,12 +20,6 @@ import java.util.Set;
  * </ul>
  */
 public interface ContextBuilder {
-
-    /**
-     * 装配 A 系统段：静态模板 + 动态目录 + 技能说明 → SystemMessage。
-     * @param progressiveMode true=渐进披露模式，false=全量注入模式
-     */
-    SystemMessage buildSystemMessage(boolean progressiveMode);
 
     /**
      * 无投影版本

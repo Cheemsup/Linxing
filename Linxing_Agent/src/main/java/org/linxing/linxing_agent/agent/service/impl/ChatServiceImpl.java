@@ -20,6 +20,7 @@ import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionThresh
 import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionLoopExecutor;
 import org.linxing.linxing_agent.agent.memory.window.recovery.HistoryRecoveryService;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.longterm.worker.MemoryWorkerService;
 import org.linxing.linxing_agent.agent.utils.SourceExtractor;
 import org.linxing.linxing_agent.rag.constant.OperationType;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
@@ -28,7 +29,6 @@ import org.linxing.linxing_agent.common.constant.MessageType;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.agent.dto.ChatRequest;
 import org.linxing.linxing_agent.agent.dto.ChatResponse;
-import org.linxing.linxing_agent.agent.mapper.ChatMessageMapper;
 import org.linxing.linxing_agent.rag.entity.ActivityLog;
 import org.linxing.linxing_agent.rag.mapper.ActivityLogMapper;
 import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
@@ -54,12 +54,12 @@ public class ChatServiceImpl implements IChatService {
     private final AgentExecutor agentExecutor;
     private final AgentMemoryFactory memoryFactory;
     private final AgentStepMapper agentStepMapper;
-    private final ChatMessageMapper chatMessageMapper;
     private final SummaryService summaryService;
     private final ProjectionThresholds projectionThresholds;
     private final TokenEstimator tokenEstimator;
     private final HistoryRecoveryService historyRecoveryService;
     private final ProjectionLoopExecutor projectionLoopExecutor;
+    private final MemoryWorkerService memoryWorkerService;
 
     /**
      * 核心对话入口：解析会话→保存用户消息→溯源历史→Agent循环→记录日志
@@ -209,6 +209,15 @@ public class ChatServiceImpl implements IChatService {
         runtimeMirrorService.appendMessage(sessionId, userMsg);
         runtimeMirrorService.appendMessage(sessionId, assistantMsg);
         patchMirrorStepChatMessageIds(sessionId, assistantMsg.getId());
+
+        // Memory Worker 异步触发：Redis Mirror 写回后、return ChatResponse 前。
+        // 独立 memoryWorkerExecutor 线程，不阻塞主循环
+        try {
+            memoryWorkerService.runAfterConversation(userId, sessionId, originalQuery, result);
+        } catch (Exception e) {
+            log.warn("[MemoryWorker] 触发失败, userId={} sessionId={}: {}",
+                    userId, sessionId, e.getMessage());
+        }
 
         return ChatResponse.builder()
                 .answer(result.getAnswer())

@@ -60,6 +60,14 @@ public interface Tool {
     ToolCallResult execute(ToolCallRequest request, AgentContext context);
 
     /**
+     * 是否注册为主 Agent 可见可调的工具（进 ToolRegistry 自动发现 + 能力目录）。
+     * <p>元工具（如仅向 Memory Worker 暴露的 WriteMemoryTool）继承重写为false
+     */
+    default boolean shouldRegisterToMainAgent() {
+        return true;
+    }
+
+    /**
      * @deprecated 使用 {@link #execute(ToolCallRequest, AgentContext)} 代替
      */
     @Deprecated

@@ -18,17 +18,6 @@ import java.util.List;
 
 /**
  * Summary 独立持久化服务（thePlan P1-2：回答前主动判定 + 挂载式落盘）。
- * <p>
- * 取代旧体系"纯内存、不落库、被动在工具轮次后触发"的摘要方式（旧 {@code SummaryMemory}
- * 已于 2-B 删除）。本服务把 summary 作为 {@code type='summary'} 的普通 chat_messages 行落库，
- * 挂在路径末端作为新叶子，用户消息作为其子节点。Recovery 沿 parent_id 天然命中。
- * <p>
- * 落盘流程（thePlan P1-2 第 1~3 步，第 4 步用户消息挂载由调用方处理）：
- * <ol>
- *   <li>调用 {@code summaryModel}（非流式）压缩"上一个 summary 挂点（或 Root）到当前路径末端"的历史</li>
- *   <li>插入 {@code type='summary'} 行，{@code parent_id = 当前路径末端 message_id}</li>
- *   <li>刷新路径后续新消息的 {@code nearest_summary_message_id} 指向新 summary（被压缩旧消息不动）</li>
- * </ol>
  * 注意：本类中的 {@code ChatMessage} 指 langchain4j 消息，实体用全限定名 {@code org.linxing.linxing_agent.agent.entity.ChatMessage}。
  */
 @Slf4j

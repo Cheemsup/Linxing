@@ -10,19 +10,13 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.window.builder.ContextBuilder;
-import org.linxing.linxing_agent.agent.skill.SkillMetadata;
-import org.linxing.linxing_agent.agent.skill.SkillRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.linxing.linxing_agent.agent.tool.ToolRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolSpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,12 +30,6 @@ public class AgentExecutor {
      * 大模型最大调用轮次，注意并不等同于step
      */
     private static final int MAX_STEPS = 20;
-
-    /**
-     * 渐进式披露阈值：tool + skill 注册总数超过此值时启用渐进披露模式，低于等于阈值时采用全量注入模式
-     */
-    @Value("${agent.disclosure.threshold:5}")
-    private int disclosureThreshold;
 
     /**
      * 普通工具执行超时秒数，默认3分钟
@@ -62,18 +50,13 @@ public class AgentExecutor {
     private static final Set<String> WORKFLOW_TOOL_NAMES = Set.of("start_study_plan_workflow");
 
     private final ToolRegistry toolRegistry;
-    private final SkillRegistry skillRegistry;
-    private final ObjectMapper objectMapper;
     private final ToolExecutionTimeout toolExecutionTimeout;
     private final ContextBuilder contextBuilder;
 
-    public AgentExecutor(ToolRegistry toolRegistry, SkillRegistry skillRegistry,
-                         ObjectMapper objectMapper,
+    public AgentExecutor(ToolRegistry toolRegistry,
                          ToolExecutionTimeout toolExecutionTimeout,
                          ContextBuilder contextBuilder) {
         this.toolRegistry = toolRegistry;
-        this.skillRegistry = skillRegistry;
-        this.objectMapper = objectMapper;
         this.toolExecutionTimeout = toolExecutionTimeout;
         this.contextBuilder = contextBuilder;
     }
@@ -88,18 +71,14 @@ public class AgentExecutor {
     public AgentResult execute(AgentContext context, OpenAiStreamingChatModel chatModel, AgentStepListener listener) {
         // 从 context 取统一步骤记录器：主循环与工作流共享同一实例，step_order 单调递增
         StepRecorder recorder = context.getStepRecorder();
+        int sessionId = context.getSessionId();
 
-        //根据工具+技能总数决定是否启用渐进披露模式
-        int totalCount = toolRegistry.size() + skillRegistry.size();
-        boolean progressiveMode = totalCount > disclosureThreshold;
-
-        //contextBuilder内部构建工具JSON
-        List<ToolSpecification> initialSpecs = contextBuilder.buildInitialToolSpecs(progressiveMode);
-        Set<String> activatedToolNames = new HashSet<>();//渐进模式下已动态激活的工具名集合
-
+        //progressiveMode 判定、工具规格拼装与动态激活维护已全部内化到 contextBuilder
         int stepNumber = 0;
 
         //主循环：LLM推理 → 工具调用 → 结果注入 → 下一轮
+        //注（0723 改造）：不再在 finally 调 clearSession——激活集跨同 session 多次 chat 复用，
+        //循环结束清掉会破坏跨 chat 复用；改由 Builder 的 Caffeine TTL 兜底回收
         while (stepNumber < MAX_STEPS) {
             stepNumber++;
 
@@ -111,9 +90,9 @@ public class AgentExecutor {
                     .phase(AgentStepTypes.PHASE_THINKING)
                     .build());
 
-            List<ToolSpecification> roundSpecs = contextBuilder.buildRoundToolSpecs(initialSpecs, activatedToolNames, progressiveMode);//渐进模式下追加已激活的工具规格
+            List<ToolSpecification> roundSpecs = contextBuilder.buildRoundToolSpecs(sessionId);//渐进模式下追加已激活的工具规格
 
-            List<ChatMessage> currentMessages = contextBuilder.buildMessages(context, context.getRecovered());//SystemMessage 幂等首位 + Rule Set 投影（SkipTurn/RewriteTool）+ memory 累加消息
+            List<ChatMessage> currentMessages = context.getMemory().messages();//装配已在对话开始一次性完成（Builder→AgentContext.memory），循环内只读不再回调 Builder
             ChatRequest chatRequest = ChatRequest.builder()
                     .messages(currentMessages)
                     .toolSpecifications(roundSpecs)
@@ -204,24 +183,8 @@ public class AgentExecutor {
                                 toolSpec, toolCallRequest, context, timeout);//将tool传入带计时的执行类中执行
                     }
 
-                    //渐进披露模式：resolve成功后提取被解析的工具名并动态激活
-                    if (progressiveMode && "resolve".equals(toolReq.name()) && toolResult.isSuccess()) {
-                        List<String> resolvedNames = parseResolvedNames(toolReq.arguments());
-                        for (String name : resolvedNames) {
-                            if (toolRegistry.getTool(name) != null) {
-                                activatedToolNames.add(name);
-                            }
-                            //技能被解析时，将其关联的工具也动态激活
-                            SkillMetadata skillMeta = skillRegistry.getMetadata(name);
-                            if (skillMeta != null && skillMeta.getToolNames() != null) {
-                                for (String toolName : skillMeta.getToolNames()) {
-                                    if (toolRegistry.getTool(toolName) != null) {
-                                        activatedToolNames.add(toolName);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    //回调通知 builder：渐进披露模式下 resolve 成功会触发工具/技能动态激活（策略内化于 builder）
+                    contextBuilder.onToolExecuted(sessionId, toolReq.name(), toolResult, toolReq.arguments());
 
                     //构建工具执行结果文本
                     String resultText = toolResult.isSuccess()
@@ -293,25 +256,6 @@ public class AgentExecutor {
                 .totalSteps(stepNumber)
                 .exceededMaxSteps(true)
                 .build();
-    }
-
-    /**
-     * 从 resolve 工具的 arguments JSON 中提取被解析的名称列表。
-     * 用于渐进披露模式下解析 LLM 通过 resolve 请求了哪些工具/技能。
-     */
-    private List<String> parseResolvedNames(String arguments) {
-        try {
-            JsonNode node = objectMapper.readTree(arguments);
-            JsonNode namesNode = node.get("names");
-            if (namesNode != null && namesNode.isArray()) {
-                List<String> names = new ArrayList<>();
-                namesNode.forEach(n -> names.add(n.asText()));
-                return names;
-            }
-        } catch (Exception e) {
-            log.warn("[AgentExecutor] 解析 resolve 参数失败: {}", arguments);
-        }
-        return List.of();
     }
 
     private String truncate(String text, int maxLen) {

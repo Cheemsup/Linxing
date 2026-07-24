@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Snip/Rewrite 异步小循环编排入口
  *
- * <p>编排两阶段（3.4 拆分后）：
+ * <p>编排两阶段：
  * <ul>
  *   <li><b>阶段 1 · Rewrite</b>（{@link RewriteLoopExecutor}）：纯规则，不调 LLM，
  *       把读性质工具超长结果产为 RewriteToolRule。REWRITE_TOOL / SNIP_LOWVALUE 区间均触发。</li>
@@ -90,18 +90,7 @@ public class ProjectionLoopExecutor {
                              ProjectionPolicy policy) {
         CompletableFuture.runAsync(() -> {//新线程执行
             try {
-                // per-call 临时增量容器：本次小循环的 rule 变更攒入 batch，结束时由 RuleSetStore 原子应用即弃
-                RuleSetStore.RuleUpdateBatch batch = new RuleSetStore.RuleUpdateBatch();
-                // 纯规则 Rewrite
-                if (shouldTriggerRewrite(policy)) {
-                    rewriteLoopExecutor.run(recovered, batch);
-                }
-                // LLM ReAct Snip
-                if (shouldTriggerSnip(policy)) {
-                    skipTurnReActLoop.run(recovered, sessionId, currentQuery, batch);
-                }
-                // 一次性原子应用（空 batch 也安全，RuleSetStore.apply 内部判空）
-                ruleSetStore.apply(sessionId, batch);
+                runProjection(sessionId, recovered, currentQuery, policy);
             } catch (Exception e) {
                 log.warn("[SnipLoop] sessionId={} 小循环异常，batch 丢弃不应用: {}",
                         sessionId, e.getMessage());
@@ -113,5 +102,48 @@ public class ProjectionLoopExecutor {
                 }
             }
         }, snipExecutor);
+    }
+
+    /**
+     * 同步执行小循环（调用线程阻塞至完成）。先 {@link #tryStart} CAS 去重，finally 复位 flag。
+     *
+     * @return true 表示已实际运行；false 表示 tryStart 失败（同 session 已有循环在跑）
+     */
+    public boolean executeSync(Integer sessionId, RecoveredHistory recovered, String currentQuery,
+                               ProjectionPolicy policy) {
+        if (!tryStart(sessionId)) {
+            return false;
+        }
+        try {
+            runProjection(sessionId, recovered, currentQuery, policy);
+        } catch (Exception e) {
+            log.warn("[SnipLoop-Sync] sessionId={} 同步小循环异常，batch 丢弃不应用: {}",
+                    sessionId, e.getMessage());
+        } finally {
+            AtomicBoolean flag = runningFlags.get(sessionId);
+            if (flag != null) {
+                flag.set(false);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 小循环主体：按 policy 分阶段触发，攒同一 batch 原子应用。
+     */
+    private void runProjection(Integer sessionId, RecoveredHistory recovered, String currentQuery,
+                               ProjectionPolicy policy) {
+        // per-call 临时增量容器：本次小循环的 rule 变更攒入 batch，结束时由 RuleSetStore 原子应用即弃
+        RuleSetStore.RuleUpdateBatch batch = new RuleSetStore.RuleUpdateBatch();
+        // 纯规则 Rewrite
+        if (shouldTriggerRewrite(policy)) {
+            rewriteLoopExecutor.run(recovered, batch);
+        }
+        // LLM ReAct Snip
+        if (shouldTriggerSnip(policy)) {
+            skipTurnReActLoop.run(recovered, sessionId, currentQuery, batch);
+        }
+        // 一次性原子应用（空 batch 也安全，RuleSetStore.apply 内部判空且写条目）
+        ruleSetStore.apply(sessionId, batch);
     }
 }

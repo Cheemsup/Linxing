@@ -27,6 +27,6 @@ public class RecoveredHistory {
     /** 当前路径末端 message id（用户消息的 parent 链末端，summary 的挂载点候选）。 */
     private Integer pathEndMessageId;
 
-    /** history 段的 Turn 边界列表（2-D 起 buildMessages 应用 SkipTurnRule 用）；与 messages 下标对齐。 */
+    /** history 段的 Turn 边界列表（供 DefaultContextBuilder.assembleMessages 应用 SkipTurnRule 用）；与 messages 下标对齐。 */
     private List<TurnBoundary> turnBoundaries;
 }

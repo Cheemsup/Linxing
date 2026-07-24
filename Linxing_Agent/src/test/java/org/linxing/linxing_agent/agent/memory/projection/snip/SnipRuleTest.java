@@ -7,10 +7,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.memory.window.projection.snip.SkipTurnReActLoop;
-import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemory;
-import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemoryFactory;
 import org.linxing.linxing_agent.agent.memory.window.builder.ContextBuilder;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.memory.window.recovery.TurnBoundary;
@@ -34,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <ol>
  *   <li>产出：{@link SkipTurnReActLoop#run} 跑完后 batch 中应有 ≥1 条 SkipTurnRule，turnId 指向 Turn 1。</li>
  *   <li>落 RuleSet：{@link RuleSetStore#apply} 后该 turnId 命中 {@link RuleSet#shouldSkipTurn}。</li>
- *   <li>Builder 消费：{@link ContextBuilder#buildMessages(AgentContext, RecoveredHistory)}
+ *   <li>Builder 消费：{@link ContextBuilder#build}
  *       产出的消息列表中，Turn 1 的所有消息（user+ai）应被整段跳过、不出现在结果里；
  *       Turn 2-3 原样保留。</li>
  * </ol>
@@ -53,8 +50,6 @@ class SnipRuleTest {
     private RuleSetStore ruleSetStore;
     @Autowired
     private ContextBuilder contextBuilder;
-    @Autowired
-    private AgentMemoryFactory memoryFactory;
 
     /**
      * 构造跑题历史：Turn 1 烹饪食谱（离题），Turn 2-3 Agent 上下文管理（主题）。
@@ -96,7 +91,6 @@ class SnipRuleTest {
 
         return RecoveredHistory.builder()
                 .messages(msgs)
-                .pathEntities(List.of())
                 .summaryEntity(null)
                 .pathEndMessageId(9003)
                 .turnBoundaries(boundaries)
@@ -132,12 +126,10 @@ class SnipRuleTest {
         assertTrue(rs.shouldSkipTurn(9001),
                 "Turn 1（离题烹饪食谱）应被标记跳过。实际 skipTurnStartIds=" + rs.skippedTurnStartIds());
 
-        // 断言 3：Builder 消费——buildMessages 产出的列表中，Turn 1 的消息应整段消失
-        AgentMemory memory = memoryFactory.create();
-        memory.addAll(recovered.getMessages()); // history 段直接填入（模拟 ChatServiceImpl 的 memory.addAll）
-        AgentContext context = new AgentContext(1, sessionId, memory, "当前轮追加问题");
-
-        List<ChatMessage> built = contextBuilder.buildMessages(context, recovered);
+        // 断言 3：Builder 消费——build() 产出的列表中，Turn 1 的消息应整段消失
+        // 装配路径：recovered 作为 build 入参（无状态），一次性装配 + token 估算 + 策略判定（SystemMessage + 历史投影 + 当前用户问）
+        // currentQuery 复用 Snip 锚点（即 Builder 装配时追加的当前问，与真实链路一致）
+        List<ChatMessage> built = contextBuilder.build(sessionId, recovered, 1, currentQuery).getMessages();
 
         // built[0] 是 SystemMessage，从 index 1 起是 history+当前轮
         // Turn 1 的两条消息文本（番茄炒蛋相关）不应出现在 built 中

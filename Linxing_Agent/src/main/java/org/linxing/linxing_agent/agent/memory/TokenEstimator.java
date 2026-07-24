@@ -5,6 +5,7 @@ import com.knuddels.jtokkit.api.Encoding;
 import com.knuddels.jtokkit.api.EncodingRegistry;
 import com.knuddels.jtokkit.api.EncodingType;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -15,8 +16,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -31,6 +35,12 @@ import java.util.Optional;
 public class TokenEstimator {
 
     private static final Logger log = LoggerFactory.getLogger(TokenEstimator.class);
+
+    private final ObjectMapper objectMapper;
+
+    public TokenEstimator(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     @Value("${agent.token.encoding:cl100k_base}")
     private String encodingName;
@@ -97,6 +107,41 @@ public class TokenEstimator {
             total += estimate(msg);
         }
         return total;
+    }
+
+    /**
+     * 估算工具规格段 token 数。把每个 ToolSpecification 的 name/description/parameters
+     * 序列化为 JSON 文本后 BPE 计数，近似实际发 LLM 的 tools JSON 开销。
+     */
+    public long estimateToolSpecs(List<ToolSpecification> specs) {
+        if (specs == null || specs.isEmpty()) {
+            return 0;
+        }
+        long total = 0;
+        for (ToolSpecification spec : specs) {
+            total += encoding.countTokens(serializeToolSpec(spec));
+        }
+        return total;
+    }
+
+    /**
+     * 估算完整上下文 token 数 = 消息段 + 工具规格段。
+     */
+    public long estimateContext(List<? extends ChatMessage> messages, List<ToolSpecification> specs) {
+        return estimate(messages) + estimateToolSpecs(specs);
+    }
+
+    private String serializeToolSpec(ToolSpecification spec) {
+        try {
+            Map<String, Object> functionProps = new LinkedHashMap<>();
+            functionProps.put("name", spec.name());
+            functionProps.put("description", spec.description());
+            functionProps.put("parameters", spec.parameters());
+            return objectMapper.writeValueAsString(functionProps);
+        } catch (Exception e) {
+            log.warn("[TokenEstimator] 序列化工具规格失败，降级用 toString: {}", spec.name());
+            return String.valueOf(spec);
+        }
     }
 
     private String extractText(ChatMessage msg) {

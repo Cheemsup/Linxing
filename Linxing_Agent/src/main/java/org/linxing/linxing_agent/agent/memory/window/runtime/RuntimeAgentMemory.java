@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>上下文管理改造后，memory 的职责仅剩"运行时对话流的顺序累加"——
  * <ul>
- *   <li>SystemMessage 不再进 memory：由 {@code ContextBuilder.buildMessages} 每轮幂等置于首位</li>
+ *   <li>SystemMessage 由 {@code ContextBuilder.build} 一次性装配于 messages 首位并写入 memory，循环内 Executor 只读不再回调</li>
  *   <li>驱逐 / Projection 不再由 memory 负责，而是移交ContextBuilder</li>
  *   <li>历史装配由 {@code ChatServiceImpl.chat} 的 Recovery 直接 {@link #addAll} 填入</li>
  * </ul>

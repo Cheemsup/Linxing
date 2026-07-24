@@ -79,11 +79,7 @@ public class WriteMemoryTool implements Tool {
         String content = args.getContent() == null ? "" : args.getContent();
         try {
             memoryWorkspace.initUserWorkspaceIfAbsent(userId);
-            // TODO[HistoryArchiver 暂时弃用 2026.07.22]：原在此处覆盖 Current.md 前调用
-            //  historyArchiver.archiveIfStageSwitched(...) 检测学习主题切换并归档旧阶段。
-            //  该功能不成熟，暂移除调用；HistoryArchiver 文件保留待后续设计完善后恢复。
-            //  恢复时需同步：1) 恢复 historyArchiver 字段与构造注入；2) 恢复此处归档调用与 safeReadCurrent；
-            //  3) 在 DESCRIPTION 与 MemoryWorkerReActLoop SYSTEM_PROMPT 中补回归档承诺。
+            // TODO[HistoryArchiver 暂时弃用 2026.07.22]
             memoryWorkspace.write(userId, args.getPath(), content);
             return ToolCallResult.success(request.getToolCallId(), NAME, "已写入：" + args.getPath());
         } catch (MemoryAccessException e) {

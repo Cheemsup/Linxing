@@ -5,6 +5,8 @@ public final class AgentPrompts {
     private AgentPrompts() {
     }
 
+    public static final String DYNAMIC_SECTION_PLACEHOLDER = "{{DYNAMIC_SECTION}}";
+
     public static final String SYSTEM_PROMPT_TEMPLATE_FULL =
             "你是一个智能学习助手，具备以下能力：\n"
             + "1. 检索用户个人笔记和文档中的知识\n"
@@ -27,7 +29,7 @@ public final class AgentPrompts {
             + "save_exam 成功后，只需告知用户测验已生成并提供链接（如[查看测验](/quiz?examId=123)），"
             + "不要在回答中重复输出试题内容和答案，答案不应在聊天界面暴露。\n"
             + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
-            + "%s";
+            + DYNAMIC_SECTION_PLACEHOLDER;
 
     public static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE =
             "你是一个智能学习助手，具备以下能力：\n"
@@ -51,5 +53,5 @@ public final class AgentPrompts {
             + "save_exam 成功后，只需告知用户测验已生成并提供链接（如[查看测验](/quiz?examId=123)），"
             + "不要在回答中重复输出试题内容和答案，答案不应在聊天界面暴露。\n"
             + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
-            + "%s";
+            + DYNAMIC_SECTION_PLACEHOLDER;
 }

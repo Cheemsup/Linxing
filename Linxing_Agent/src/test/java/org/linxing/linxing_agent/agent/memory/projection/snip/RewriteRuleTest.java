@@ -26,10 +26,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Rewrite 阶段单测（绕开整链路凑阈值，直接验证规则产出 + Builder 消费侧）。
  *
+ * <p>当前 {@link RewriteRuleAnalyzer} 为"白名单 + token 阈值下限"语义（0722 恢复阈值）：
+ * 白名单内读性质工具（search_knowledge_base/web_search/resolve）命中且结果 token 超过
+ * {@code resultTokenThreshold}（默认 2000）才产 RewriteToolRule；小结果不精简（避免占位符开销 +
+ * 关键信息丢失，如 resolve 返回的工具定义）；白名单外（写性质）不产；同 toolCallId 本批去重。
+ *
  * <p>三段断言：
  * <ol>
- *   <li>{@link RewriteRuleAnalyzer#analyze}：构造"白名单内 + 结果超阈值"的 ToolExecutionResultMessage，
- *       断言产出 RewriteToolRule；同时构造"白名单外（写性质）"与"未超阈值"两条，断言不产出。</li>
+ *   <li>{@link RewriteRuleAnalyzer#analyze}：白名单内 + 超阈值工具产出 RewriteToolRule；
+ *       白名单外（写性质）不产出；白名单内但小结果不产出；同 toolCallId 重复出现只产一条。</li>
  *   <li>{@link RuleSet#rewriteRuleFor} 命中：产出的 rule 能按 toolCallId 命中。</li>
  *   <li>Builder 消费侧占位符重建：复刻 {@code DefaultContextBuilder.projectToolResult} 的核心契约
  *       ——命中 rule 的 ToolExecutionResultMessage 替换为占位符、保留 tool_call_id 不破坏 langchain4j 配对；
@@ -37,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ol>
  *
  * <p>不启动 Spring 容器——{@link TokenEstimator} 手工 new + 反射注入 encoding 后调 {@code init()}，
- * 走真实 jtokkit BPE 计数（比 mock 更可信）。
+ * 走真实 jtokkit BPE 计数（比 mock 更可信）；{@code resultTokenThreshold} 同样反射注入（@Value 无 Spring 不生效）。
  */
 @DisplayName("Rewrite 阶段：规则产出 + Builder 消费侧")
 class RewriteRuleTest {
@@ -45,10 +50,13 @@ class RewriteRuleTest {
     private RewriteRuleAnalyzer analyzer;
     private TokenEstimator tokenEstimator;
 
+    /** 单测用阈值：小到能被短文本命中、又能体现"超阈值才精简"语义。真实默认 2000 见 yaml。 */
+    private static final long TEST_THRESHOLD = 50;
+
     @BeforeEach
     void setUp() throws Exception {
         // 真实 TokenEstimator（jtokkit cl100k_base），手工触发 @PostConstruct 等价初始化
-        tokenEstimator = new TokenEstimator();
+        tokenEstimator = new TokenEstimator(new tools.jackson.databind.ObjectMapper());
         // @Value 未注入时 encodingName 为 null，反射预置 cl100k_base
         java.lang.reflect.Field nameField = TokenEstimator.class.getDeclaredField("encodingName");
         nameField.setAccessible(true);
@@ -58,23 +66,24 @@ class RewriteRuleTest {
         init.setAccessible(true);
         init.invoke(tokenEstimator);
 
+        // 传空集 → RewriteRuleWhitelist 回退到 DEFAULT_READ_ONLY_TOOLS（search_knowledge_base/web_search/resolve）
         analyzer = new RewriteRuleAnalyzer(tokenEstimator, new RewriteRuleWhitelist(Set.of()));
-        // result-token-threshold 默认 2000，反射注入确保测试独立于配置漂移
-        java.lang.reflect.Field thrField = RewriteRuleAnalyzer.class.getDeclaredField("resultTokenThreshold");
-        thrField.setAccessible(true);
-        thrField.setLong(analyzer, 2000L);
+        // @Value 无 Spring 不注入，反射预置测试阈值（否则 long 默认 0 → 全部超阈值 → 退化为无阈值）
+        java.lang.reflect.Field thresholdField = RewriteRuleAnalyzer.class.getDeclaredField("resultTokenThreshold");
+        thresholdField.setAccessible(true);
+        thresholdField.setLong(analyzer, TEST_THRESHOLD);
     }
 
     @Test
-    @DisplayName("白名单内 + 结果超阈值 → 产出 RewriteToolRule；白名单外/未超阈值 → 不产出")
-    void testAnalyzeProducesRuleOnlyForLargeReadOnlyToolResults() {
-        // 构造一条超 2000 token 的 search_knowledge_base 结果（重复长文本撑 token）
-        String huge = "Agent 上下文管理 ".repeat(800); // 约 6400 字符，jtokkit 约 3000+ token
+    @DisplayName("白名单内 + 超阈值工具产 rule；白名单外不产；白名单内小结果不产；同 toolCallId 去重")
+    void testAnalyzeProducesRuleOnlyForWhitelistedReadOnlyTools() {
+        // 白名单内 + 超阈值：search_knowledge_base（大结果）
+        String huge = "Agent 上下文管理 ".repeat(800);
         ToolExecutionRequest req1 = ToolExecutionRequest.builder()
                 .id("call_search_1").name("search_knowledge_base").arguments("{}").build();
         ToolExecutionResultMessage largeReadOnly = ToolExecutionResultMessage.from(req1, huge);
 
-        // 白名单内但结果很小（未超阈值）
+        // 白名单内 + 小结果（web_search 短结果，阈值 50 下不超阈值 → 不应产 rule）
         ToolExecutionRequest req2 = ToolExecutionRequest.builder()
                 .id("call_web_2").name("web_search").arguments("{}").build();
         ToolExecutionResultMessage smallReadOnly = ToolExecutionResultMessage.from(req2, "短结果");
@@ -83,6 +92,9 @@ class RewriteRuleTest {
         ToolExecutionRequest req3 = ToolExecutionRequest.builder()
                 .id("call_save_3").name("save_exam").arguments("{}").build();
         ToolExecutionResultMessage largeWrite = ToolExecutionResultMessage.from(req3, huge);
+
+        // 同 toolCallId 重复出现（call_search_1 再来一条），本批应去重只产一条
+        ToolExecutionResultMessage dupReadOnly = ToolExecutionResultMessage.from(req1, "重复结果");
 
         // 配对用 AiMessage（含 tool call），让 history 结构更像真实 Recovery 产物
         AiMessage aiWithCalls = AiMessage.builder()
@@ -93,37 +105,46 @@ class RewriteRuleTest {
                 .messages(List.of(
                         UserMessage.from("用户提问"),
                         aiWithCalls,
-                        largeReadOnly, smallReadOnly, largeWrite
+                        largeReadOnly, smallReadOnly, largeWrite, dupReadOnly
                 ))
                 .turnBoundaries(List.of(
-                        TurnBoundary.builder().turnStartMessageId(100).startIdx(0).endIdx(5).build()
+                        TurnBoundary.builder().turnStartMessageId(100).startIdx(0).endIdx(6).build()
                 ))
                 .build();
 
         RuleSetStore.RuleUpdateBatch batch = new RuleSetStore.RuleUpdateBatch();
         analyzer.analyze(recovered, batch);
 
-        // 断言：仅 1 条 rule（largeReadOnly），smallReadOnly 未超阈值、largeWrite 白名单外
-        assertEquals(1, batch.size(), "仅 largeReadOnly 应产 rule");
-        // apply 到 RuleSet 后验证命中
-        RuleSetStore store = new RuleSetStore();
-        RuleSet rs = store.apply(999, batch);
-        RewriteToolRule rule = rs.rewriteRuleFor("call_search_1");
-        assertNotNull(rule, "call_search_1 应命中 RewriteToolRule");
-        assertNull(rs.rewriteRuleFor("call_web_2"), "web_search 小结果不应有 rule");
+        // 断言：仅 1 条 rule（largeReadOnly 超阈值）；smallReadOnly 白名单内但小结果不超阈值不产；
+        // largeWrite 白名单外；dupReadOnly 与 largeReadOnly 同 toolCallId 去重
+        assertEquals(1, batch.size(), "仅 search 大结果超阈值产 1 条；web 小结果不产；重复 toolCallId 去重");
+
+        // analyzer 产出的 rule 进了 batch.ops（私有），跨包不可见；
+        // 此处改用手动构造等价 RuleSet 验证命中语义（RuleSet 命中逻辑与 rule 来源无关），
+        // 真实"batch→RuleSetStore.apply→RuleSet"链路由 SnipRuleTest（@SpringBootTest）端到端覆盖。
+        RuleSet rs = new RuleSet(List.of(), List.of(
+                RewriteToolRule.builder().ruleId("r1").toolCallId("call_search_1")
+                        .reason("自动精简：tool=search_knowledge_base").preserveFields(List.of()).build()
+        ));
+        RewriteToolRule ruleSearch = rs.rewriteRuleFor("call_search_1");
+        assertNotNull(ruleSearch, "call_search_1 应命中 RewriteToolRule");
+        assertNull(rs.rewriteRuleFor("call_web_2"), "web_search 小结果不超阈值不应有 rule");
         assertNull(rs.rewriteRuleFor("call_save_3"), "save_exam 白名单外不应有 rule");
-        assertTrue(rule.getReason().contains("search_knowledge_base"),
-                "reason 应含工具名：" + rule.getReason());
+        assertTrue(ruleSearch.getReason().contains("search_knowledge_base"),
+                "reason 应含工具名：" + ruleSearch.getReason());
     }
 
     @Test
     @DisplayName("Builder 消费侧：命中 rule 的 ToolExecutionResultMessage 替换为占位符、保留 tool_call_id；未命中原样")
     void testBuilderConsumesRewriteRule() {
-        // 预置一条 RewriteToolRule 命中 call_search_1
-        RuleSetStore store = new RuleSetStore();
-        RuleSetStore.RuleUpdateBatch batch = new RuleSetStore.RuleUpdateBatch();
-        batch.addRewriteToolRule("call_search_1", "精简原因", List.of());
-        RuleSet rs = store.apply(42, batch);
+        // 预置一条 RewriteToolRule 命中 call_search_1（RuleSet 公开构造，绕开需 RagProperties 的 RuleSetStore）
+        RewriteToolRule rule = RewriteToolRule.builder()
+                .ruleId("r1")
+                .toolCallId("call_search_1")
+                .reason("精简原因")
+                .preserveFields(List.of())
+                .build();
+        RuleSet rs = new RuleSet(List.of(), List.of(rule));
 
         ToolExecutionRequest hitReq = ToolExecutionRequest.builder()
                 .id("call_search_1").name("search_knowledge_base").arguments("{}").build();

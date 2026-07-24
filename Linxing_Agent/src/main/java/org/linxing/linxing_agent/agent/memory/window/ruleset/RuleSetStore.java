@@ -48,18 +48,20 @@ public class RuleSetStore {
         return rs != null ? rs : RuleSet.EMPTY;
     }
 
+    /** 缓存条目是否存在（区分"过期/从未计算"与"已计算但结果为 EMPTY"）。访问即续期。 */
+    public boolean hasEntry(Integer sessionId) {
+        return store.getIfPresent(sessionId) != null;
+    }
+
     /**
-     * 原子应用一批 rule 变更（空 batch 直接返回当前值）。
-     * 用 {@code asMap().compute} 在 Caffeine 内部锁下完成「读-重放-替换」。
+     * 原子应用一批 rule 变更。空 batch 也写入（当前值或 EMPTY），保证 hasEntry 能区分
+     * "已计算但空"与"从未计算"。用 {@code asMap().compute} 在 Caffeine 内部锁下完成「读-重放-替换」。
      */
     public RuleSet apply(Integer sessionId, RuleUpdateBatch batch) {
-        if (batch == null || batch.isEmpty()) {
-            return get(sessionId);
-        }
         RuleSet[] resultHolder = new RuleSet[1];
         store.asMap().compute(sessionId, (k, current) -> {
             RuleSet cur = current != null ? current : RuleSet.EMPTY;
-            RuleSet next = batch.applyTo(cur);
+            RuleSet next = (batch == null || batch.isEmpty()) ? cur : batch.applyTo(cur);
             resultHolder[0] = next;
             return next;
         });

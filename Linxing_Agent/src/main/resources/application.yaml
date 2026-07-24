@@ -83,10 +83,10 @@ rag:
     tokenizer-path: classpath:models/ms-marco-MiniLM-L-6-v2/tokenizer.json
   cache:
     doc-preview-ttl: ${RAG_CACHE_DOC_PREVIEW_TTL:3600}
-    # session-messages-ttl / agent-steps-ttl 已随 P3 Runtime Mirror 落地停写旧键，保留仅供旧键自然过期观察
+    # session-messages-ttl / agent-steps-ttl 保留仅供旧键自然过期观察
     session-messages-ttl: ${RAG_CACHE_SESSION_MSGS_TTL:1800}
     agent-steps-ttl: ${RAG_CACHE_AGENT_STEPS_TTL:3600}
-    # P3 Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用，秒），默认 12h
+    #Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用，秒），默认 12h
     mirror-ttl: ${RAG_CACHE_MIRROR_TTL:43200}
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
@@ -117,12 +117,10 @@ agent:
     timeout-seconds: ${AGENT_TOOL_TIMEOUT_SECONDS:180}
     workflow-timeout-seconds: ${AGENT_TOOL_WORKFLOW_TIMEOUT_SECONDS:600}
   memory:
-    # type/max-messages/max-tokens 于 2-B memory 退化为极简累加器后失效（AgentMemoryFactory 不再读）。
-    # 运行时上下文保护改由 Recovery 入口 token 预算截断 + 2-D Rule Set/Projection 提供，此处保留键仅作占位，后续清理。
     type: ${AGENT_MEMORY_TYPE:window}
     max-messages: ${AGENT_MEMORY_MAX_MESSAGES:40}
     max-tokens: ${AGENT_MEMORY_MAX_TOKENS:32000}
-    # Long-term Memory Workspace：受限沙盒，按 userId 子目录隔离。与 files_store 同根便于统一备份。
+    # Long-term Memory Workspace：受限沙盒，按 userId 子目录隔离
     longterm:
       workspace:
         root-dir: ${AGENT_MEMORY_LONGTERM_ROOT:#{null}}
@@ -132,23 +130,23 @@ agent:
     encoding: ${AGENT_TOKEN_ENCODING:cl100k_base}        # jtokkit 编码名：cl100k_base / o200k_base，DeepSeek/GLM/Kimi/Minimax 均走 OpenAI 兼容 BPE，近似可接受
     max-context: ${AGENT_TOKEN_MAX_CONTEXT:200000}       # 模型上下文最高上限，据此反推各级 Projection 阈值
   projection:
-    thresholds:
+    thresholds:                                                   # Projection 阈值，按 max-context 计算比例
       full-to-rewrite: ${AGENT_PROJECTION_FULL_TO_REWRITE:0.60}   # FULL → REWRITE_TOOL 线
       rewrite-to-snip: ${AGENT_PROJECTION_REWRITE_TO_SNIP:0.80}    # REWRITE_TOOL → SNIP_LOWVALUE 线
       snip-to-summary: ${AGENT_PROJECTION_SNIP_TO_SUMMARY:0.90}    # SNIP_LOWVALUE → SUMMARY 线
-      summary-max-ratio: ${AGENT_PROJECTION_SUMMARY_MAX_RATIO:0.5} # Summary 压缩目标占 max-context 比例
+      summary-max-ratio: ${AGENT_PROJECTION_SUMMARY_MAX_RATIO:0.3} # Summary 压缩目标占 max-context 比例（0723_当前未使用）
     snip:
       enabled: ${AGENT_SNIP_ENABLED:true}                                   # Projection rule 异步产出总开关
       skip-turn-llm-enabled: ${AGENT_SNIP_SKIP_TURN_LLM_ENABLED:true}      # SkipTurn LLM ReAct 开关（false=只跑 Rewrite 纯规则）
-      max-steps: ${AGENT_SNIP_MAX_STEPS:6}                                 # Snip 小循环最大 LLM 轮次（远小于主循环 20）
+      max-steps: ${AGENT_SNIP_MAX_STEPS:6}                                 # Snip 小循环最大 LLM 轮次
       executor:
         core-pool-size: ${AGENT_SNIP_CORE_POOL:2}
         max-pool-size: ${AGENT_SNIP_MAX_POOL:4}
         queue-capacity: ${AGENT_SNIP_QUEUE:32}
         thread-name-prefix: snip-
       rewrite:
-        result-token-threshold: ${AGENT_SNIP_REWRITE_TOKEN_THRESHOLD:2000} # 读性质工具结果 token 超此值才产 RewriteToolRule
-        read-only-tools:                                                       # 读性质工具白名单（结果可被 Rewrite 精简）；写性质工具不在此列
+        result-token-threshold: ${AGENT_SNIP_REWRITE_TOKEN_THRESHOLD:200} # 工具结果 token 超此值才产 RewriteToolRule
+        read-only-tools:
           - search_knowledge_base
           - web_search
           - resolve

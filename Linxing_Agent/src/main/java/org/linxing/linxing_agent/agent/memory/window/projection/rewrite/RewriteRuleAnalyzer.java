@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.memory.TokenEstimator;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.memory.window.ruleset.RuleSetStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
@@ -22,8 +23,15 @@ public class RewriteRuleAnalyzer {
     private final RewriteRuleWhitelist rewriteRuleWhitelist;
 
     /**
-     * 按白名单产出 RewriteToolRule 到 batch
-     * 保留 tokenEstimator 仅用于 reason 审计文本，便于观察精简量。
+     * 读性质工具结果 token 超此阈值才产 RewriteToolRule。
+     * <p>下限保护：小于此阈值的结果（如 resolve 返回的工具定义，通常仅几十~两百 token）原样保留不精简
+     */
+    @Value("${agent.projection.snip.rewrite.result-token-threshold}")
+    private long resultTokenThreshold;
+
+    /**
+     * 按白名单 + token 阈值产出 RewriteToolRule 到 batch。
+     * <p>白名单命中（读性质工具）且结果 token 超过 {@link #resultTokenThreshold} 才产 rule；
      * @param recovered
      * @param batch
      */
@@ -49,14 +57,18 @@ public class RewriteRuleAnalyzer {
                 continue;//本批已产，去重
             }
             long tokens = tokenEstimator.estimate(msg);
+            // 阈值下限保护：小结果（如 resolve 工具定义）不精简，避免占位符开销 + 关键信息丢失
+            if (tokens < resultTokenThreshold) {
+                continue;
+            }
             batch.addRewriteToolRule(toolCallId,
-                    "自动精简：tool=" + toolName + " 结果 token=" + tokens,
+                    "自动精简：tool=" + toolName + " 结果 token=" + tokens + " 超阈值 " + resultTokenThreshold,
                     List.of());
             seen.add(toolCallId);
             produced++;
         }
         if (produced > 0) {
-            log.info("[RewriteRuleAnalyzer] 产出 {} 条 RewriteToolRule（无阈值，白名单命中即精简）", produced);
+            log.info("[RewriteRuleAnalyzer] 产出 {} 条 RewriteToolRule（阈值={}）", produced, resultTokenThreshold);
         }
     }
 }

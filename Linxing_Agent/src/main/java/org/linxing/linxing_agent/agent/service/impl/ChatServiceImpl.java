@@ -14,12 +14,11 @@ import org.linxing.linxing_agent.agent.entity.ChatMessage;
 import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemory;
 import org.linxing.linxing_agent.agent.memory.window.runtime.AgentMemoryFactory;
 import org.linxing.linxing_agent.agent.memory.window.SummaryService;
-import org.linxing.linxing_agent.agent.memory.TokenEstimator;
 import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionPolicy;
-import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionThresholds;
-import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionLoopExecutor;
 import org.linxing.linxing_agent.agent.memory.window.recovery.HistoryRecoveryService;
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
+import org.linxing.linxing_agent.agent.memory.window.builder.ContextAssembly;
+import org.linxing.linxing_agent.agent.memory.window.builder.ContextBuilder;
 import org.linxing.linxing_agent.agent.memory.longterm.worker.MemoryWorkerService;
 import org.linxing.linxing_agent.agent.utils.SourceExtractor;
 import org.linxing.linxing_agent.rag.constant.OperationType;
@@ -52,13 +51,11 @@ public class ChatServiceImpl implements IChatService {
     private final IRuntimeMirrorService runtimeMirrorService;
     private final SourceExtractor sourceExtractor;
     private final AgentExecutor agentExecutor;
+    private final ContextBuilder contextBuilder;
     private final AgentMemoryFactory memoryFactory;
     private final AgentStepMapper agentStepMapper;
     private final SummaryService summaryService;
-    private final ProjectionThresholds projectionThresholds;
-    private final TokenEstimator tokenEstimator;
     private final HistoryRecoveryService historyRecoveryService;
-    private final ProjectionLoopExecutor projectionLoopExecutor;
     private final MemoryWorkerService memoryWorkerService;
 
     /**
@@ -102,33 +99,30 @@ public class ChatServiceImpl implements IChatService {
             }
 
             // 回答前主动 summary 判定：历史超 SUMMARY 阈值时压缩"上一个 Summary 挂点（或 Root）→路径末端"的历史，挂到路径末端。
-            RecoveredHistory recoveredForLoop = recovered;
-            long historyTokens = tokenEstimator.estimate(recovered.getMessages());
+            boolean summaryTriggered = false;// SUMMARY 是否实际落盘：触发则跳过本轮异步 Projection（旧历史已被摘要丢弃，再跑 rewrite/snip 产出的 rule 下一轮必失配，纯属白做）
             Integer userMsgParentId = request.getParentMessageId();// userMsg 的 parent，默认指向上一条消息；判定 SUMMARY 后改指 summary
+
+            // 一次性 build：Builder 内部闭环完成 装配 + token 估算+ 策略判定 + 同步重建触发（MISS+投影区间）+ 异步 Projection 触发（CAS）
+            ContextAssembly asm = contextBuilder.build(sessionId, recovered, userId, originalQuery);
+
             if (recovered.getPathEndMessageId() != null
-                    && !recovered.getMessages().isEmpty()) {
-                if (projectionThresholds.policyFor(historyTokens) == ProjectionPolicy.SUMMARY) {
-                    // 压缩范围："上一个 Summary 挂点（或 Root）→路径末端"的历史
-                    // 不变式：recovered.summaryEntity != null 时 messages[0] 为旧 summary 摘要
-                    List<dev.langchain4j.data.message.ChatMessage> toSummarize = recovered.getMessages();
-                    // summarizeAndPersist 落 summary（parentId=pathEndMessageId），不再需要 successorIds 刷新
-                    ChatMessage summaryMsg = summaryService.summarizeAndPersist(
-                            userId, sessionId, recovered.getPathEndMessageId(),
-                            toSummarize);
-                    if (summaryMsg != null) {
-                        // userMsg 待落盘时 parent 指向新 summary；resolveNearestSummary(summaryId) 会识别 parent 为 summary
-                        // 并预填 nearestSummaryMessageId=summaryId，一次写对，无需事后刷新/改挂
-                        userMsgParentId = summaryMsg.getId();
-                        // memory 历史替换为仅 summary 摘要（被压缩旧历史丢弃），当前用户消息由 runAgentLoop 末尾追加；
-                        List<dev.langchain4j.data.message.ChatMessage> messagesForMemory = new ArrayList<>();
-                        messagesForMemory.add(UserMessage.from("【历史内容经过压缩精简，如下是摘要】\n" + summaryMsg.getContent()));
-                        recoveredForLoop = RecoveredHistory.builder()
-                                .messages(messagesForMemory)
-                                .summaryEntity(summaryMsg)
-                                .pathEndMessageId(recovered.getPathEndMessageId())
-                                .turnBoundaries(List.of())
-                                .build();
-                    }
+                    && !recovered.getMessages().isEmpty()
+                    && asm.getPolicy() == ProjectionPolicy.SUMMARY) {
+                // SUMMARY 落盘（DB + LLM 双重副作用，留外部——Builder 守纯装配边界不染此）
+                // 压缩范围："上一个 Summary 挂点（或 Root）→路径末端"的历史
+                // 不变式：recovered.summaryEntity != null 时 messages[0] 为旧 summary 摘要
+                ChatMessage summaryMsg = summaryService.summarizeAndPersist(
+                        userId, sessionId, recovered.getPathEndMessageId(),
+                        recovered.getMessages());
+                if (summaryMsg != null) {
+                    // userMsg 待落盘时 parent 指向新 summary；resolveNearestSummary(summaryId) 会识别 parent 为 summary
+                    // 并预填 nearestSummaryMessageId=summaryId，一次写对，无需事后刷新/改挂
+                    userMsgParentId = summaryMsg.getId();
+                    summaryTriggered = true;// 标记本轮已 SUMMARY 压缩（日志用）
+                    // SUMMARY 落盘后构造精简 recovered（仅 summary 摘要 + 零 Turn），二次 build 得最终装配产物
+                    // 二次 build 时 policy 已非 SUMMARY（精简后 token 大降），异步 Projection 不会误触发
+                    RecoveredHistory simplified = buildSimplifiedFromSummary(recovered, summaryMsg);
+                    asm = contextBuilder.build(sessionId, simplified, userId, originalQuery);
                 }
             }
 
@@ -136,19 +130,11 @@ public class ChatServiceImpl implements IChatService {
             ChatMessage userMsg = chatMessageService.saveUserMessage(
                     userId, sessionId, userMsgParentId, originalQuery);
 
-            // Projection rule 异步产出。历史进入 REWRITE_TOOL/SNIP_LOWVALUE 区间时异步启动小循环产出 RewriteToolRule（纯规则）+ SkipTurnRule（LLM），攒进同一 batch 原子应用。
-            // 主流程不等待、用上一版 RuleSet 继续（允许落后一轮）
-            // per-session CAS 避免同时启动多个异步rewrite/snip带来混乱；snip循环不落库、不推 SSE；异常丢弃 batch 不影响主流程。
-            ProjectionPolicy policy = projectionThresholds.policyFor(historyTokens);
-            log.info("[Projection] sessionId={}, historyTokens={}, maxContext={}, policy={}, snipEnabled={}",
-                    sessionId, historyTokens, projectionThresholds.getMaxContextTokens(), policy,
-                    projectionLoopExecutor.shouldTrigger(policy));
-            if (projectionLoopExecutor.shouldTrigger(policy) && projectionLoopExecutor.tryStart(sessionId)) {
-                log.info("[SnipLoop] sessionId={} triggered, policy={}", sessionId, policy);
-                projectionLoopExecutor.executeAsync(sessionId, recovered, originalQuery, policy);//执行snip循环，将rule注入batch
+            if (summaryTriggered) {
+                log.info("[Projection] sessionId={} skipped: SUMMARY 已压缩历史，本轮 Projection 无需触发", sessionId);
             }
 
-            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, recoveredForLoop,
+            ChatResponse agentResponse = runAgentLoop(userId, sessionId, userMsg, asm.getMessages(),
                     originalQuery, listener, recorder);//执行ReAct Agent循环
 
             chatMessageService.touchSession(sessionId);//更新会话最近修改时间
@@ -171,27 +157,24 @@ public class ChatServiceImpl implements IChatService {
      * @param userId
      * @param sessionId
      * @param userMsg
-     * @param recovered 已由 Recovery 重建的历史（含 tool 回放 + turnBoundaries），直接填入 memory；
-     *                  Builder 消费其 turnBoundaries 应用 Rule Set 投影
+     * @param initialMessages 已由 ContextBuilder.build() 装配的最终 messages（SystemMessage 首位 + 历史投影 + 当前用户问），
+     *                         直接写入运行容器，循环内 Executor 只读不再回调 Builder 装配
      * @param originalQuery
      * @return
      */
     private ChatResponse runAgentLoop(Integer userId, Integer sessionId,
                                        ChatMessage userMsg,
-                                       RecoveredHistory recovered,
+                                       List<dev.langchain4j.data.message.ChatMessage> initialMessages,
                                        String originalQuery, AgentStepListener listener,
                                        StepRecorder recorder) {
-        AgentMemory memory = memoryFactory.create();
+        AgentMemory memory = memoryFactory.create();//运行容器初始为空
 
-        //将历史消息（含 tool 回放）填入Agent记忆——Recovery 已按"工具调用组"原子重建，无需再按 type 分支
-        memory.addAll(recovered.getMessages());
-
-        memory.add(UserMessage.from(originalQuery));//加入当前用户问题
+        //装配结果作为运行容器初始内容；Executor 循环内 add 的 aiMessage/resultMsg 自然追加在此容器末尾
+        memory.addAll(initialMessages);
 
         AgentContext context = new AgentContext(userId, sessionId, memory, originalQuery);
         context.setStepListener(listener);
         context.setStepRecorder(recorder);//注入统一步骤记录器，主循环与工作流共享
-        context.setRecovered(recovered);//注入 Recovery 结果，供 ContextBuilder.buildMessages 应用 Rule Set 投影
 
         OpenAiStreamingChatModel chatModel = llmManager.getStreamingModel(LlmType.CHAT_MODEL);//获取流式LLM对象
 
@@ -225,6 +208,26 @@ public class ChatServiceImpl implements IChatService {
                 .sourceDetails(sourceExtractor.parseSourceDetails(sourcesJson))
                 .sessionId(sessionId)
                 .messageId(assistantMsg.getId())
+                .build();
+    }
+
+    /**
+     * SUMMARY 落盘后构造精简版 {@link RecoveredHistory}：仅含 summary 摘要（带压缩提示前缀）+ 零 Turn。
+     * <p>Builder 的 {@link ContextBuilder#build} 收到零 Turn 的 recovered 会走零投影路径
+     * （SystemMessage + 当前用户问），实现"压缩旧历史丢弃，仅 summary 摘要进 prompt"。
+     * @param origin     原始完整 recovered（提供 pathEndMessageId 等）
+     * @param summaryMsg 已落盘的 summary 消息（取其 content 作摘要正文）
+     * @return 精简版 recovered，供二次 build
+     */
+    private RecoveredHistory buildSimplifiedFromSummary(RecoveredHistory origin, ChatMessage summaryMsg) {
+        List<dev.langchain4j.data.message.ChatMessage> messagesForMemory = new ArrayList<>();
+        messagesForMemory.add(UserMessage.from(
+                "【历史内容经过压缩精简，如下是摘要】\n" + summaryMsg.getContent()));
+        return RecoveredHistory.builder()
+                .messages(messagesForMemory)
+                .summaryEntity(summaryMsg)
+                .pathEndMessageId(origin.getPathEndMessageId())
+                .turnBoundaries(List.of())
                 .build();
     }
 

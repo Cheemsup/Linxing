@@ -2,21 +2,16 @@ package org.linxing.linxing_agent.agent.subagent;
 
 import dev.langchain4j.agentic.AgenticServices;
 import dev.langchain4j.agentic.UntypedAgent;
-import dev.langchain4j.agentic.agent.ErrorContext;
 import dev.langchain4j.agentic.agent.ErrorRecoveryResult;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.core.AgentStepEvent;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.PendingClarificationRegistry;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.common.config.LlmManager;
 import org.linxing.linxing_agent.common.constant.LlmType;
 import org.springframework.stereotype.Service;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * study_plan 工作流顶层编排服务。学习计划的制定流程分为两阶段：资料收集和用户补充、plan（和可能的exam）生成，内部使用langchain4j的顺序工作流编排agent
@@ -82,14 +77,8 @@ public class StudyPlanner {
             String clarificationQuestion, Integer userId, Integer sessionId,
             StepRecorder recorder, ChatModel chatModel) {
 
-        // 推送 workflow_start 事件，使得前端能够显示本工作流状态
-        recorder.record(AgentStepEvent.builder()
-                .eventType(AgentStepTypes.WORKFLOW_START)
-                .stepNumber(0)
-                .phase(AgentStepTypes.PHASE_STUDY_PLAN)
-                .label("正在生成学习计划")
-                .stepData(buildWorkflowStartData(topic, generateExam, needsClarification))
-                .build());
+        // 0724 改进一方案A：workflow_start 已删除——workflow 工具改由外层 AgentExecutor 的
+        // tool_call(tool_kind=workflow, is_workflow=true) 承载状态，不再在此单独推送 start 事件。
 
         // ---- 知识收集（信息补充 + 自主搜索）----
         UntypedAgent knowledgeWorkflowAgent = knowledgeCollectionStage
@@ -166,46 +155,14 @@ public class StudyPlanner {
             }
         }
 
-        // 推送 workflow_end 事件
-        recorder.record(AgentStepEvent.builder()
-                .eventType(AgentStepTypes.WORKFLOW_END)
-                .stepNumber(0)
-                .phase(AgentStepTypes.PHASE_STUDY_PLAN)
-                .label("生成完成")
-                .stepData(buildWorkflowEndData(result))
-                .error(result.getError())
-                .finalStep(true)
-                .build());
+        // 0724 改进一方案A：workflow_end 已删除——结果结构化数据（plan_id/exam_id 等）由
+        // ContentGenerationStage.persistResults 内部已有的 save_plan/save_exam sub_agent 事件承载，
+        // 外层 AgentExecutor 的 tool_result(tool_kind=workflow, is_workflow=true) 承载完成状态。
+        // 仅当有错误时记录到日志，便于排查。
+        if (result.getError() != null && !result.getError().isBlank()) {
+            log.warn("study_plan 工作流执行有错误: session={}, error={}", sessionId, result.getError());
+        }
 
         return result;
-    }
-
-    // ==================== 工作流数据构建 ====================
-
-    private Map<String, Object> buildWorkflowStartData(String topic, boolean generateExam,
-                                                       boolean needsClarification) {
-        Map<String, Object> data = new HashMap<>();
-        data.put("topic", topic);
-        data.put("generate_exam", generateExam);
-        data.put("needs_clarification", needsClarification);
-        return data;
-    }
-
-    private Map<String, Object> buildWorkflowEndData(StudyPlanWorkflowResult result) {
-        Map<String, Object> data = new HashMap<>();
-        data.put("plan_saved", result.isPlanSaved());
-        data.put("exam_saved", result.isExamSaved());
-        data.put("plan_id", result.getPlanId() != null ? result.getPlanId() : -1);
-        data.put("exam_id", result.getExamId() != null ? result.getExamId() : -1);
-        data.put("exam_triggered", result.isExamTriggered());
-        data.put("clarification_triggered", result.isClarificationTriggered());
-        data.put("clarification_timed_out", result.isClarificationTimedOut());
-        data.put("plan_retry_count", result.getPlanRetryCount());
-        return data;
-    }
-
-    private String getErrorMessage(ErrorContext errorContext) {
-        Throwable ex = errorContext.exception();
-        return ex != null ? ex.getMessage() : "unknown error";
     }
 }

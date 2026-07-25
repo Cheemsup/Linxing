@@ -90,6 +90,10 @@ public class SseChatAdapter {
                     if (event.getAnswer() != null) data.put("answer", event.getAnswer());
                     if (event.getError() != null) data.put("error", event.getError());
                     data.put("finalStep", event.isFinalStep());
+                    //透传层级字段，供前端流式 onStep 实时归集到树
+                    if (event.getStepId() != null) data.put("stepId", event.getStepId());
+                    if (event.getParentStepId() != null) data.put("parentStepId", event.getParentStepId());
+                    if (event.getAgentId() != null) data.put("agentId", event.getAgentId());
 
                     synchronized (emitter) {
                         emitter.send(SseEmitter.event().name("step").data(data));

@@ -234,6 +234,8 @@ CREATE TABLE IF NOT EXISTS agent_steps (
     step_type       VARCHAR(30) NOT NULL,
     content         TEXT,
     step_data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    parent_step_id  INT,
+    agent_id        VARCHAR(50),
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT agent_steps_session_id_fkey
         FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -245,16 +247,20 @@ COMMENT ON TABLE agent_steps IS 'Agent执行步骤记录表，记录ReAct循环�
 COMMENT ON COLUMN agent_steps.id IS '步骤唯一ID';
 COMMENT ON COLUMN agent_steps.chat_message_id IS '关联的助手消息ID，NULL表示步骤尚未绑定消息；消息删除时CASCADE';
 COMMENT ON COLUMN agent_steps.session_id IS '所属会话ID；会话删除时CASCADE';
-COMMENT ON COLUMN agent_steps.step_order IS '步骤顺序，从1开始';
-COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thinking（推理思考）/……_call/……_result/error/cache_hit等，应用层校验；注意：final类型不写DB，仅SSE推送';
+COMMENT ON COLUMN agent_steps.step_order IS '步骤顺序，从1开始（全局到达顺序，所有 step 共享递增）';
+COMMENT ON COLUMN agent_steps.step_type IS '步骤类型：thinking（推理思考）/……_call/……_result/error等，应用层校验；注意：final类型不写DB，仅SSE推送';
 COMMENT ON COLUMN agent_steps.content IS '主文本内容：thinking时为完整推理文本，……_call时为调用参数，……_result时为返回结果';
 COMMENT ON COLUMN agent_steps.step_data IS '类型特有结构化数据（JSONB），如……_call_id/arguments/is_success/error_code/thinking_tokens等';
+COMMENT ON COLUMN agent_steps.parent_step_id IS '父步骤ID，NULL表示根层（主Agent step）。表达树形嵌套——子Agent内部step挂到对应sub_agent step下';
+COMMENT ON COLUMN agent_steps.agent_id IS '所属Agent标识（main/plan_generator/exam_generator等）。并行子Agent交错到达时按此分组重建各子序列';
 COMMENT ON COLUMN agent_steps.created_at IS '创建时间';
 
 CREATE INDEX idx_agent_steps_session_id ON agent_steps(session_id);
 CREATE INDEX idx_agent_steps_chat_message_id ON agent_steps(chat_message_id);
 CREATE INDEX idx_agent_steps_session_step ON agent_steps(session_id, step_order);
 CREATE INDEX idx_agent_steps_step_data_gin ON agent_steps USING GIN (step_data);
+CREATE INDEX idx_agent_steps_parent ON agent_steps(parent_step_id);
+CREATE INDEX idx_agent_steps_agent_id ON agent_steps(agent_id);
 
 -- =============================================
 -- 9、知识测验表 exams

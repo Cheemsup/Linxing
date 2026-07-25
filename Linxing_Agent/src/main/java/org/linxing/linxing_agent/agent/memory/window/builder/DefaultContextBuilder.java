@@ -12,6 +12,9 @@ import org.linxing.linxing_agent.agent.catalog.Catalog;
 import org.linxing.linxing_agent.agent.catalog.CatalogEntry;
 import org.linxing.linxing_agent.agent.catalog.CatalogProvider;
 import org.linxing.linxing_agent.agent.core.AgentPrompts;
+import org.linxing.linxing_agent.agent.core.AgentStepEvent;
+import org.linxing.linxing_agent.agent.core.AgentStepTypes;
+import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.memory.longterm.injector.LongMemoryInjector;
 import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionLoopExecutor;
 import org.linxing.linxing_agent.agent.memory.window.projection.ProjectionPolicy;
@@ -30,7 +33,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -397,9 +402,11 @@ public class DefaultContextBuilder implements ContextBuilder {
      *   <li>被解析的技能：将其关联的工具一并激活（技能本身无 ToolSpecification，靠关联工具落地）</li>
      * </ul>
      * 非渐进模式或非 resolve / 失败结果均 no-op，但统一回调保持接口对称。
+     * <p>0724 改造：激活技能时通过 recorder 推送 skill_activated 事件（携带 displayName + tool_names），
+     * 让前端感知"技能 X 已激活、关联工具已注入"——原激活逻辑静默，用户无从知晓。
      */
     @Override
-    public void onToolExecuted(int sessionId, String toolName, ToolCallResult result, String arguments) {
+    public void onToolExecuted(int sessionId, String toolName, ToolCallResult result, String arguments, StepRecorder recorder) {
         if (!isProgressiveMode()) {
             return;// 非渐进模式不激活
         }
@@ -413,17 +420,36 @@ public class DefaultContextBuilder implements ContextBuilder {
         Set<String> activated = activatedToolNamesBySession.asMap()
                 .computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet());
         for (String name : resolvedNames) {
-            // 被解析的是工具：已注册则激活
-            if (toolRegistry.getTool(name) != null) {
-                activated.add(name);
-            }
-            // 被解析的是技能：连带激活其关联工具
+            // 被解析的是技能：连带激活其关联工具，并推送 skill_activated 事件
             SkillMetadata skillMeta = skillRegistry.getMetadata(name);
             if (skillMeta != null && skillMeta.getToolNames() != null) {
+                List<String> activatedToolNames = new ArrayList<>();
                 for (String relatedToolName : skillMeta.getToolNames()) {
                     if (toolRegistry.getTool(relatedToolName) != null) {
                         activated.add(relatedToolName);
+                        activatedToolNames.add(relatedToolName);
                     }
+                }
+                // 推送 skill_activated：携带 displayName + 已激活的关联工具名列表
+                if (recorder != null) {
+                    String displayName = skillMeta.getDisplayName() != null
+                            && !skillMeta.getDisplayName().isBlank()
+                            ? skillMeta.getDisplayName() : name;
+                    Map<String, Object> stepData = new HashMap<>();
+                    stepData.put(AgentStepTypes.KEY_SKILL_NAME, displayName);
+                    stepData.put(AgentStepTypes.KEY_TOOL_NAMES, activatedToolNames);
+                    recorder.record(AgentStepEvent.builder()
+                            .eventType(AgentStepTypes.SKILL_ACTIVATED)
+                            .stepNumber(0)
+                            .phase(AgentStepTypes.PHASE_THINKING)
+                            .label("已激活技能：" + displayName)
+                            .stepData(stepData)
+                            .build());
+                }
+            } else {
+                // 被解析的是工具：已注册则激活
+                if (toolRegistry.getTool(name) != null) {
+                    activated.add(name);
                 }
             }
         }

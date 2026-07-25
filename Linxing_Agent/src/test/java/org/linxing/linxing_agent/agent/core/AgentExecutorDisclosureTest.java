@@ -344,7 +344,7 @@ class AgentExecutorDisclosureTest {
             // 解析一个真实存在的业务工具
             String bizTool = pickBizToolName();
             ToolCallResult ok = resolveSuccess(bizTool);
-            defaultContextBuilder.onToolExecuted(sid, "resolve", ok, ok.getResult());
+            defaultContextBuilder.onToolExecuted(sid, "resolve", ok, ok.getResult(), null);
 
             List<String> names = roundSpecNames(sid);
             assertTrue(names.contains("resolve"), "resolve 仍在");
@@ -367,12 +367,12 @@ class AgentExecutorDisclosureTest {
             // 非 resolve 工具成功 → 不激活
             String bizTool = pickBizToolName();
             ToolCallResult nonResolve = ToolCallResult.success("c2", bizTool, "{}");
-            defaultContextBuilder.onToolExecuted(sid, bizTool, nonResolve, "{}");
+            defaultContextBuilder.onToolExecuted(sid, bizTool, nonResolve, "{}", null);
             assertEquals(1, roundSpecNames(sid).size(), "非 resolve 工具不应触发激活");
 
             // resolve 失败 → 不激活
             ToolCallResult fail = ToolCallResult.failure("c3", "resolve", "boom");
-            defaultContextBuilder.onToolExecuted(sid, "resolve", fail, fail.getError());
+            defaultContextBuilder.onToolExecuted(sid, "resolve", fail, fail.getError(), null);
             assertEquals(1, roundSpecNames(sid).size(), "resolve 失败不应触发激活");
         } finally {
             int totalCount = toolRegistry.size() + skillRegistry.size();
@@ -391,7 +391,7 @@ class AgentExecutorDisclosureTest {
 
             String bizTool = pickBizToolName();
             ToolCallResult ok = resolveSuccess(bizTool);
-            defaultContextBuilder.onToolExecuted(sidA, "resolve", ok, ok.getResult());
+            defaultContextBuilder.onToolExecuted(sidA, "resolve", ok, ok.getResult(), null);
 
             // A 已激活，B 未受影响
             assertTrue(roundSpecNames(sidA).contains(bizTool), "session A 应已激活");

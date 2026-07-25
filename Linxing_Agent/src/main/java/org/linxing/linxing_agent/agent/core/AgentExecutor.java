@@ -151,18 +151,38 @@ public class AgentExecutor {
                     ToolSpec toolSpec = toolRegistry.getTool(toolReq.name());
                     String toolLabel = toolSpec != null ? toolSpec.getExecutor().displayLabel() : toolReq.name();
 
+                    // 0724 改进三：tool_kind 分类——在统一 tool 入口区分 function_calling / skill / workflow / mcp
+                    // resolve 是技能/工具解析入口→skill；workflow 工具→workflow；其余→function_calling；mcp 预留
+                    boolean isWorkflowTool = WORKFLOW_TOOL_NAMES.contains(toolReq.name());
+                    String toolKind = isWorkflowTool
+                            ? AgentStepTypes.TOOL_KIND_WORKFLOW
+                            : ("resolve".equals(toolReq.name())
+                                ? AgentStepTypes.TOOL_KIND_SKILL
+                                : AgentStepTypes.TOOL_KIND_FUNCTION);
+
                     // 推送 tool_call 事件（SSE + 入库）：content 为请求参数，执行前已知
-                    recorder.record(AgentStepEvent.builder()
+                    // 0724 改进一方案A：workflow_start 已删，workflow 工具改由 tool_call 的 stepData
+                    // (is_workflow=true + tool_kind=workflow) 承载，前端据此渲染为可折叠容器
+                    Map<String, Object> toolCallData = new java.util.HashMap<>();
+                    toolCallData.put(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id());
+                    toolCallData.put(AgentStepTypes.KEY_TOOL_NAME, toolReq.name());
+                    toolCallData.put(AgentStepTypes.KEY_TOOL_KIND, toolKind);
+                    toolCallData.put("arguments", toolReq.arguments());
+                    if (isWorkflowTool) {
+                        toolCallData.put(AgentStepTypes.KEY_IS_WORKFLOW, true);
+                    }
+                    // 0724 改造B：tool_call 落盘并拿到 step id 压入 parent 栈，
+                    // 使工作流子 Agent 的 sub_agent start 能挂到该 tool_call 下（parent_step_id 不再为 NULL）。
+                    // tool_result 落盘前弹栈，保证 tool_result 与 tool_call 平级（均根层）。
+                    Integer toolCallStepId = recorder.recordToolCallReturningId(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_CALL)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)
                             .label(toolLabel)
                             .answer(toolReq.arguments())
-                            .stepData(Map.of(
-                                    AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
-                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
-                                    "arguments", toolReq.arguments()))
+                            .stepData(toolCallData)
                             .build());
+                    recorder.pushParentStepId(toolCallStepId);
 
                     ToolCallRequest toolCallRequest = ToolCallRequest.builder()
                             .toolCallId(toolReq.id())
@@ -171,20 +191,28 @@ public class AgentExecutor {
                             .build();
 
                     ToolCallResult toolResult;
-                    if (toolSpec == null) {
-                        toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
-                                "未知工具: " + toolReq.name());
-                    } else {
-                        //工作流类工具使用更宽松的超时，普通工具使用默认超时
-                        int timeout = WORKFLOW_TOOL_NAMES.contains(toolReq.name())
-                                ? workflowToolTimeoutSeconds
-                                : toolTimeoutSeconds;
-                        toolResult = toolExecutionTimeout.executeWithTimeout(
-                                toolSpec, toolCallRequest, context, timeout);//将tool传入带计时的执行类中执行
+                    try {
+                        if (toolSpec == null) {
+                            toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
+                                    "未知工具: " + toolReq.name());
+                        } else {
+                            //工作流类工具使用更宽松的超时，普通工具使用默认超时
+                            int timeout = isWorkflowTool
+                                    ? workflowToolTimeoutSeconds
+                                    : toolTimeoutSeconds;
+                            toolResult = toolExecutionTimeout.executeWithTimeout(
+                                    toolSpec, toolCallRequest, context, timeout);//将tool传入带计时的执行类中执行
+                        }
+                    } finally {
+                        // 0724 改造B：工具执行结束（含异常/未知工具）后弹栈——子 Agent 的 start/end 已在
+                        // beforeAgentInvocation/afterAgentInvocation 自行压弹，这里弹的是外层 tool_call id。
+                        // 必须在 tool_result 落盘前弹，使 tool_result 的 parent 取到 NULL（与 tool_call 平级）。
+                        recorder.popParentStepId();
                     }
 
                     //回调通知 builder：渐进披露模式下 resolve 成功会触发工具/技能动态激活（策略内化于 builder）
-                    contextBuilder.onToolExecuted(sessionId, toolReq.name(), toolResult, toolReq.arguments());
+                    //0724 改进三：透传 recorder，激活技能时由 builder 推 skill_activated 事件
+                    contextBuilder.onToolExecuted(sessionId, toolReq.name(), toolResult, toolReq.arguments(), recorder);
 
                     //构建工具执行结果文本
                     String resultText = toolResult.isSuccess()
@@ -192,6 +220,15 @@ public class AgentExecutor {
                             : "Error: " + toolResult.getError();
 
                     // 推送 tool_result 事件（SSE + 入库）：成功用 answer 存结果，失败用 error 存错误
+                    // 0724 改进一方案A：workflow_end 已删，workflow 工具结果由 tool_result 的 stepData 承载
+                    Map<String, Object> toolResultData = new java.util.HashMap<>();
+                    toolResultData.put(AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id());
+                    toolResultData.put(AgentStepTypes.KEY_TOOL_NAME, toolReq.name());
+                    toolResultData.put(AgentStepTypes.KEY_TOOL_KIND, toolKind);
+                    toolResultData.put(AgentStepTypes.KEY_IS_SUCCESS, toolResult.isSuccess());
+                    if (isWorkflowTool) {
+                        toolResultData.put(AgentStepTypes.KEY_IS_WORKFLOW, true);
+                    }
                     recorder.record(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_RESULT)
                             .stepNumber(stepNumber)
@@ -199,10 +236,7 @@ public class AgentExecutor {
                             .label(toolLabel)
                             .answer(toolResult.isSuccess() ? toolResult.getResult() : null)
                             .error(toolResult.isSuccess() ? null : toolResult.getError())
-                            .stepData(Map.of(
-                                    AgentStepTypes.KEY_TOOL_CALL_ID, toolReq.id(),
-                                    AgentStepTypes.KEY_TOOL_NAME, toolReq.name(),
-                                    AgentStepTypes.KEY_IS_SUCCESS, toolResult.isSuccess()))
+                            .stepData(toolResultData)
                             .build());
 
                     //工具执行结果注入记忆，供LLM下一轮参考

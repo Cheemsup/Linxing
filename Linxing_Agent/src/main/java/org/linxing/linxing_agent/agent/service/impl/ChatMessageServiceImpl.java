@@ -145,7 +145,7 @@ public class ChatMessageServiceImpl implements IChatMessageService {
     }
 
     /**
-     * 获取会话消息列表（P3 Mirror：优先读 mirror:msgs，miss/异常回源 DB 并热身镜像）。
+     * 获取会话消息列表
      * @param sessionId 会话ID
      * @return 消息VO列表
      */

@@ -42,6 +42,47 @@
                               <div v-else class="step-placeholder">等待思考内容...</div>
                             </div>
                           </div>
+                          <!-- 修复：本 v-if 分支同时被实时 stepEvents（扁平）与刷新后的 historyStepsCache（树）命中，
+                               后者 sub_agent 节点带 children，须渲染嵌套子步骤，否则历史回看被扁平化。
+                               与下方 v-else 历史回看模板保持一致：clarify 系列 → 状态文本；sub_agent → 可折叠面板含 children。 -->
+                          <div v-else-if="isClarifyStep(step)" class="step-item step-sub-agent clarify-step">
+                            <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
+                            <div class="clarify-content">
+                              <div class="step-text">{{ formatStepText(step) }}</div>
+                              <div class="clarify-status clarify-done">
+                                {{ step.stepData && step.stepData.agent_role === 'clarify_answer'
+                                   ? (step.answer || step.content || '已补充信息')
+                                   : '已基于现有信息生成初版内容' }}
+                              </div>
+                            </div>
+                          </div>
+                          <div v-else-if="step.eventType === 'sub_agent'" class="collapsible-panel sub-panel sub-agent-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'subagent_' + step.id) }">
+                            <div class="panel-header" @click="togglePanel(item.id, 'subagent_' + step.id)">
+                              <el-icon class="panel-toggle"><component :is="isPanelCollapsed(item.id, 'subagent_' + step.id) ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                              <el-icon class="step-icon"><Cpu /></el-icon>
+                              <span class="panel-title">{{ formatStepText(step) }}</span>
+                            </div>
+                            <div v-show="!isPanelCollapsed(item.id, 'subagent_' + step.id)" class="panel-body">
+                              <template v-for="(child, cidx) in (step.children || [])" :key="'c_' + cidx">
+                                <div v-if="child.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx) }">
+                                  <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + step.id + '_' + cidx)">
+                                    <el-icon class="panel-toggle"><component :is="isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx) ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                                    <el-icon class="step-icon"><MagicStick /></el-icon>
+                                    <span class="panel-title">{{ child.thinkingContent ? '思考详情' : '正在思考...' }}</span>
+                                  </div>
+                                  <div v-show="!isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx)" class="panel-body">
+                                    <div v-if="child.thinkingContent" class="thinking-content">{{ child.thinkingContent }}</div>
+                                    <div v-else class="step-placeholder">无思考内容</div>
+                                  </div>
+                                </div>
+                                <div v-else :class="['step-item', getStepClass(child)]">
+                                  <el-icon class="step-icon"><component :is="getStepIcon(child)" /></el-icon>
+                                  <span class="step-text">{{ formatStepText(child) }}</span>
+                                </div>
+                              </template>
+                              <div v-if="!(step.children && step.children.length)" class="step-placeholder">无子步骤</div>
+                            </div>
+                          </div>
                           <div v-else :class="['step-item', getStepClass(step)]">
                             <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
                             <span class="step-text">{{ formatStepText(step) }}</span>
@@ -82,7 +123,10 @@
                       </div>
                       <div v-show="!isPanelCollapsed(item.id, 'step')" class="panel-body">
                         <template v-if="loadingSteps[item.id]">
-                          <div class="step-placeholder">加载中...</div>
+                          <div class="step-placeholder">
+                            <StarLoader :size="16" :show-elapsed="false" />
+                            <span>加载中...</span>
+                          </div>
                         </template>
                         <template v-else-if="historyStepsCache[item.id] && historyStepsCache[item.id].length">
                           <template v-for="(step, idx) in historyStepsCache[item.id]" :key="idx">
@@ -95,6 +139,46 @@
                             <div v-show="!isPanelCollapsed(item.id, 'thinking_' + idx)" class="panel-body">
                               <div v-if="step.thinkingContent" class="thinking-content">{{ step.thinkingContent }}</div>
                               <div v-else class="step-placeholder">无思考内容</div>
+                            </div>
+                          </div>
+                          <!-- 修复：历史回看中 clarify 系列事件渲染为状态文本，而非空 sub_agent 面板 -->
+                          <div v-else-if="isClarifyStep(step)" class="step-item step-sub-agent clarify-step">
+                            <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
+                            <div class="clarify-content">
+                              <div class="step-text">{{ formatStepText(step) }}</div>
+                              <div class="clarify-status clarify-done">
+                                {{ step.stepData && step.stepData.agent_role === 'clarify_answer'
+                                   ? (step.answer || step.content || '已补充信息')
+                                   : '已基于现有信息生成初版内容' }}
+                              </div>
+                            </div>
+                          </div>
+                          <!-- 0724 改进四：sub_agent 渲染为可折叠面板，children 为子 Agent 内部 step（按 agent_id 分组配对） -->
+                          <div v-else-if="step.eventType === 'sub_agent'" class="collapsible-panel sub-panel sub-agent-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'subagent_' + step.id) }">
+                            <div class="panel-header" @click="togglePanel(item.id, 'subagent_' + step.id)">
+                              <el-icon class="panel-toggle"><component :is="isPanelCollapsed(item.id, 'subagent_' + step.id) ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                              <el-icon class="step-icon"><Cpu /></el-icon>
+                              <span class="panel-title">{{ formatStepText(step) }}</span>
+                            </div>
+                            <div v-show="!isPanelCollapsed(item.id, 'subagent_' + step.id)" class="panel-body">
+                              <template v-for="(child, cidx) in (step.children || [])" :key="'c_' + cidx">
+                                <div v-if="child.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx) }">
+                                  <div class="panel-header" @click="togglePanel(item.id, 'thinking_' + step.id + '_' + cidx)">
+                                    <el-icon class="panel-toggle"><component :is="isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx) ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                                    <el-icon class="step-icon"><MagicStick /></el-icon>
+                                    <span class="panel-title">{{ child.thinkingContent ? '思考详情' : '正在思考...' }}</span>
+                                  </div>
+                                  <div v-show="!isPanelCollapsed(item.id, 'thinking_' + step.id + '_' + cidx)" class="panel-body">
+                                    <div v-if="child.thinkingContent" class="thinking-content">{{ child.thinkingContent }}</div>
+                                    <div v-else class="step-placeholder">无思考内容</div>
+                                  </div>
+                                </div>
+                                <div v-else :class="['step-item', getStepClass(child)]">
+                                  <el-icon class="step-icon"><component :is="getStepIcon(child)" /></el-icon>
+                                  <span class="step-text">{{ formatStepText(child) }}</span>
+                                </div>
+                              </template>
+                              <div v-if="!(step.children && step.children.length)" class="step-placeholder">无子步骤</div>
                             </div>
                           </div>
                           <div v-else :class="['step-item', getStepClass(step)]">
@@ -170,9 +254,10 @@
                   </div>
                   <div v-show="!stepCollapsed" class="panel-body" ref="streamingStepBody" @scroll="onStreamingStepScroll">
                     <div v-if="!stepEvents.length && !isStreaming" class="step-placeholder">
-                      等待思考开始...
+                      <StarLoader :size="16" :show-elapsed="false" />
+                      <span>等待思考开始...</span>
                     </div>
-                    <template v-for="(step, idx) in stepEvents" :key="idx">
+                    <template v-for="(step, idx) in stepTree" :key="idx">
                       <div v-if="step.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: step.thinkingCollapsed }">
                         <div class="panel-header" @click="step.thinkingCollapsed = !step.thinkingCollapsed">
                           <el-icon class="panel-toggle"><component :is="step.thinkingCollapsed ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
@@ -184,43 +269,92 @@
                           <div v-else class="step-placeholder">等待思考内容...</div>
                         </div>
                       </div>
+                      <!-- 0724 改造C：sub_agent 流式实时可折叠面板，children 为子 Agent 内部 step -->
+                      <!-- 修复：clarify 系列事件同为 sub_agent 类型，须先于 sub_agent 面板分支判定，否则输入框分支不可达 -->
                       <div v-else-if="isClarifyStep(step)" class="step-item step-sub-agent clarify-step">
                         <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
                         <div class="clarify-content">
                           <div class="step-text">{{ formatStepText(step) }}</div>
-                          <div v-if="!getClarifyState(idx).submitted && !getClarifyState(idx).expired" class="clarify-input-area">
-                            <textarea
-                              :value="getClarifyState(idx).answer"
-                              @input="setClarifyAnswer(idx, $event.target.value)"
-                              placeholder="请输入你的补充信息..."
-                              rows="2"
-                              class="clarify-input"
-                              @keydown.enter.exact.prevent="submitClarify(idx)"
-                            ></textarea>
-                            <button
-                              class="clarify-submit-btn"
-                              @click="submitClarify(idx)"
-                              :disabled="getClarifyState(idx).submitting || !getClarifyState(idx).answer || !getClarifyState(idx).answer.trim()"
-                            >
-                              {{ getClarifyState(idx).submitting ? '提交中...' : '补充信息' }}
-                            </button>
+                          <!-- clarify 提问（有 question）：展示输入框；clarify_answer（无 question）：展示状态反馈 -->
+                          <template v-if="step.stepData && step.stepData.question">
+                            <div v-if="!getClarifyState(idx).submitted && !getClarifyState(idx).expired" class="clarify-input-area">
+                              <textarea
+                                :value="getClarifyState(idx).answer"
+                                @input="setClarifyAnswer(idx, $event.target.value)"
+                                placeholder="请输入你的补充信息..."
+                                rows="2"
+                                class="clarify-input"
+                                @keydown.enter.exact.prevent="submitClarify(idx)"
+                              ></textarea>
+                              <button
+                                class="clarify-submit-btn"
+                                @click="submitClarify(idx)"
+                                :disabled="getClarifyState(idx).submitting || !getClarifyState(idx).answer || !getClarifyState(idx).answer.trim()"
+                              >
+                                {{ getClarifyState(idx).submitting ? '提交中...' : '补充信息' }}
+                              </button>
+                            </div>
+                            <div v-else-if="getClarifyState(idx).submitted" class="clarify-status clarify-done">
+                              已回复：{{ getClarifyState(idx).answer }}
+                            </div>
+                            <div v-else class="clarify-status clarify-expired">
+                              已基于现有信息生成初版内容
+                            </div>
+                          </template>
+                          <!-- clarify_answer 回复/超时/中断事件：直接展示后端给出的状态文本 -->
+                          <div v-else class="clarify-status clarify-done">
+                            {{ step.answer || step.content || (step.error ? '澄清已中断' : '已收到补充信息') }}
                           </div>
-                          <div v-else-if="getClarifyState(idx).submitted" class="clarify-status clarify-done">
-                            已回复：{{ getClarifyState(idx).answer }}
-                          </div>
-                          <div v-else class="clarify-status clarify-expired">
-                            已基于现有信息生成初版内容
-                          </div>
+                        </div>
+                      </div>
+                      <div v-else-if="step.eventType === 'sub_agent'" class="collapsible-panel sub-panel sub-agent-panel" :class="{ collapsed: step.thinkingCollapsed }">
+                        <div class="panel-header" @click="step.thinkingCollapsed = !step.thinkingCollapsed">
+                          <el-icon class="panel-toggle"><component :is="step.thinkingCollapsed ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                          <el-icon class="step-icon"><Cpu /></el-icon>
+                          <span class="panel-title">{{ formatStepText(step) }}</span>
+                          <!-- sub_agent 执行中纯转圈（无独立心跳源，不计时）；isStepRunning 据 completed 标记停动画 -->
+                          <StarLoader v-if="isStepRunning(step, stepEvents, isStreaming)" :size="14" :show-elapsed="false" />
+                        </div>
+                        <div v-show="!step.thinkingCollapsed" class="panel-body">
+                          <template v-for="(child, cidx) in (step.children || [])" :key="'sc_' + cidx">
+                            <div v-if="child.eventType === 'thinking'" class="collapsible-panel sub-panel" :class="{ collapsed: child.thinkingCollapsed }">
+                              <div class="panel-header" @click="child.thinkingCollapsed = !child.thinkingCollapsed">
+                                <el-icon class="panel-toggle"><component :is="child.thinkingCollapsed ? 'ArrowRight' : 'ArrowDown'" /></el-icon>
+                                <el-icon class="step-icon"><MagicStick /></el-icon>
+                                <span class="panel-title">{{ child.thinkingContent ? '思考详情' : '正在思考...' }}</span>
+                              </div>
+                              <div v-show="!child.thinkingCollapsed" class="panel-body">
+                                <div v-if="child.thinkingContent" class="thinking-content">{{ child.thinkingContent }}</div>
+                                <div v-else class="step-placeholder">无思考内容</div>
+                              </div>
+                            </div>
+                            <div v-else :class="['step-item', getStepClass(child)]">
+                              <el-icon class="step-icon" :class="{ 'is-loading': isStepRunning(child, stepEvents, isStreaming) }"><component :is="getStepIcon(child)" /></el-icon>
+                              <span class="step-text">{{ formatStepText(child) }}</span>
+                              <StarLoader
+                                v-if="isStepRunning(child, stepEvents, isStreaming)"
+                                :size="14"
+                                :elapsed-seconds="child.elapsedSeconds || null"
+                                :show-elapsed="child.elapsedSeconds != null"
+                              />
+                            </div>
+                          </template>
+                          <div v-if="!(step.children && step.children.length)" class="step-placeholder">无子步骤</div>
                         </div>
                       </div>
                       <div v-else :class="['step-item', getStepClass(step)]">
                         <el-icon class="step-icon" :class="{ 'is-loading': isStepRunning(step, stepEvents, isStreaming) }"><component :is="getStepIcon(step)" /></el-icon>
                         <span class="step-text">{{ formatStepText(step) }}</span>
-                        <span v-if="isStepRunning(step, stepEvents, isStreaming)" class="step-running-hint">执行中...</span>
+                        <!-- 0724 改进五：工具执行中用四芒星 StarLoader 替代"执行中..."文案，显示"已 N 秒"计时 -->
+                        <StarLoader
+                          v-if="isStepRunning(step, stepEvents, isStreaming)"
+                          :size="14"
+                          :elapsed-seconds="step.elapsedSeconds || null"
+                        />
                       </div>
                     </template>
                     <div v-if="isStreaming && !stepEvents.length" class="step-item step-thinking">
-                      <el-icon class="step-icon"><MagicStick /></el-icon>
+                      <StarLoader :size="16" :show-elapsed="false" />
                       <span>正在思考...</span>
                     </div>
                   </div>
@@ -239,7 +373,8 @@
                     <div v-else-if="isStreaming" class="answer streaming-answer streaming-plain">{{ streamingText }}</div>
                     <div v-else-if="streamingText" class="answer" v-html="formatAnswer(streamingText)"></div>
                     <div v-else class="step-placeholder">
-                      等待回答...
+                      <StarLoader :size="16" :show-elapsed="false" />
+                      <span>等待回答...</span>
                     </div>
                     <span v-if="isStreaming" class="streaming-cursor">|</span>
                   </div>
@@ -303,6 +438,7 @@ import { ragApi, chatSessionApi } from '@/api/agent/chat'
 import { workflowApi } from '@/api/agent/workflow'
 import ChunkContextPanel from './ChunkContextPanel.vue'
 import ChatTreePanel from './ChatTreePanel.vue'
+import StarLoader from './StarLoader.vue'
 import { chatTreeStore } from '@/stores/agent/chatTreeStore'
 import { chatSessionStore } from '@/stores/agent/chatSessionStore'
 import { useMarkdownRenderer } from '@/composables/useMarkdownRenderer'
@@ -319,7 +455,8 @@ export default {
   name: 'ChatPanel',
   components: {
     ChunkContextPanel,
-    ChatTreePanel
+    ChatTreePanel,
+    StarLoader
   },
   data() {
     return {
@@ -335,6 +472,11 @@ export default {
       // 渲染节流定时器：流式 token 高频到来时，markdown 重解析按固定节拍进行，避免逐 token 重建 DOM
       renderTimer: null,
       stepEvents: [],
+      // 0724 改造C：流式实时树——onStep 收到带 stepId/parentStepId 的事件时归集到树，模板遍历 stepTree 而非 stepEvents。
+      // stepNodeMap 为 id→node 快速查找（挂载子 step 到 parent 用）。sub_agent start/end 配对同 buildStepTree。
+      stepTree: [],
+      stepNodeMap: {},
+      subAgentStartsByAgent: {}, // agentId → start node（流式配对 end 用）
       stepCollapsed: false,
       answerCollapsed: false,
       tokenBuffer: '',
@@ -540,6 +682,11 @@ export default {
         if (!Array.isArray(data)) {
           data = []
         }
+        // 后端 ChatMessageVO 的消息类型字段名为 type（user/assistant/summary），
+        // 前端模板与树遍历逻辑统一读 role。历史消息需在此归一化 type→role，
+        // 否则 user 消息因 role===undefined 落入 v-else 的 bot-message 分支，
+        // 被错误渲染出"思考过程+回答"双面板。
+        data = data.map(m => ({ ...m, role: m.role || m.type }))
         chatTreeStore.setMessages(data)
         if (activeLeafId) {
           chatTreeStore.setActiveLeaf(activeLeafId)
@@ -562,6 +709,7 @@ export default {
       this.streamingHtml = ''
       this.isStreaming = false
       this.stepEvents = []
+      this.resetStepTree()
       this.stepCollapsed = false
       this.answerCollapsed = false
       this.tokenBuffer = ''
@@ -629,27 +777,71 @@ export default {
 
           if (data.eventType === 'thinking') {
             // thinking 事件：创建思考窗口，token 通过 flushTokenBuffer 实时回填
-            vm.stepEvents.push({
+            const tnode = {
               eventType: 'thinking',
               stepNumber: stepNumber,
               phase: data.phase,
               thinkingContent: '',
+              stepId: data.stepId || null,
+              parentStepId: data.parentStepId || (data.stepData && data.stepData.parent_step_id) || null,
+              agentId: data.agentId || (data.stepData && data.stepData.agent_id) || null,
               thinkingCollapsed: false
-            })
-          } else if (data.eventType === 'cache_hit') {
-            // 缓存命中：直接使用 answer
-            vm.stepEvents.push({
-              eventType: 'cache_hit',
+            }
+            vm.stepEvents.push(tnode)
+            vm.addToStepTree(tnode)
+          } else if (data.eventType === 'tool_progress') {
+            // 0724 改进二：工具执行心跳——不入 stepEvents（保活信号非业务步骤），
+            // 只更新对应 tool_call step 的 elapsedSeconds，驱动 StarLoader 计时 + 动画
+            // Vue 3 Proxy 响应式，直接赋值即可触发更新
+            // 0724 计时准确性改造 D：按 tool_call_id 精确匹配当前正在执行的 tool_call step，
+            // 而非"最后一个 tool_call"——连续多工具调用时后者会错位到上一个工具。
+            const sd = data.stepData || {}
+            const elapsed = sd.elapsed_seconds != null ? sd.elapsed_seconds : 0
+            const tcid = sd.tool_call_id
+            let target = null
+            if (tcid) {
+              // 优先按 tool_call_id 精确匹配
+              for (let i = vm.stepEvents.length - 1; i >= 0; i--) {
+                const s = vm.stepEvents[i]
+                if (s.eventType === 'tool_call'
+                    && s.stepData && s.stepData.tool_call_id === tcid) {
+                  target = s
+                  break
+                }
+              }
+            }
+            if (!target) {
+              // 兜底：回退到最后一个 tool_call（异常/旧数据兼容）
+              for (let i = vm.stepEvents.length - 1; i >= 0; i--) {
+                const s = vm.stepEvents[i]
+                if (s.eventType === 'tool_call') {
+                  target = s
+                  break
+                }
+              }
+            }
+            if (target) {
+              target.elapsedSeconds = elapsed
+            }
+          } else if (data.eventType === 'skill_activated') {
+            // 0724 改进三：技能激活事件——独立 step 展示"已激活技能：X"
+            const snode = {
+              eventType: 'skill_activated',
               stepNumber: stepNumber,
               phase: data.phase,
-              answer: data.answer,
-              thinkingContent: data.answer || '',
+              stepData: data.stepData || {},
+              label: data.label,
+              stepId: data.stepId || null,
+              parentStepId: data.parentStepId || (data.stepData && data.stepData.parent_step_id) || null,
+              agentId: data.agentId || (data.stepData && data.stepData.agent_id) || null,
               thinkingCollapsed: false
-            })
+            }
+            vm.stepEvents.push(snode)
+            vm.addToStepTree(snode)
           } else if (data.phase === 'answer') {
             // 最终回答（final 事件）：thinking step 内容由 flushTokenBuffer 实时写入，
             // streamingText 也同步更新，不做迁移——避免窗口消失和内容跳变
-            vm.stepEvents.push({
+            const anode = {
               eventType: data.eventType,
               stepNumber: stepNumber,
               phase: data.phase,
@@ -657,23 +849,37 @@ export default {
               answer: data.answer,
               error: data.error,
               finalStep: data.finalStep,
+              stepId: data.stepId || null,
+              parentStepId: data.parentStepId || (data.stepData && data.stepData.parent_step_id) || null,
+              agentId: data.agentId || (data.stepData && data.stepData.agent_id) || null,
               thinkingCollapsed: false
-            })
+            }
+            vm.stepEvents.push(anode)
+            vm.addToStepTree(anode)
           } else {
             // tool_call / tool_result / error 事件：token 已由 flushTokenBuffer 实时回填
-            vm.stepEvents.push({
+            // 0724 改进三：stepData 内带 tool_kind，供前端按分类展示
+            const enode = {
               eventType: data.eventType,
               stepNumber: stepNumber,
               phase: data.phase,
               stepData: data.stepData || {},
               answer: data.answer,
               error: data.error,
+              label: data.label,
               finalStep: data.finalStep,
+              stepId: data.stepId || null,
+              parentStepId: data.parentStepId || (data.stepData && data.stepData.parent_step_id) || null,
+              agentId: data.agentId || (data.stepData && data.stepData.agent_id) || null,
               thinkingCollapsed: false
-            })
+            }
+            vm.stepEvents.push(enode)
+            vm.addToStepTree(enode)
 
-            // workflow_end 到来时，将所有未提交的 clarify 步骤标记为过期（超时或已跳过）
-            if (data.eventType === 'workflow_end') {
+            // 0724 改进一方案A：workflow_end 已删，workflow 工具完成时由 tool_result(is_workflow=true) 触发
+            // 将所有未提交的 clarify 步骤标记为过期（超时或已跳过）
+            if (data.eventType === 'tool_result'
+                && data.stepData && data.stepData.is_workflow) {
               vm.expirePendingClarifications()
             }
           }
@@ -775,6 +981,9 @@ export default {
         onDone() {
           vm.tempUserMsg = null
           vm.loading = false
+          // 兜底：流式结束前把所有未闭合 step 标记完成，防止断连/异常导致永久转圈
+          // （isStreaming=false 已能让 isStepRunning 返回 false，此标记为双保险）
+          vm.markAllStepsCompleted()
           vm.isStreaming = false
           vm.$nextTick(() => {
             // 流式彻底结束后兜底再贴底一次：onResult 的滚动可能早于 DOM 完全渲染完成
@@ -802,10 +1011,8 @@ export default {
         case 'thinking': return 'step-thinking'
         case 'error': return 'step-error'
         case 'final': return 'step-final'
-        case 'cache_hit': return 'step-cache'
-        case 'workflow_start': return 'step-workflow'
+        case 'skill_activated': return 'step-skill'
         case 'sub_agent': return 'step-sub-agent'
-        case 'workflow_end': return 'step-workflow'
         default: return ''
       }
     },
@@ -817,25 +1024,42 @@ export default {
         case 'thinking': return 'MagicStick'
         case 'error': return 'CircleCloseFilled'
         case 'final': return 'CircleCheckFilled'
-        case 'cache_hit': return 'Lightning'
-        case 'workflow_start': return 'Promotion'
+        case 'skill_activated': return 'MagicStick'
         case 'sub_agent': return 'Cpu'
-        case 'workflow_end': return 'Flag'
         default: return 'LocationFilled'
       }
     },
 
     /**
-     * 判断某个步骤是否正处于"执行中"状态，用于显示转圈加载动画。
-     * tool_call 事件在工具执行前推送、tool_result 在执行后推送，
-     * 因此当最后一个步骤是 tool_call 且流式未结束时，说明工具正在执行中。
-     * 历史消息（已结束）的 tool_call 不会被视为执行中。
+     * 判断某个步骤是否正处于"执行中"状态，用于显示四芒星动画。
+     * 统一规则：tool_call 与 sub_agent 一视同仁——触发即转，结束（收到 tool_result / sub_agent end）即停。
+     * 不区分母/子、Agent/Tool，无特例。
+     *
+     * 计时由数据驱动：母 tool_call 有 tool_progress 心跳（elapsedSeconds 非空）则显示"已 N 秒"；
+     * sub_agent 与子 Agent 内部工具无心跳源，纯转圈。
+     *
+     * 闭合判定：addToStepTree 在收到 tool_result / sub_agent end 时把对应节点标记 completed=true，
+     * 此处据此停止动画——不再依赖"是否最后一个 step"（旧逻辑导致母 tool_call 在子 step 出现后丢动画、
+     * sub_agent 永远不是最后一个而拿不到动画）。
+     *
+     * 超时软上限：tool_progress 心跳累计 > 660s 视为异常（后端可能已断连/超时但前端未收到结束事件），
+     * 停止动画。仅对有心跳的母 tool_call 生效（elapsedSeconds 为 null 时不启用）。
      */
     isStepRunning(step, steps, isStreaming) {
-      if (!steps || !steps.length) return false
       if (!isStreaming) return false
-      const last = steps[steps.length - 1]
-      return step === last && step.eventType === 'tool_call'
+      if (!step) return false
+      // 已闭合（tool_result / sub_agent end 已到达）——停
+      if (step.completed === true) return false
+      if (step.eventType === 'tool_call') {
+        if (step.elapsedSeconds != null && step.elapsedSeconds > 660) return false
+        return true
+      }
+      if (step.eventType === 'sub_agent') {
+        // clarify 子 Agent 在等用户输入，非执行中——不转
+        if (this.isClarifyStep(step)) return false
+        return true
+      }
+      return false
     },
 
     getStepsForMessage(item) {
@@ -850,13 +1074,15 @@ export default {
     },
 
     /**
-     * 判断是否为 HumanInTheLoop 澄清步骤（需要展示输入框）
+     * 判断是否为 HumanInTheLoop 澄清系列步骤（clarify 提问 / clarify_answer 回复）。
+     * 两者同为 sub_agent 类型，须在模板 v-if 链中先于 sub_agent 面板分支判定，
+     * 否则会被渲染成"无子步骤"空面板。是否有 question 决定显示输入框还是状态反馈。
      */
     isClarifyStep(step) {
       return step.eventType === 'sub_agent'
         && step.stepData
-        && step.stepData.agent_role === 'clarify'
-        && step.stepData.question
+        && (step.stepData.agent_role === 'clarify'
+            || step.stepData.agent_role === 'clarify_answer')
     },
 
     /**
@@ -939,18 +1165,203 @@ export default {
         const res = await chatSessionApi.getMessageSteps(messageId)
         const steps = res.data.data || res.data || []
         const mapped = steps.map(s => ({
+          id: s.id,
           eventType: s.stepType,
           stepNumber: s.stepOrder,
           stepData: s.stepData || {},
           content: s.content,
+          // 0724 改进四：层级字段，供 buildStepTree 重建树
+          parentStepId: s.parentStepId || s.parent_step_id || null,
+          agentId: s.agentId || s.agent_id || null,
           thinkingContent: s.stepType === 'thinking' ? s.content : ''
         }))
-        this.historyStepsCache[messageId] = mapped
+        // 0724 改进四：历史步骤重建为树（按 parentStepId 组装 children）
+        this.historyStepsCache[messageId] = this.buildStepTree(mapped)
       } catch (e) {
         console.error('加载推理步骤失败:', e)
       } finally {
         this.loadingSteps[messageId] = false
       }
+    },
+
+    /**
+     * 0724 改造C：流式实时归集——onStep 收到带 stepId/parentStepId 的事件时挂入树。
+     * - sub_agent start（is_start=true）：创建容器节点入树（根或挂 parent），记入 subAgentStartsByAgent
+     * - sub_agent end（is_start=false）：合并到同 agentId 的 start（更新 success/error），不独立入树
+     * - 有 parentStepId 且 nodeMap 命中：挂到 parent.children
+     * - 否则：入根层 stepTree
+     * thinking/tool_progress 等无 stepId 的事件直接入根层（兼容旧逻辑）。
+     */
+    addToStepTree(node) {
+      const aid = node.agentId || (node.stepData && node.stepData.agent_name)
+      // 修复：clarify 系列（clarify 提问 / clarify_answer 回复）是用户交互叶子节点，
+      // 不参与 sub_agent start/end 配对——否则 clarify_answer 会被误当作 start 覆盖 clarify 节点，
+      // 或两者被合并成一环。直接跳过配对逻辑，落到下方"强制入根层"分支。
+      const role = node.stepData && node.stepData.agent_role
+      const isClarifySeries = node.eventType === 'sub_agent'
+        && (role === 'clarify' || role === 'clarify_answer')
+      if (node.eventType === 'sub_agent' && node.stepData && !isClarifySeries) {
+        const isEnd = node.stepData.is_start === false
+          || node.stepData.is_start === 'false' || node.stepData.is_start === 0
+        if (isEnd) {
+          const startNode = aid ? this.subAgentStartsByAgent[aid] : null
+          if (startNode) {
+            startNode.stepData = { ...startNode.stepData, ...node.stepData }
+            startNode.stepData.is_start = true
+            if (node.error) startNode.error = node.error
+            // 标记 sub_agent 已闭合：end 已到达，isStepRunning 据此停止动画
+            startNode.completed = true
+            delete this.subAgentStartsByAgent[aid]
+          } else {
+            // 无配对 start，作为根层保留
+            this.stepTree.push(node)
+            if (node.stepId != null) this.stepNodeMap[node.stepId] = node
+          }
+          return
+        }
+        // sub_agent start：记入配对表，标记未闭合
+        if (aid && (node.stepData.is_start === true
+            || node.stepData.is_start === 'true' || node.stepData.is_start === 1
+            || node.stepData.is_start == null)) {
+          this.subAgentStartsByAgent[aid] = node
+          node.completed = false
+        }
+      }
+      // tool_result 到达：按 tool_call_id 反查对应 tool_call，标记其已闭合
+      if (node.eventType === 'tool_result' && node.stepData && node.stepData.tool_call_id) {
+        const toolCallNode = this._findStepByToolCallId(node.stepData.tool_call_id)
+        if (toolCallNode) toolCallNode.completed = true
+      }
+      // tool_call 入树时显式标记未闭合（配合 isStepRunning）
+      if (node.eventType === 'tool_call') {
+        node.completed = false
+      }
+      // 挂到 parent 或入根层
+      // 0724 改造C：clarify 系列（clarify 提问 + clarify_answer 回复/超时/中断）强制入根层——
+      // 它们是用户交互节点，需在根层可见：clarify 渲染输入框，clarify_answer 渲染状态反馈。
+      // 若挂到 tool_call.children 下模板遍历不到，输入框与状态反馈都会消失，用户无法交互也无法感知结果。
+      // isClarifySeries 已在方法开头计算（跳过配对时复用）。
+      const pid = isClarifySeries ? null : node.parentStepId
+      if (pid != null && this.stepNodeMap[pid]) {
+        this.stepNodeMap[pid].children = this.stepNodeMap[pid].children || []
+        this.stepNodeMap[pid].children.push(node)
+      } else {
+        this.stepTree.push(node)
+      }
+      if (node.stepId != null) this.stepNodeMap[node.stepId] = node
+    },
+    /**
+     * 在 stepTree 全树（含各节点 children）按 tool_call_id 查找 tool_call 节点。
+     * 供 tool_result 到达时反查对应 tool_call 标记 completed。
+     */
+    _findStepByToolCallId(tcid) {
+      const walk = (list) => {
+        for (const s of list) {
+          if (s.eventType === 'tool_call'
+              && s.stepData && s.stepData.tool_call_id === tcid) return s
+          if (s.children) {
+            const r = walk(s.children)
+            if (r) return r
+          }
+        }
+        return null
+      }
+      return walk(this.stepTree)
+    },
+    /**
+     * 0724 改造C：重置流式树状态（新会话/新问题时调用）。
+     */
+    resetStepTree() {
+      this.stepTree = []
+      this.stepNodeMap = {}
+      this.subAgentStartsByAgent = {}
+    },
+    /**
+     * 标记所有 step 为已闭合（completed=true），递归含 children。
+     * 流式结束兜底用：防止断连/异常导致未收到 tool_result / sub_agent end 的步骤永久转圈。
+     */
+    markAllStepsCompleted() {
+      const walk = (list) => {
+        list.forEach(s => {
+          s.completed = true
+          if (s.children) walk(s.children)
+        })
+      }
+      walk(this.stepTree)
+      this.stepEvents.forEach(s => { s.completed = true })
+    },
+
+    /**
+     * 0724 改进四：将扁平 step 列表按 parentStepId 重建为树。
+     * - 根层（parentStepId 为 null）放入结果数组
+     * - 有 parent 的挂到对应 parent 的 children 下
+     * - sub_agent 的 start/end 配对：end 事件（is_start=false）合并到同 agent 的 start 事件上（更新 success/error），
+     *   不单独作为树节点，避免重复
+     * 顺序场景下按 stepOrder 排序保证时序正确。
+     */
+    buildStepTree(steps) {
+      if (!steps || !steps.length) return []
+      // 按 stepOrder 排序保证时序（loadHistorySteps 已把 stepOrder 映射为 stepNumber）
+      const sorted = [...steps].sort((a, b) => (a.stepNumber || 0) - (b.stepNumber || 0))
+      // 建 id → node 映射（带 children）
+      const nodeMap = new Map()
+      sorted.forEach(s => {
+        nodeMap.set(s.id, { ...s, children: [] })
+      })
+      const roots = []
+      // 0724 改造C：is_start 宽松判定——兼容 jsonb 反序列化为字符串 "true"/"false" 的情况
+      const isStart = (v) => v === true || v === 'true' || v === 1
+      const isEnd = (v) => v === false || v === 'false' || v === 0
+      // 第一遍：收集 sub_agent start 节点（用于配对 end）
+      const subAgentStarts = new Map() // agentId → start node
+      nodeMap.forEach(node => {
+        if (node.eventType === 'sub_agent' && node.stepData
+            && isStart(node.stepData.is_start)) {
+          const aid = node.agentId || (node.stepData.agent_name)
+          if (aid) subAgentStarts.set(aid, node)
+        }
+      })
+      // 第二遍：构建树，end 事件合并到 start
+      nodeMap.forEach(node => {
+        // sub_agent end 事件：合并到同 agent 的 start，不独立入树
+        if (node.eventType === 'sub_agent' && node.stepData
+            && isEnd(node.stepData.is_start)) {
+          const aid = node.agentId || (node.stepData.agent_name)
+          let startNode = aid ? subAgentStarts.get(aid) : null
+          // 兜底：is_start 字段缺失时，按同 agent_id 的首尾配对——此节点为 end，
+          // 找同 agent_id 中尚未配对的 start（subAgentStarts 已存首个 start）
+          if (!startNode && aid) {
+            // 若 start 未被收集（is_start 缺失），扫一遍找同 agent 的首个 sub_agent
+            for (const n of nodeMap.values()) {
+              if (n.eventType === 'sub_agent'
+                  && (n.agentId === aid || (n.stepData && n.stepData.agent_name === aid))
+                  && n !== node) {
+                startNode = n
+                subAgentStarts.set(aid, n)
+                break
+              }
+            }
+          }
+          if (startNode) {
+            // 用 end 事件更新 start 的 success 状态
+            startNode.stepData = { ...startNode.stepData, ...node.stepData }
+            startNode.stepData.is_start = true // 保持为 start 节点（前端据此渲染面板）
+            if (node.error) startNode.error = node.error
+          } else {
+            // 既无 start 也无配对，作为根层节点保留（不丢数据）
+            roots.push(node)
+          }
+          return
+        }
+        // 跳过已作为 start 被合并引用的 end 节点（上面分支已 return）
+        const pid = node.parentStepId
+        if (pid != null && nodeMap.has(pid)) {
+          nodeMap.get(pid).children.push(node)
+        } else {
+          roots.push(node)
+        }
+      })
+      return roots
     },
 
     toggleHistoryStepsPanel(item) {
@@ -971,8 +1382,17 @@ export default {
       const sd = step.stepData || {}
       const label = step.label || sd.display_label || null
       switch (step.eventType) {
-        case 'tool_call':
+        case 'tool_call': {
+          // 0724 改进三：按 tool_kind 细化展示
+          const kind = sd.tool_kind
+          if (kind === 'skill') {
+            return label || '加载技能'
+          }
+          if (kind === 'workflow') {
+            return label || sd.tool_name || '执行工作流'
+          }
           return label || sd.tool_name || '调用工具'
+        }
         case 'tool_result': {
           const toolLabel = label || sd.tool_name || '工具'
           return sd.is_success === false ? `${toolLabel}失败` : `${toolLabel}完成`
@@ -983,12 +1403,12 @@ export default {
           return label || `出错：${step.error || '未知'}`
         case 'final':
           return label || '回答已就绪'
-        case 'cache_hit':
-          return label || '已为你快速回答'
-        case 'workflow_start': {
-          if (label) return label
-          const topic = sd.topic ? `：${sd.topic}` : ''
-          return `正在生成学习计划${topic}`
+        case 'skill_activated': {
+          // 0724 改进三：技能激活展示名 + 关联工具数
+          const skillName = sd.skill_name || label || '技能'
+          const toolNames = sd.tool_names || []
+          const toolPart = toolNames.length ? `（关联 ${toolNames.length} 个工具）` : ''
+          return label || `已激活技能：${skillName}${toolPart}`
         }
         case 'sub_agent': {
           if (label) {
@@ -1013,7 +1433,6 @@ export default {
             knowledge_search: '正在收集资料',
             plan: '正在生成学习计划',
             plan_save: '正在保存学习计划',
-            plan_retry: '正在重新生成学习计划',
             exam: '正在生成测验',
             exam_save: '正在保存测验'
           }
@@ -1029,21 +1448,6 @@ export default {
             return `${roleLabel}${success ? '' : '（失败）'}：${detail}`
           }
           return roleLabel + (success ? '' : '（失败）')
-        }
-        case 'workflow_end': {
-          if (label) return label
-          const planSaved = sd.plan_saved
-          const examSaved = sd.exam_saved
-          const examTriggered = sd.exam_triggered
-          const clarificationTimedOut = sd.clarification_timed_out
-          let suffix = clarificationTimedOut ? '（已基于现有信息生成初版）' : ''
-          if (planSaved && (!examTriggered || examSaved)) {
-            return `生成完成：学习计划已保存${examTriggered ? '，测验已保存' : ''}${suffix}`
-          }
-          if (planSaved && examTriggered && !examSaved) {
-            return `生成完成：学习计划已保存，测验生成失败${suffix}`
-          }
-          return `生成完成${step.error ? '：' + step.error : ''}${suffix}`
         }
         default:
           return label || step.eventType || ''
@@ -1728,13 +2132,32 @@ export default {
   font-weight: 500;
 }
 
-.step-workflow .step-text {
+.step-sub-agent .step-text {
+  color: #00838f;
+}
+
+/* 0724 改进三：技能激活步骤样式 */
+.step-skill .step-text {
   color: #6a1b9a;
   font-weight: 500;
 }
 
-.step-sub-agent .step-text {
-  color: #00838f;
+/* 0724 改进四：sub_agent 可折叠子面板（历史回看树形） */
+.sub-agent-panel {
+  margin: 4px 0;
+  background: #f1f8f9;
+  border: 1px solid #b2dfdb;
+  border-radius: 6px;
+}
+
+.sub-agent-panel > .panel-header {
+  padding: 6px 8px;
+}
+
+.sub-agent-panel > .panel-body {
+  padding: 4px 8px 4px 16px;
+  border-left: 2px solid #b2dfdb;
+  margin-left: 8px;
 }
 
 /* HumanInTheLoop 澄清步骤样式 */

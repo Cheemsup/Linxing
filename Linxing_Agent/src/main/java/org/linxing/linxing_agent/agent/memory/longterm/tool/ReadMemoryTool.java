@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.memory.longterm.tool;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 读取指定相对路径的长期记忆 Markdown 全文。
@@ -28,6 +30,7 @@ public class ReadMemoryTool implements Tool {
             + "参数 path 为相对路径，如 Agent.md、Learning/Current.md、History/AgentMemory.md。";
 
     private final MemoryWorkspace memoryWorkspace;
+    private final ObjectMapper objectMapper;
 
     @Override
     public String name() {
@@ -68,8 +71,16 @@ public class ReadMemoryTool implements Tool {
     @Override
     public ToolCallResult execute(ToolCallRequest request, AgentContext context) {
         Integer userId = context.getUserId();
-        String path = readPathArgument(request);
-        if (path == null) {
+        // 用 ObjectMapper 解析参数：渐进披露模式下 LLM 未 resolve 拿到 schema 时可能用 name 键，
+        // @JsonAlias({"name"}) 兼容此键名漂移，path 仍为规范名。
+        ReadArgs args;
+        try {
+            args = objectMapper.readValue(request.getArguments(), ReadArgs.class);
+        } catch (Exception e) {
+            return ToolCallResult.failure(request.getToolCallId(), NAME, "参数解析失败: " + e.getMessage());
+        }
+        String path = args.getPath();
+        if (path == null || path.isBlank()) {
             return ToolCallResult.failure(request.getToolCallId(), NAME, "path 参数为空");
         }
         try {
@@ -83,47 +94,14 @@ public class ReadMemoryTool implements Tool {
     }
 
     /**
-     * 轻量解析 path 参数：直接从 arguments JSON 提取 path 字段，避免依赖 ObjectMapper（供 Builder `@` 引用解析复用）。
+     * read_memory 工具参数。
+     * <p>{@code path} 为规范键名（与 {@link #spec()} 声明一致）；
+     * {@code @JsonAlias({"name"})} 兼容渐进披露模式下 LLM 未先 resolve 拿 schema 时用 {@code name} 键的漂移。
      */
-    private String readPathArgument(ToolCallRequest request) {
-        String args = request.getArguments();
-        if (args == null || args.isBlank()) {
-            return null;
-        }
-        return extractJsonField(args, "path");
-    }
-
-    /**
-     * 极简 JSON 字段提取：仅支持顶层字符串字段，用于 path 这种简单参数。复杂结构请走 ObjectMapper。
-     */
-    private static String extractJsonField(String json, String field) {
-        String key = "\"" + field + "\"";
-        int idx = json.indexOf(key);
-        if (idx < 0) {
-            return null;
-        }
-        int colon = json.indexOf(':', idx + key.length());
-        if (colon < 0) {
-            return null;
-        }
-        int start = -1;
-        for (int i = colon + 1; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '"') {
-                start = i + 1;
-                break;
-            }
-            if (!Character.isWhitespace(c)) {
-                return null;
-            }
-        }
-        if (start < 0) {
-            return null;
-        }
-        int end = json.indexOf('"', start);
-        if (end < 0) {
-            return null;
-        }
-        return json.substring(start, end);
+    @lombok.Data
+    @lombok.NoArgsConstructor
+    public static class ReadArgs {
+        @JsonAlias({"name"})
+        private String path;
     }
 }

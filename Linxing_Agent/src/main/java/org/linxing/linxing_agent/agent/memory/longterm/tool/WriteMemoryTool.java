@@ -1,5 +1,6 @@
 package org.linxing.linxing_agent.agent.memory.longterm.tool;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,8 @@ public class WriteMemoryTool implements Tool {
     @lombok.Data
     @lombok.NoArgsConstructor
     public static class WriteArgs {
+        /** path兼容name，容错设计 */
+        @JsonAlias({"name"})
         private String path;
         private String content;
     }

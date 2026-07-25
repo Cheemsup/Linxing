@@ -20,5 +20,9 @@ public class AgentStepVO {
     private String content;
     private String label;
     private Map<String, Object> stepData;
+    /** 0724新增：父步骤ID，NULL表示根层。前端据此重建树 */
+    private Integer parentStepId;
+    /** 0724新增：所属Agent标识（main/plan_generator...），前端据此分组配对 sub_agent start/end */
+    private String agentId;
     private OffsetDateTime createdAt;
 }

@@ -63,6 +63,10 @@ public class AgentStepServiceImpl {
                 .content(step.getContent())
                 .label(label)
                 .stepData(stepData)
+                // 0724 修复：回填层级字段——前端 buildStepTree 据此重建 sub_agent/工具调用父子树，
+                // 缺失会导致历史回看全部扁平化（所有节点 parentStepId 为 null 进 roots）。
+                .parentStepId(step.getParentStepId())
+                .agentId(step.getAgentId())
                 .createdAt(step.getCreatedAt())
                 .build();
     }

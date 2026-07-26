@@ -174,7 +174,7 @@ public class AgentExecutor {
                     // 0724 改造B：tool_call 落盘并拿到 step id 压入 parent 栈，
                     // 使工作流子 Agent 的 sub_agent start 能挂到该 tool_call 下（parent_step_id 不再为 NULL）。
                     // tool_result 落盘前弹栈，保证 tool_result 与 tool_call 平级（均根层）。
-                    Integer toolCallStepId = recorder.recordToolCallReturningId(AgentStepEvent.builder()
+                    Integer toolCallStepId = recorder.record(AgentStepEvent.builder()
                             .eventType(AgentStepTypes.TOOL_CALL)
                             .stepNumber(stepNumber)
                             .phase(AgentStepTypes.PHASE_THINKING)

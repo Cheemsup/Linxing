@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
+import org.linxing.linxing_agent.agent.core.SubAgentStepListener;
 import org.linxing.linxing_agent.agent.service.impl.ExamServiceImpl;
 import org.linxing.linxing_agent.agent.tool.impl.SaveExamTool;
 import org.linxing.linxing_agent.agent.tool.impl.SaveStudyPlanTool;
@@ -71,7 +72,7 @@ public class ContentGenerationStage {
                         saveStudyPlanTool)
                 .outputKey(PLAN_OUTPUT_KEY)
                 .defaultKeyValue("clarification", "无补充信息")
-                .listener(StepRecorder.createListener(
+                .listener(SubAgentStepListener.create(
                         PLAN_AGENT_NAME, "plan",
                         PLAN_DISPLAY_LABEL, PLAN_OUTPUT_KEY, recorder,
                         AgentStepTypes.PHASE_STUDY_PLAN))
@@ -85,7 +86,7 @@ public class ContentGenerationStage {
                         replaceContainerMetadataTool,
                         saveExamTool)
                 .outputKey(EXAM_OUTPUT_KEY)
-                .listener(StepRecorder.createListener(
+                .listener(SubAgentStepListener.create(
                         EXAM_AGENT_NAME, "exam",
                         EXAM_DISPLAY_LABEL, EXAM_OUTPUT_KEY, recorder,
                         AgentStepTypes.PHASE_STUDY_PLAN))

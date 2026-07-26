@@ -77,7 +77,22 @@
                                 </div>
                                 <div v-else :class="['step-item', getStepClass(child)]">
                                   <el-icon class="step-icon"><component :is="getStepIcon(child)" /></el-icon>
-                                  <span class="step-text">{{ formatStepText(child) }}</span>
+                                  <span class="step-text">
+                                    <template v-if="child.eventType === 'tool_call' && formatToolArgSummary(child.stepData && child.stepData.arguments, child.stepData && child.stepData.tool_name)">
+                                      {{ formatStepText(child) }}：
+                                      <span v-if="!isToolArgLong(child)">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                      <span v-else class="tool-arg-wrap">
+                                        <span v-if="!getToolArgExpanded(child)" class="tool-arg-truncated">
+                                          {{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name).slice(0, 30) }}…
+                                        </span>
+                                        <span v-else class="tool-arg-full">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                        <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(child)">
+                                          {{ getToolArgExpanded(child) ? '收起' : '展开' }}
+                                        </button>
+                                      </span>
+                                    </template>
+                                    <template v-else>{{ formatStepText(child) }}</template>
+                                  </span>
                                 </div>
                               </template>
                               <div v-if="!(step.children && step.children.length)" class="step-placeholder">无子步骤</div>
@@ -85,7 +100,22 @@
                           </div>
                           <div v-else :class="['step-item', getStepClass(step)]">
                             <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
-                            <span class="step-text">{{ formatStepText(step) }}</span>
+                            <span class="step-text">
+                              <template v-if="step.eventType === 'tool_call' && formatToolArgSummary(step.stepData && step.stepData.arguments, step.stepData && step.stepData.tool_name)">
+                                {{ formatStepText(step) }}：
+                                <span v-if="!isToolArgLong(step)">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                                <span v-else class="tool-arg-wrap">
+                                  <span v-if="!getToolArgExpanded(step)" class="tool-arg-truncated">
+                                    {{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name).slice(0, 30) }}…
+                                  </span>
+                                  <span v-else class="tool-arg-full">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                                  <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(step)">
+                                    {{ getToolArgExpanded(step) ? '收起' : '展开' }}
+                                  </button>
+                                </span>
+                              </template>
+                              <template v-else>{{ formatStepText(step) }}</template>
+                            </span>
                           </div>
                         </template>
                       </div>
@@ -175,7 +205,22 @@
                                 </div>
                                 <div v-else :class="['step-item', getStepClass(child)]">
                                   <el-icon class="step-icon"><component :is="getStepIcon(child)" /></el-icon>
-                                  <span class="step-text">{{ formatStepText(child) }}</span>
+                                  <span class="step-text">
+                                    <template v-if="child.eventType === 'tool_call' && formatToolArgSummary(child.stepData && child.stepData.arguments, child.stepData && child.stepData.tool_name)">
+                                      {{ formatStepText(child) }}：
+                                      <span v-if="!isToolArgLong(child)">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                      <span v-else class="tool-arg-wrap">
+                                        <span v-if="!getToolArgExpanded(child)" class="tool-arg-truncated">
+                                          {{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name).slice(0, 30) }}…
+                                        </span>
+                                        <span v-else class="tool-arg-full">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                        <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(child)">
+                                          {{ getToolArgExpanded(child) ? '收起' : '展开' }}
+                                        </button>
+                                      </span>
+                                    </template>
+                                    <template v-else>{{ formatStepText(child) }}</template>
+                                  </span>
                                 </div>
                               </template>
                               <div v-if="!(step.children && step.children.length)" class="step-placeholder">无子步骤</div>
@@ -183,7 +228,22 @@
                           </div>
                           <div v-else :class="['step-item', getStepClass(step)]">
                             <el-icon class="step-icon"><component :is="getStepIcon(step)" /></el-icon>
-                            <span class="step-text">{{ formatStepText(step) }}</span>
+                            <span class="step-text">
+                              <template v-if="step.eventType === 'tool_call' && formatToolArgSummary(step.stepData && step.stepData.arguments, step.stepData && step.stepData.tool_name)">
+                                {{ formatStepText(step) }}：
+                                <span v-if="!isToolArgLong(step)">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                                <span v-else class="tool-arg-wrap">
+                                  <span v-if="!getToolArgExpanded(step)" class="tool-arg-truncated">
+                                    {{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name).slice(0, 30) }}…
+                                  </span>
+                                  <span v-else class="tool-arg-full">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                                  <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(step)">
+                                    {{ getToolArgExpanded(step) ? '收起' : '展开' }}
+                                  </button>
+                                </span>
+                              </template>
+                              <template v-else>{{ formatStepText(step) }}</template>
+                            </span>
                           </div>
                           </template>
                         </template>
@@ -330,7 +390,22 @@
                             </div>
                             <div v-else :class="['step-item', getStepClass(child)]">
                               <el-icon class="step-icon" :class="{ 'is-loading': isStepRunning(child, stepEvents, isStreaming) }"><component :is="getStepIcon(child)" /></el-icon>
-                              <span class="step-text">{{ formatStepText(child) }}</span>
+                              <span class="step-text">
+                                <template v-if="child.eventType === 'tool_call' && formatToolArgSummary(child.stepData && child.stepData.arguments, child.stepData && child.stepData.tool_name)">
+                                  {{ formatStepText(child) }}：
+                                  <span v-if="!isToolArgLong(child)">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                  <span v-else class="tool-arg-wrap">
+                                    <span v-if="!getToolArgExpanded(child)" class="tool-arg-truncated">
+                                      {{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name).slice(0, 30) }}…
+                                    </span>
+                                    <span v-else class="tool-arg-full">{{ formatToolArgSummary(child.stepData.arguments, child.stepData.tool_name) }}</span>
+                                    <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(child)">
+                                      {{ getToolArgExpanded(child) ? '收起' : '展开' }}
+                                    </button>
+                                  </span>
+                                </template>
+                                <template v-else>{{ formatStepText(child) }}</template>
+                              </span>
                               <StarLoader
                                 v-if="isStepRunning(child, stepEvents, isStreaming)"
                                 :size="14"
@@ -344,7 +419,22 @@
                       </div>
                       <div v-else :class="['step-item', getStepClass(step)]">
                         <el-icon class="step-icon" :class="{ 'is-loading': isStepRunning(step, stepEvents, isStreaming) }"><component :is="getStepIcon(step)" /></el-icon>
-                        <span class="step-text">{{ formatStepText(step) }}</span>
+                        <span class="step-text">
+                          <template v-if="step.eventType === 'tool_call' && formatToolArgSummary(step.stepData && step.stepData.arguments, step.stepData && step.stepData.tool_name)">
+                            {{ formatStepText(step) }}：
+                            <span v-if="!isToolArgLong(step)">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                            <span v-else class="tool-arg-wrap">
+                              <span v-if="!getToolArgExpanded(step)" class="tool-arg-truncated">
+                                {{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name).slice(0, 30) }}…
+                              </span>
+                              <span v-else class="tool-arg-full">{{ formatToolArgSummary(step.stepData.arguments, step.stepData.tool_name) }}</span>
+                              <button class="tool-arg-toggle" @click.stop="toggleToolArgExpanded(step)">
+                                {{ getToolArgExpanded(step) ? '收起' : '展开' }}
+                              </button>
+                            </span>
+                          </template>
+                          <template v-else>{{ formatStepText(step) }}</template>
+                        </span>
                         <!-- 0724 改进五：工具执行中用四芒星 StarLoader 替代"执行中..."文案，显示"已 N 秒"计时 -->
                         <StarLoader
                           v-if="isStepRunning(step, stepEvents, isStreaming)"
@@ -436,6 +526,7 @@
 <script>
 import { ragApi, chatSessionApi } from '@/api/agent/chat'
 import { workflowApi } from '@/api/agent/workflow'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ChunkContextPanel from './ChunkContextPanel.vue'
 import ChatTreePanel from './ChatTreePanel.vue'
 import StarLoader from './StarLoader.vue'
@@ -497,7 +588,9 @@ export default {
       // 回到底部附近时自动恢复为 true，实时跟随最新输出（kimi/智谱清言/deepseek 风格）。
       // 两个窗口各自独立追踪：stepBody 对应"思考过程"，answerBody 对应"回答"。
       stepPinned: true,
-      answerPinned: true
+      answerPinned: true,
+      // 0726 改造：tool_call 入参摘要展开/折叠状态，key 由 stepId/stepNumber 派生
+      toolArgExpandedMap: {}
     }
   },
   computed: {
@@ -719,6 +812,8 @@ export default {
       // 每次新的流式请求开始时，清空 HumanInTheLoop 澄清输入框状态，
       // 避免同页面会话中上一次工作流的澄清回复被复用到新工作流。
       this.clarifyInputs = {}
+      // 0726 改造：清空 tool_call 入参展开状态，避免跨会话残留
+      this.toolArgExpandedMap = {}
       // 新一轮流式开始，两个窗口默认贴底跟随最新内容
       this.stepPinned = true
       this.answerPinned = true
@@ -951,11 +1046,11 @@ export default {
           // 展示完整内容（kimi/智谱清言/deepseek 完成后自动滚到底的体验）。
           // 由于此时模板尚未把 streamingText 切回 formatAnswer 渲染，需在下一帧再次拉到底。
           vm.answerPinned = true
-          vm.$nextTick(() => {
-            if (vm.$refs.streamingAnswerBody) {
-              vm.$refs.streamingAnswerBody.scrollTop = vm.$refs.streamingAnswerBody.scrollHeight
-            }
-          })
+          vm.pinStreamingPanelsToBottom()
+          // 正式 assistant 消息已入列，其 answer-panel 的 .panel-body 是新建 DOM（scrollTop=0），
+          // 长回答会停在顶部。流式面板（streamingAnswerBody）随 loading=false 即将销毁，
+          // pinStreamingPanelsToBottom 对它无效——必须额外把正式回答面板贴底。
+          vm.pinAnswerPanelToBottom(assistantMsg.id)
           // 流式已完成、消息已追加，恢复 watch 自动 load 能力
           vm.suppressWatchLoad = false
         },
@@ -986,28 +1081,38 @@ export default {
           vm.markAllStepsCompleted()
           vm.isStreaming = false
           vm.$nextTick(() => {
-            // 流式彻底结束后兜底再贴底一次：onResult 的滚动可能早于 DOM 完全渲染完成
-            if (vm.$refs.streamingAnswerBody) {
-              vm.$refs.streamingAnswerBody.scrollTop = vm.$refs.streamingAnswerBody.scrollHeight
-            }
-            if (vm.$refs.streamingStepBody) {
-              vm.$refs.streamingStepBody.scrollTop = vm.$refs.streamingStepBody.scrollHeight
-            }
+            // 流式彻底结束后兜底再贴底一次：onResult 的滚动可能早于 DOM 完全渲染完成。
+            // 与 scrollToBottom 同理走 rAF 双帧，等 isStreaming=false 触发的面板分支切换
+            // 完成浏览器 reflow 后再设 scrollTop，避免被后续重排冲掉。
+            vm.pinStreamingPanelsToBottom()
             vm.scrollToBottom()
           })
-          vm.fetchSessions()
-          // 首轮回答完成后触发 AI 自动命名（KIMI 风格）
-          if (needsAutoTitle && vm.activeSessionId) {
-            chatSessionStore.autoTitle(vm.activeSessionId)
-          }
+          // 首轮回答完成后触发 AI 自动命名（KIMI 风格）。
+          // 关键：必须先 await 命名落库，再 fetchSessions 拉列表，否则两者并发时
+          // fetchSessions 可能用"新对话"覆盖刚写入的新标题（首页路径尤其易触发）。
+          ;(async () => {
+            if (needsAutoTitle && vm.activeSessionId) {
+              // fallback：首轮 user 消息截断，与后端 autoGenerateTitle 兜底一致（>12 字加 …）
+              const fallback = q.length > 12 ? q.slice(0, 12) + '…' : q
+              await chatSessionStore.autoTitle(vm.activeSessionId, fallback)
+            }
+            await vm.fetchSessions()
+          })()
         }
       })
     },
 
     getStepClass(step) {
       switch (step.eventType) {
-        case 'tool_call': return 'step-tool'
-        case 'tool_result': return 'step-tool'
+        case 'tool_call': {
+          // 完成态由 resultData.is_success 驱动颜色（文案不变）；双条件确保
+          // markAllStepsCompleted 兜底（completed 但无 resultData）保持默认色
+          if (step.completed === true && step.resultData) {
+            return step.resultData.is_success === false ? 'step-tool-failed' : 'step-tool-done'
+          }
+          return 'step-tool'
+        }
+        case 'tool_result': return 'step-tool'  // merged 节点不渲染，保留兜底
         case 'thinking': return 'step-thinking'
         case 'error': return 'step-error'
         case 'final': return 'step-final'
@@ -1064,7 +1169,9 @@ export default {
 
     getStepsForMessage(item) {
       if (item.stepEvents && item.stepEvents.length) {
-        return item.stepEvents
+        // 跳过已合并的 tool_result（merged 标记由 addToStepTree 打），
+        // 否则流式快照里 tool_call/tool_result 仍为两条 → 历史回看窗口期显示两条
+        return item.stepEvents.filter(s => !s.merged)
       }
       const cached = this.historyStepsCache[item.id]
       if (cached && cached.length) {
@@ -1227,10 +1334,23 @@ export default {
           node.completed = false
         }
       }
-      // tool_result 到达：按 tool_call_id 反查对应 tool_call，标记其已闭合
+      // tool_result 到达：按 tool_call_id 反查对应 tool_call，合并结果并标记闭合
+      // 不独立入树（同 sub_agent end :1224 模式）：tool_result 仅留在 stepEvents 保 idx（clarify 不错位），
+      // 打 merged=true 供渲染跳过；tool_call 节点携带 resultData 驱动完成态颜色
       if (node.eventType === 'tool_result' && node.stepData && node.stepData.tool_call_id) {
         const toolCallNode = this._findStepByToolCallId(node.stepData.tool_call_id)
-        if (toolCallNode) toolCallNode.completed = true
+        if (toolCallNode) {
+          toolCallNode.completed = true
+          toolCallNode.resultData = {
+            is_success: node.stepData.is_success,
+            answer: node.answer,
+            error: node.error,
+            result_stepData: node.stepData
+          }
+          node.merged = true   // stepEvents 里此 node 标记合并，渲染层跳过
+          return               // 不入 stepTree/stepNodeMap
+        }
+        // 未找到配对 tool_call（异常）：落根层保留，不丢数据
       }
       // tool_call 入树时显式标记未闭合（配合 isStepRunning）
       if (node.eventType === 'tool_call') {
@@ -1321,6 +1441,13 @@ export default {
           if (aid) subAgentStarts.set(aid, node)
         }
       })
+      // 第一遍（续）：收集 tool_call 节点（配对 tool_result 用，与流式 addToStepTree 同构）
+      const toolCallStarts = new Map() // tool_call_id → tool_call node
+      nodeMap.forEach(node => {
+        if (node.eventType === 'tool_call' && node.stepData && node.stepData.tool_call_id) {
+          toolCallStarts.set(node.stepData.tool_call_id, node)
+        }
+      })
       // 第二遍：构建树，end 事件合并到 start
       nodeMap.forEach(node => {
         // sub_agent end 事件：合并到同 agent 的 start，不独立入树
@@ -1352,6 +1479,21 @@ export default {
             roots.push(node)
           }
           return
+        }
+        // tool_result：合并到同 tool_call_id 的 tool_call，不独立入树（与流式 addToStepTree 同构）
+        if (node.eventType === 'tool_result' && node.stepData && node.stepData.tool_call_id) {
+          const callNode = toolCallStarts.get(node.stepData.tool_call_id)
+          if (callNode) {
+            callNode.completed = true
+            callNode.resultData = {
+              is_success: node.stepData.is_success,
+              answer: node.answer,
+              error: node.error,
+              result_stepData: node.stepData
+            }
+            return  // 不入 roots/children
+          }
+          // 未找到配对：落根层保留，不丢数据
         }
         // 跳过已作为 start 被合并引用的 end 节点（上面分支已 return）
         const pid = node.parentStepId
@@ -1391,6 +1533,7 @@ export default {
           if (kind === 'workflow') {
             return label || sd.tool_name || '执行工作流'
           }
+          // 0726 改造：工具名作为主文案，入参摘要由模板侧单独渲染（支持截断/展开）
           return label || sd.tool_name || '调用工具'
         }
         case 'tool_result': {
@@ -1452,6 +1595,85 @@ export default {
         default:
           return label || step.eventType || ''
       }
+    },
+
+    /**
+     * 0726 改造：从工具入参 JSON 字符串中提取主参数摘要，供 tool_call step 文案展示。
+     * <p>策略：按 tool_name 映射主参数 key（searchKnowledgeBase/webSearch→query，
+     * resolve→names 数组 join），未命中则取第一个 string 值；解析失败返回空。
+     * 仅做提取，截断/展开交互由模板侧 stepArgExpanded 状态控制。
+     * @param argsJson 工具入参（JSON 字符串，来自后端 stepData.arguments 或 step.answer）
+     * @param toolName 工具名，用于主参数 key 映射
+     * @returns {string} 主参数摘要原文（未截断），提取不到返回 ''
+     */
+    formatToolArgSummary(argsJson, toolName) {
+      if (!argsJson) return ''
+      let args = null
+      try {
+        // 兼容后端 stepData.arguments（字符串）与 step.answer（同字符串）两种来源
+        const parsed = typeof argsJson === 'string' ? JSON.parse(argsJson) : argsJson
+        args = parsed && typeof parsed === 'object' ? parsed : null
+      } catch {
+        // JSON 解析失败：兜底用原文首若干字符，避免空展示
+        const raw = String(argsJson)
+        return raw.length > 60 ? raw.slice(0, 60) : raw
+      }
+      if (!args) return ''
+      // 按 tool_name 映射主参数 key
+      const keyMap = {
+        searchKnowledgeBase: 'query',
+        webSearch: 'query',
+        resolve: 'names'
+      }
+      const key = keyMap[toolName]
+      let primary = null
+      if (key && args[key] != null) {
+        primary = args[key]
+      } else {
+        // fallback：取第一个非空 string 值（跳过 userId 等无展示意义字段）
+        for (const v of Object.values(args)) {
+          if (typeof v === 'string' && v.trim()) {
+            primary = v
+            break
+          }
+        }
+      }
+      if (primary == null) return ''
+      if (Array.isArray(primary)) {
+        return primary.filter(Boolean).join('、')
+      }
+      return String(primary)
+    },
+
+    /**
+     * 判断 tool_call step 的入参摘要是否超过截断阈值，用于决定是否渲染"展开/折叠"按钮。
+     * @param step 当前 step 节点
+     * @returns {boolean} 超过阈值返回 true
+     */
+    isToolArgLong(step) {
+      const sd = step.stepData || {}
+      const summary = this.formatToolArgSummary(sd.arguments, sd.tool_name)
+      return summary.length > 30
+    },
+
+    /**
+     * 获取 tool_call step 的入参展开状态，不存在时初始化为折叠。
+     * key 优先用 stepId（流式），fallback 到 id（历史回看 loadHistorySteps 映射字段），
+     * 再 fallback 到 stepNumber。避免工作流场景下多条 tool_call stepNumber 同为 0 导致状态串扰。
+     */
+    getToolArgExpanded(step) {
+      const sid = step.stepId != null ? step.stepId : step.id
+      const k = sid != null ? 'tc_' + sid : 'tc_sn_' + (step.stepNumber || 0)
+      if (this.toolArgExpandedMap[k] === undefined) {
+        this.toolArgExpandedMap = { ...this.toolArgExpandedMap, [k]: false }
+      }
+      return this.toolArgExpandedMap[k]
+    },
+
+    toggleToolArgExpanded(step) {
+      const sid = step.stepId != null ? step.stepId : step.id
+      const k = sid != null ? 'tc_' + sid : 'tc_sn_' + (step.stepNumber || 0)
+      this.toolArgExpandedMap = { ...this.toolArgExpandedMap, [k]: !this.toolArgExpandedMap[k] }
     },
 
     flushTokenBuffer() {
@@ -1557,7 +1779,15 @@ export default {
       this.question = ''
     },
     async handleDeleteSubtree(messageId) {
-      if (!confirm('确定要删除此消息及其所有回复吗？')) return
+      try {
+        await ElMessageBox.confirm('确定要删除此消息及其所有回复吗？', '删除消息', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+      } catch {
+        return // 用户取消
+      }
       try {
         await chatSessionApi.deleteSubtree(messageId)
         const currentActiveLeaf = chatTreeStore.state.activeLeafId
@@ -1568,10 +1798,12 @@ export default {
         } else {
           newActiveLeaf = currentActiveLeaf
         }
+        // 删除后强制重新加载本会话消息，确保视图与后端一致
         await this.loadMessages(newActiveLeaf)
+        ElMessage.success('消息已删除')
       } catch (e) {
         console.error('删除消息子树失败:', e)
-        alert('删除失败: ' + (e.response?.data?.msg || e.message))
+        ElMessage.error('删除失败: ' + (e.response?.data?.msg || e.message))
       }
     },
     handleTreeSelect(nodeId) {
@@ -1640,11 +1872,20 @@ export default {
       )
       return html
     },
+    // 滚动主消息列表到底部。
+    // 回答完毕时 onResult→onDone 会连续触发多次 DOM 重排（正式消息入列、tempUserMsg 移除、
+    // 流式面板 v-if 分支切换），Vue 的 $nextTick 只保证 DOM 更新 flush，不保证浏览器已 reflow。
+    // 若在重排完成前设 scrollTop，随后的 reflow 会把滚动位置冲回顶部（"回退到顶部"现象）。
+    // 故用 requestAnimationFrame 连续两帧：第一帧等 Vue DOM 更新落地，第二帧等浏览器布局完成，
+    // 再读 scrollHeight 设 scrollTop——与 ChatGPT/Kimi 回答完毕贴底的体验一致。
     scrollToBottom() {
-      const container = this.$refs.messagesContainer
-      if (container) {
-        container.scrollTop = container.scrollHeight
+      const apply = () => {
+        const container = this.$refs.messagesContainer
+        if (container) {
+          container.scrollTop = container.scrollHeight
+        }
       }
+      requestAnimationFrame(() => requestAnimationFrame(apply))
     },
 
     // 精确定位到指定消息节点：对话树跳转时使用，取代原来固定的滚到底部。
@@ -1689,6 +1930,36 @@ export default {
       if (this.answerPinned && this.$refs.streamingAnswerBody) {
         this.$refs.streamingAnswerBody.scrollTop = this.$refs.streamingAnswerBody.scrollHeight
       }
+    },
+
+    // 流式面板（思考/回答）贴底，rAF 双帧版本。
+    // 回答结束时 isStreaming=false 会触发面板 v-if 分支切换（streamingHtml→formatAnswer 重渲染），
+    // 同步设 scrollTop 会被随后的 reflow 冲掉，故与 scrollToBottom 一致用双帧等待布局稳定。
+    pinStreamingPanelsToBottom() {
+      const apply = () => {
+        if (this.$refs.streamingAnswerBody) {
+          this.$refs.streamingAnswerBody.scrollTop = this.$refs.streamingAnswerBody.scrollHeight
+        }
+        if (this.$refs.streamingStepBody) {
+          this.$refs.streamingStepBody.scrollTop = this.$refs.streamingStepBody.scrollHeight
+        }
+      }
+      requestAnimationFrame(() => requestAnimationFrame(apply))
+    },
+
+    // 把正式 assistant 消息的回答面板（.answer-panel .panel-body，max-height:400px 自带滚动）
+    // 贴到底部。回答完毕 onResult 后，临时流式面板随 loading=false 销毁，正式消息的回答面板是
+    // 新建 DOM，scrollTop 默认 0，长回答会停在顶部——需主动贴底展示完整内容（与各 LLM 网页版一致）。
+    // 用 data-msg-id 定位消息行，rAF 双帧等 formatAnswer 的 v-html 渲染 + 浏览器 reflow 完成后再设。
+    pinAnswerPanelToBottom(msgId) {
+      const apply = () => {
+        const row = this.$refs.messagesContainer?.querySelector(`[data-msg-id="${msgId}"]`)
+        const body = row?.querySelector('.answer-panel .panel-body')
+        if (body) {
+          body.scrollTop = body.scrollHeight
+        }
+      }
+      requestAnimationFrame(() => requestAnimationFrame(apply))
     }
   }
 }
@@ -2098,6 +2369,48 @@ export default {
 
 .step-tool .step-text {
   color: #a0682f;
+}
+
+/* 0726 改造：tool_call 入参摘要展开/折叠 */
+.tool-arg-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tool-arg-truncated {
+  color: #666;
+}
+
+.tool-arg-full {
+  color: #444;
+  word-break: break-word;
+}
+
+.tool-arg-toggle {
+  background: none;
+  border: none;
+  color: #b8763d;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.tool-arg-toggle:hover {
+  text-decoration: underline;
+}
+
+/* 工具完成态：文案不变，仅靠颜色区分成功/失败（与 .step-final/.step-error 视觉一致） */
+.step-tool-done .step-text {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.step-tool-failed .step-text {
+  color: #c62828;
+  font-weight: 500;
 }
 
 /* 工具执行中：图标转圈加载动画 + "执行中..." 提示 */

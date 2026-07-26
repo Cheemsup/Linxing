@@ -113,9 +113,13 @@ export const chatSessionStore = {
   },
 
   /**
-   * 触发 AI 自动命名，更新本地列表标题
+   * 触发 AI 自动命名，更新本地列表标题。
+   * 失败时（后端不可达/返回空/LLM 异常）回退到 fallbackTitle（首条 user 消息截断），
+   * 与后端 ChatSessionServiceImpl.autoGenerateTitle 的兜底语义对齐——避免标题永远停在"新对话"。
+   * @param id 会话ID
+   * @param fallbackTitle 命名失败时的兜底标题（通常为首条 user 消息截断）
    */
-  async autoTitle(id) {
+  async autoTitle(id, fallbackTitle = null) {
     try {
       const res = await chatSessionApi.autoTitle(id)
       const title = res.data?.data?.title
@@ -125,6 +129,16 @@ export const chatSessionStore = {
       }
     } catch (e) {
       console.warn('AI 自动命名失败:', e)
+    }
+    // 兜底：后端不可达或返回空时，用首条用户消息截断作为标题
+    if (fallbackTitle) {
+      try {
+        await chatSessionApi.updateTitle(id, fallbackTitle)
+        this.updateSessionTitle(id, fallbackTitle)
+        return fallbackTitle
+      } catch (e2) {
+        console.warn('兜底命名失败:', e2)
+      }
     }
     return null
   },

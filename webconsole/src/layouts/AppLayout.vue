@@ -68,14 +68,41 @@
             v-for="s in chatSessions"
             :key="s.id"
             class="history-item"
-            :class="{ active: isHistoryActive(s.id) }"
+            :class="{ active: isHistoryActive(s.id), editing: editingId === s.id }"
             @click="switchToSession(s.id)"
           >
             <el-icon class="history-icon"><ChatLineRound /></el-icon>
-            <span class="history-title">{{ s.title }}</span>
-            <button class="history-delete" @click.stop="deleteSession(s.id)" title="删除对话">
-              <el-icon><Close /></el-icon>
-            </button>
+            <!-- 就地编辑态：标题原地变 input，回车/失焦保存、Esc 取消 -->
+            <input
+              v-if="editingId === s.id"
+              ref="titleInputRef"
+              v-model="editingTitle"
+              class="history-title-input"
+              maxlength="30"
+              @click.stop
+              @keyup.enter="saveTitle(s.id)"
+              @keyup.esc="cancelEdit"
+              @blur="saveTitle(s.id)"
+            />
+            <span v-else class="history-title">{{ s.title }}</span>
+            <!-- 操作菜单：hover 显「⋯」，点击展开（编辑态下隐藏，避免误触） -->
+            <el-dropdown
+              v-if="editingId !== s.id"
+              trigger="click"
+              placement="bottom-end"
+              @command="onMenuCommand($event, s)"
+              @click.stop
+            >
+              <button class="history-more" @click.stop title="更多操作">
+                <el-icon><MoreFilled /></el-icon>
+              </button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="rename" :icon="EditPen">更改对话标题</el-dropdown-item>
+                  <el-dropdown-item command="delete" :icon="Delete" divided>删除对话</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
           <div v-if="!chatSessions.length" class="history-empty">暂无对话记录</div>
         </div>
@@ -113,10 +140,13 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { MoreFilled, EditPen, Delete } from '@element-plus/icons-vue'
 import { authStore } from '@/stores/authStore'
 import { chatSessionStore } from '@/stores/agent/chatSessionStore'
+import { chatSessionApi } from '@/api/agent/chat'
 
 const COLLAPSE_KEY = 'linxing_sidebar_collapsed'
 
@@ -223,8 +253,68 @@ export default {
     }
 
     const deleteSession = async (id) => {
-      if (!confirm('确定删除此对话？此操作不可撤销。')) return
+      try {
+        await ElMessageBox.confirm('确定删除此对话？此操作不可撤销。', '删除对话', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+      } catch {
+        return // 用户取消
+      }
+      // 删除当前路由对应的会话时，先跳首页再删，避免 URL 停留在已删会话上
+      const isActiveSession = String(id) === route.params.sessionId
+      if (isActiveSession) {
+        router.push('/chat/home')
+      }
       await chatSessionStore.deleteSession(id)
+    }
+
+    // —— 就地标题编辑 ——
+    // editingId 命中某条目时，该条目标题渲染为 input；回车/失焦保存，Esc 取消
+    const editingId = ref(null)
+    const editingTitle = ref('')
+    const titleInputRef = ref(null)
+
+    const startEdit = (s) => {
+      editingId.value = s.id
+      editingTitle.value = s.title || ''
+      // v-for 内的 ref 是数组；同一时刻仅一个 input 渲染（editingId 唯一），取首个
+      nextTick(() => {
+        const el = Array.isArray(titleInputRef.value) ? titleInputRef.value[0] : titleInputRef.value
+        el?.focus?.()
+      })
+    }
+
+    const cancelEdit = () => {
+      editingId.value = null
+      editingTitle.value = ''
+    }
+
+    const saveTitle = async (id) => {
+      if (editingId.value !== id) return // blur 可能重复触发，守卫之
+      const newTitle = editingTitle.value.trim()
+      const current = chatSessionStore.state.sessions.find(s => s.id === id)
+      // 空标题或未改动：直接取消，不发请求
+      if (!newTitle || newTitle === (current?.title || '')) {
+        cancelEdit()
+        return
+      }
+      try {
+        await chatSessionApi.updateTitle(id, newTitle)
+        chatSessionStore.updateSessionTitle(id, newTitle) // 共享 store 更新，ChatPanel 头部标题随之响应
+      } catch (e) {
+        ElMessage.error('标题更新失败')
+        console.warn('标题更新失败:', e)
+      } finally {
+        cancelEdit()
+      }
+    }
+
+    // 下拉菜单命令分发
+    const onMenuCommand = (cmd, s) => {
+      if (cmd === 'rename') startEdit(s)
+      else if (cmd === 'delete') deleteSession(s.id)
     }
 
     const handleLogout = () => {
@@ -252,6 +342,18 @@ export default {
       chatSessions,
       switchToSession,
       deleteSession,
+      // 就地标题编辑
+      editingId,
+      editingTitle,
+      titleInputRef,
+      startEdit,
+      cancelEdit,
+      saveTitle,
+      // 操作菜单
+      onMenuCommand,
+      MoreFilled,
+      EditPen,
+      Delete,
       handleLogout
     }
   }
@@ -567,7 +669,8 @@ export default {
   text-overflow: ellipsis;
 }
 
-.history-delete {
+/* 更多操作按钮：复用旧删除按钮的 hover 显隐模式，图标换为 MoreFilled */
+.history-more {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -578,7 +681,7 @@ export default {
   border-radius: 4px;
   color: var(--brand-fg-mute);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   flex-shrink: 0;
   opacity: 0;
   transition: all 0.15s;
@@ -589,14 +692,40 @@ export default {
   color: var(--brand-fg);
 }
 
-.history-item:hover .history-delete {
+.history-item:hover .history-more {
   opacity: 0.7;
 }
 
-.history-delete:hover {
-  background: rgba(176, 58, 46, 0.3);
-  color: #e8a89d;
+.history-more:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--brand-fg);
   opacity: 1 !important;
+}
+
+/* 就地编辑 input：撑满标题区，继承字号，避免条目跳动 */
+.history-title-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 2px;
+  outline: none;
+  color: var(--brand-fg);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 2px 4px;
+  margin: 0;
+}
+
+.history-title-input::placeholder {
+  color: var(--brand-fg-mute);
+}
+
+/* 编辑态：条目本身不再表现为可点击跳转，避免失焦误触 */
+.history-item.editing {
+  cursor: default;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .history-item.active {

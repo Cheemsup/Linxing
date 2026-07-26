@@ -78,6 +78,8 @@ public class RagProperties {
         private int agentStepsTtl;
         /** P3 Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用），默认 12h。每次写都 expire 续期 */
         private int mirrorTtl = 43200;
+        /** chat:response:{requestId} 幂等缓存 TTL（秒），默认 35 分钟，略大于 SSE 超时(30 分钟)以覆盖空闲 reset 窗口 */
+        private int chatResponseTtl = 2100;
     }
 
     /**

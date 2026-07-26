@@ -88,6 +88,8 @@ rag:
     agent-steps-ttl: ${RAG_CACHE_AGENT_STEPS_TTL:3600}
     #Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用，秒），默认 12h
     mirror-ttl: ${RAG_CACHE_MIRROR_TTL:43200}
+    #chat:response:{requestId} 幂等缓存 TTL（秒），默认 35 分钟，略大于 SSE 超时(30 分钟)以覆盖空闲 reset 窗口
+    chat-response-ttl: ${RAG_CACHE_CHAT_RESPONSE_TTL:2100}
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:8000}
     timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:120}

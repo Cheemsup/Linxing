@@ -70,6 +70,7 @@ public class ChatSessionServiceImpl implements IChatSessionService {
         chatSessionMapper.updateTitle(sessionId, title);
     }
 
+    //TODO：此处复杂逻辑需要下移到业务层
     @Override
     public String autoGenerateTitle(Integer sessionId) {
         ChatSession session = chatSessionMapper.selectById(sessionId);

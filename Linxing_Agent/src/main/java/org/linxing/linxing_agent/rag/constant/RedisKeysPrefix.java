@@ -20,6 +20,14 @@ public final class RedisKeysPrefix {
     /** mirror:steps:{sessionId} Hash：field=stepId，value=AgentStep 实体 JSON（含 chatMessageId/stepOrder/stepData） */
     public static final String MIRROR_STEPS = "mirror:steps:";
 
+    /**
+     * chat:response:{requestId} String：value=ChatResponse JSON。
+     * <p>SSE reset 幂等键场景——前端 retry 复用同一 requestId 时，后端命中此缓存则直接复用已完成的
+     * ChatResponse 推给新 emitter，不重跑推理、不重复落库（plan/exam/message 等）。
+     * TTL 略大于 SSE 超时（30 分钟），默认 35 分钟，覆盖空闲 reset 窗口。
+     */
+    public static final String CHAT_RESPONSE = "chat:response:";
+
     private RedisKeysPrefix() {
     }
 }

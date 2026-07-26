@@ -19,97 +19,131 @@ const SSE_BASE = process.env.VUE_APP_SSE_BASE_URL || ''
 export const ragApi = {
   chatStream({ question, sessionId, parentMessageId, onStep, onStream, onResult, onDone, onError }) {
     const token = authStore.getToken()
+    // 幂等键：每次 chatStream 调用生成唯一 requestId，SSE reset 后退避重试时复用同一值，
+    // 后端按 requestId 命中已完成结果缓存则直接复用推送，不重跑推理、不重复落库。
+    // crypto.randomUUID 在安全上下文（HTTPS / localhost）下可用；兜底用时间戳+随机数。
+    const requestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : String(Date.now()) + '-' + Math.random().toString(16).slice(2)
     const body = { question }
     if (sessionId) body.sessionId = sessionId
     if (parentMessageId) body.parentMessageId = parentMessageId
+    body.requestId = requestId
 
-    fetch(`${SSE_BASE}/agent/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(body)
-    }).then(response => {
-      if (!response.ok) {
-        response.text().then(text => {
-          onError?.({ message: text || `HTTP ${response.status}` })
-        })
-        return
-      }
+    // 退避重试：网络层失败（fetch reject / reader read reject）时，复用同一 requestId 退避重试。
+    // 后端命中缓存则直接复用已完成结果，不重跑推理；进行中则返回"处理中"。
+    // 最多重试 2 次，base 1s × factor 2（1s、2s）；HTTP 非 2xx 视为业务错误不重试。
+    const MAX_RETRY = 2
+    const BASE_DELAY = 1000
+    const RETRY_FACTOR = 2
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+    let retryCount = 0
 
-      function read() {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            onDone?.()
-            return
+    function dispatchEvent(eventName, dataStr) {
+      switch (eventName) {
+        case 'step':
+        case 'stream':
+        case 'result': {
+          try {
+            const data = JSON.parse(dataStr)
+            if (eventName === 'step') onStep?.(data)
+            else if (eventName === 'stream') onStream?.(data)
+            else onResult?.(data)
+          } catch (e) {
+            console.warn('[SSE] JSON 解析失败:', eventName, dataStr)
           }
-          const chunk = decoder.decode(value, { stream: true })
-          buffer += chunk
-          // 兼容 \r\n 和 \n 换行，事件间以空行分隔
-          const events = buffer.split(/\r?\n\r?\n/)
-          buffer = events.pop()
-          for (const event of events) {
-            let eventName = ''
-            let dataStr = ''
-            const lines = event.split(/\r?\n/)
-            for (const line of lines) {
-              if (line.startsWith('event:')) {
-                eventName = line.substring(6).trim()
-              } else if (line.startsWith('data:')) {
-                // data: 后允许零或一个空格
-                dataStr = line.substring(5).replace(/^ ?/, '')
-              }
-            }
-            if (!eventName || dataStr === undefined) continue
-            dispatchEvent(eventName, dataStr)
-          }
-          read()
-        }).catch(err => {
-          onError?.({ message: err.message || '连接失败' })
-        })
-      }
-
-      function dispatchEvent(eventName, dataStr) {
-        switch (eventName) {
-          case 'step':
-          case 'stream':
-          case 'result': {
-            try {
-              const data = JSON.parse(dataStr)
-              if (eventName === 'step') onStep?.(data)
-              else if (eventName === 'stream') onStream?.(data)
-              else onResult?.(data)
-            } catch (e) {
-              console.warn('[SSE] JSON 解析失败:', eventName, dataStr)
-            }
-            break
-          }
-          case 'done':
-            onDone?.()
-            break
-          case 'error': {
-            try {
-              const data = JSON.parse(dataStr)
-              onError?.(data)
-            } catch (e) {
-              onError?.({ message: dataStr })
-            }
-            break
-          }
-          default:
-            console.warn('[SSE] 未知事件类型:', eventName)
+          break
         }
+        case 'done':
+          onDone?.()
+          break
+        case 'error': {
+          try {
+            const data = JSON.parse(dataStr)
+            onError?.(data)
+          } catch (e) {
+            onError?.({ message: dataStr })
+          }
+          break
+        }
+        default:
+          console.warn('[SSE] 未知事件类型:', eventName)
       }
+    }
 
-      read()
-    }).catch(err => {
-      onError?.({ message: err.message || '连接失败' })
-    })
+    function startStream() {
+      fetch(`${SSE_BASE}/agent/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      }).then(response => {
+        if (!response.ok) {
+          // HTTP 非 2xx 视为业务错误，不退避重试
+          response.text().then(text => {
+            onError?.({ message: text || `HTTP ${response.status}` })
+          })
+          return
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        function read() {
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              onDone?.()
+              return
+            }
+            const chunk = decoder.decode(value, { stream: true })
+            buffer += chunk
+            // 兼容 \r\n 和 \n 换行，事件间以空行分隔
+            const events = buffer.split(/\r?\n\r?\n/)
+            buffer = events.pop()
+            for (const event of events) {
+              let eventName = ''
+              let dataStr = ''
+              const lines = event.split(/\r?\n/)
+              for (const line of lines) {
+                if (line.startsWith('event:')) {
+                  eventName = line.substring(6).trim()
+                } else if (line.startsWith('data:')) {
+                  // data: 后允许零或一个空格
+                  dataStr = line.substring(5).replace(/^ ?/, '')
+                }
+              }
+              if (!eventName || dataStr === undefined) continue
+              dispatchEvent(eventName, dataStr)
+            }
+            read()
+          }).catch(err => {
+            // 流读取中断（网络 reset 等）→ 退避重试复用同一 requestId
+            handleRetryableFailure(err)
+          })
+        }
+
+        read()
+      }).catch(err => {
+        // fetch 本身失败（连接不上）→ 退避重试复用同一 requestId
+        handleRetryableFailure(err)
+      })
+    }
+
+    function handleRetryableFailure(err) {
+      if (retryCount < MAX_RETRY) {
+        const delay = BASE_DELAY * Math.pow(RETRY_FACTOR, retryCount)
+        retryCount++
+        console.warn(`[SSE] 连接失败，${delay}ms 后退避重试（第${retryCount}/${MAX_RETRY}次），复用 requestId=${requestId}`, err.message)
+        setTimeout(startStream, delay)
+      } else {
+        onError?.({ message: err.message || '连接失败（已重试上限）' })
+      }
+    }
+
+    startStream()
   }
 }
 

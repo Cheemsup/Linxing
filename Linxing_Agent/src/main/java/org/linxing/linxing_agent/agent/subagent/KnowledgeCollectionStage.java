@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentStepTypes;
 import org.linxing.linxing_agent.agent.core.HumanInTheLoopFactory;
 import org.linxing.linxing_agent.agent.core.StepRecorder;
+import org.linxing.linxing_agent.agent.core.SubAgentStepListener;
 import org.linxing.linxing_agent.agent.tool.impl.RagSearchTool;
 import org.linxing.linxing_agent.agent.tool.impl.WebSearchTool;
 import org.springframework.stereotype.Service;
@@ -71,7 +72,7 @@ public class KnowledgeCollectionStage {
                 // clarification 在 needs_clarification=false 时不会被 HumanInTheLoop 写入 scope，
                 // 提供默认值避免 MissingArgumentException
                 .defaultKeyValue("clarification", CLARIFY_TIMEOUT_REPLY)
-                .listener(StepRecorder.createListener(
+                .listener(SubAgentStepListener.create(
                         KNOWLEDGE_AGENT_NAME, "knowledge_search",
                         KNOWLEDGE_DISPLAY_LABEL, "materials", recorder,
                         AgentStepTypes.PHASE_KNOWLEDGE_SEARCH))

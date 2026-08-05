@@ -175,6 +175,13 @@ export default {
         ]
       },
       {
+        label: '记忆',
+        collapsible: false,
+        items: [
+          { path: '/memory', name: '记忆', icon: 'Collection' }
+        ]
+      },
+      {
         label: '知识库',
         collapsible: true,
         items: [

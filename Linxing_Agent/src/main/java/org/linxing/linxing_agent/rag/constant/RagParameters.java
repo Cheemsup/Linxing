@@ -29,6 +29,15 @@ public final class RagParameters {
     public static final int SEARCH_RECALL_SIZE = 20;
 
     /**
+     * Cross-Encoder 重排序分数的相关性阈值。
+     * <p>对 ONNX Cross-Encoder（ms-marco-MiniLM-L-6-v2）的原始 logits 做 sigmoid 归一化到 [0,1] 后，
+     * 低于此阈值的结果视为不相关并舍弃（即使这可能导致 RAG 检索为空）。
+     * <p>该模型倾向给分偏高，0.5 偏严会误杀弱相关结果，0.35 为相关/弱相关的经验保守分界，
+     * 后续应根据真实语料校准调整（可通过 rag.search.score-threshold 配置覆盖）。
+     */
+    public static final double SCORE_THRESHOLD = 0.35;
+
+    /**
      * 目标类型：文档
      */
     public static final String TARGET_TYPE_DOCUMENT = "document";

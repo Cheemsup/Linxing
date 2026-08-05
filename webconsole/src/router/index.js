@@ -7,6 +7,7 @@ import LoginView from '@/views/auth/LoginView.vue'
 const SearchView = () => import('@/views/agent/SearchView.vue')
 const ChatHomeView = () => import('@/views/agent/ChatHomeView.vue')
 const ChatSessionView = () => import('@/views/agent/ChatSessionView.vue')
+const MemoryView = () => import('@/views/agent/MemoryView.vue')
 const IngestView = () => import('@/views/agent/IngestView.vue')
 const NotesView = () => import('@/views/agent/NotesView.vue')
 const ExamListView = () => import('@/views/agent/ExamListView.vue')
@@ -58,6 +59,12 @@ const routes = [
         component: ChatSessionView,
         meta: { title: '智能问答', requiresAuth: true },
         props: true
+      },
+      {
+        path: 'memory',
+        name: 'Memory',
+        component: MemoryView,
+        meta: { title: '记忆', requiresAuth: true }
       },
       {
         path: 'ingest',

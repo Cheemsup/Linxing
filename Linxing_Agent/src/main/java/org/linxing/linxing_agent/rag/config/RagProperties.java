@@ -56,6 +56,13 @@ public class RagProperties {
         private double vectorWeight = 0.7;
         private double bm25Weight = 0.3;
         private int bm25RecallSize = 20;
+        /**
+         * Cross-Encoder 重排序分数的相关性阈值（sigmoid 归一化后）。
+         * <p>低于此阈值的结果视为不相关并舍弃，可能导致 RAG 检索返回空。
+         * 设为 0 表示关闭阈值过滤（保留全部 topK 结果，向后兼容）。
+         * 默认取 {@link RagParameters#SCORE_THRESHOLD}，可经 rag.search.score-threshold 覆盖。
+         */
+        private double scoreThreshold = RagParameters.SCORE_THRESHOLD;
     }
 
     @Data

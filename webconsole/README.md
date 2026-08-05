@@ -25,13 +25,15 @@ Linxing 平台的 Vue 前端服务。基于 Vue 3 + Element Plus，为用户提�
 ## 核心功能（Features）
 
 - **JWT 登录与会话保持**：token 持久化到 `localStorage`，axios 请求拦截器自动注入 `Authorization`
-- **Agent 对话 SSE 流式渲染**：手写 fetch + ReadableStream 解析 `step`/`stream`/`result`/`done`/`error` 事件，逐步渲染思考过程与流式回答
+- **Agent 对话 SSE 流式渲染**：手写 fetch + ReadableStream 解析 `step`/`stream`/`result`/`done`/`error` 事件，逐步渲染思考过程与流式回答；支持 requestId 幂等重试
 - **对话树分支管理**：基于 `chat_messages.parent_id` 构建消息树，支持分支跳转、子树删除、活跃路径高亮
 - **富文本 Chunk 展示**：`RichChunkText` 组件把 `chunkText` 中的 `[[LINXING:IMAGE:xxx]]` 等占位符按 `nodeMetadata` 回填为图片/代码/表格/公式
+- **长期记忆编辑**：`MemoryPanel` 左文件列表 + 右预览/编辑双模式，用户直接读写后端 Markdown 记忆文件（绕过异步 Memory Worker），含未保存离开守卫与脏标记
 - **笔记入库编排**：上传文件触发后端 `/rag/ingest/file`，轮询文档状态
 - **知识库检索页**：调用 `/rag/search`，展示命中 chunk 并可查看上下文
 - **测验作答与草稿**：题目树渲染、答案提交、草稿保存/恢复
 - **学习计划时间线**：阶段进度更新与计划导出（md/html）
+- **Markdown 渲染**：`useMarkdownRenderer` 基于 markdown-it，禁内嵌 HTML 防 XSS，外链统一 `_blank`
 - **路由守卫**：未登录跳转 `/login`，已登录访问 `/login` 重定向到 `/chat`
 
 ## 技术栈（Tech Stack）
@@ -62,7 +64,8 @@ webconsole/
 │   │   └── AppLayout.vue       # 主布局：侧边栏导航 + 对话历史 + 内容区
 │   ├── views/                  # 页面（按域组织）
 │   │   ├── auth/LoginView.vue
-│   │   └── agent/              # ChatView / SearchView / IngestView / NotesView /
+│   │   └── agent/              # ChatHomeView / ChatSessionView / MemoryView /
+│   │                           #   SearchView / IngestView / NotesView /
 │   │                           #   ExamListView / ExamDetailView /
 │   │                           #   PlanListView / PlanDetailView
 │   ├── components/agent/        # 业务组件（见下文「页面组织」）
@@ -74,9 +77,9 @@ webconsole/
 │   ├── api/                    # HTTP 封装
 │   │   ├── index.js            # axios 实例 + 拦截器
 │   │   ├── auth.js
-│   │   └── agent/              # chat / workflow / ingest / search / document / chunk / exam / studyPlan
+│   │   └── agent/              # chat / workflow / ingest / search / document / chunk / exam / studyPlan / memory
 │   └── composables/
-│       └── useMarkdownRenderer.js  # ⚠️ 占位实现，尚未接入渲染库
+│       └── useMarkdownRenderer.js  # markdown-it 封装（html:false 防 XSS、linkify、breaks、外链 _blank）
 ├── vue.config.js               # devServer 代理（/api、/chunk_images）
 ├── babel.config.js
 ├── jsconfig.json
@@ -94,14 +97,15 @@ webconsole/
 - Agent SSE 流的接收与逐步渲染（思考步骤、流式 token、最终结果、引用来源）
 - 对话消息树的前端构建与分支导航
 - `chunkText` 占位符 → 富文本（图片/代码/表格/公式）的前端回填
+- 长期记忆文件的前端编辑（列表 / 预览 / 覆盖写入，未保存离开守卫）
 - 文件上传、检索、测验、学习计划等表单交互
+- Markdown 渲染（`useMarkdownRenderer` 基于 markdown-it）
 
 **本服务不负责**：
 
 - 业务逻辑与持久化（由 `Linxing_Agent` 承担）
 - 文档解析/切分/向量化（由后端 + `document_analysis_service` 承担）
 - 鉴权校验本身（前端只携带 token，校验在后端 `JwtTokenUserInterceptor`）
-- Markdown 实际渲染（`useMarkdownRenderer` 当前为占位实现，未接入渲染库）
 
 ## 服务边界（Service Boundary）
 
@@ -150,6 +154,7 @@ webconsole/
 
 测验:  QuizPanel ──examApi──▶ /api/exam/**（详情/提交/草稿）
 计划:  StudyPlanTimeline ──studyPlanApi──▶ /api/study-plan/**（进度/导出）
+记忆:  MemoryPanel ──memoryApi──▶ /api/agent/memory/**（listFiles/readFile/writeFile，直接落盘）
 ```
 
 ## 配置说明（Configuration）
@@ -237,6 +242,7 @@ yarn build           # 输出到 dist/
 | [chunk.js](src/api/agent/chunk.js) | `getContext(id)` | `/rag/chunks/{id}/context` |
 | [exam.js](src/api/agent/exam.js) | `getExam` / `listExams` / `listByPlanId` / `submitAnswer` / `saveDraft` / `getDraft` | `/exam/**` |
 | [studyPlan.js](src/api/agent/studyPlan.js) | `getPlanDetail` / `listPlans` / `updatePhaseStatus` / `exportPlan` | `/study-plan/**` |
+| [memory.js](src/api/agent/memory.js) | `listFiles` / `readFile` / `writeFile`（用户写直接落盘，绕过异步 Memory Worker） | `/agent/memory/**` |
 
 > 后端路径**无 `/api` 前缀**，前端封装里写 `/rag/...`，由 axios `baseURL='/api'` 拼成 `/api/rag/...`，再由 devServer 代理剥离 `/api`。新增后端接口时前端这里直接写裸路径即可，不要手写 `/api` 前缀。
 
@@ -261,7 +267,9 @@ yarn build           # 输出到 dist/
 | 路由路径 | View | 主组件 | 说明 |
 |---|---|---|---|
 | `/login` | `LoginView` | — | 登录/注册（左品牌叙事 + 右表单） |
-| `/chat` | `ChatView` | `ChatPanel` / `ChatTreePanel` / `ChunkContextPanel` | Agent 对话 + 对话树 + 上下文 |
+| `/chat/home` | `ChatHomeView` | `ChatHomePanel` | 聊天首页（四芒星 logo + 输入框 + 长期记忆入口卡片） |
+| `/chat/:sessionId` | `ChatSessionView` | `ChatPanel` / `ChatTreePanel` / `ChunkContextPanel` | Agent 对话 + 对话树 + 上下文 |
+| `/chat/memory` | `MemoryView` | `MemoryPanel` | 长期记忆编辑（左文件列表 + 右预览/编辑） |
 | `/ingest` | `IngestView` | `IngestPanel` | 笔记上传 |
 | `/notes` | `NotesView` | `NotesPanel` / `DocumentPreview` | 笔记列表与预览 |
 | `/search` | `SearchView` | `RichChunkText` | 知识检索结果展示 |
@@ -295,7 +303,7 @@ yarn build           # 输出到 dist/
 - **API**：按后端域分文件 [src/api/agent/](src/api/agent/)，全部基于 [src/api/index.js](src/api/index.js) 的 axios 实例；SSE 走原生 fetch，不进 axios。
 - **Assets**：当前无 `src/assets/` 目录，图标用 `@element-plus/icons-vue`，品牌 SVG 直接内联在 `AppLayout.vue` / `LoginView.vue` 模板中。
 - **Utils**：当前无独立 `src/utils/` 目录；树操作等工具方法内聚在 [chatTreeStore.js](src/stores/agent/chatTreeStore.js)。
-- **Composables**：[useMarkdownRenderer.js](src/composables/useMarkdownRenderer.js) 为占位实现，尚未接入 markdown-it/marked。
+- **Composables**：[useMarkdownRenderer.js](src/composables/useMarkdownRenderer.js) 基于 markdown-it，提供 `render`（响应式）与 `renderToHtml`（一次性），`MemoryPanel` 预览态用后者。
 
 ### 富文本占位符回填（[RichChunkText.vue](src/components/agent/RichChunkText.vue)）
 

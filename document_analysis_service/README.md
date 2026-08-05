@@ -30,6 +30,7 @@ document_analysis_service (8000)
 - **统一 Node 协议**：所有解析器输出与 Java 侧 `NodeDTO` 对应的 Node dict（`id/type/text/imagePath/html/language/level/page/bbox/hash/titlePath/groupId`）
 - **titlePath 标题路径**：跨块维护标题栈，每个 Node 都带 `titlePath`（如 "第一章 > 第一节"），保留文档层级
 - **超长块内部拆分 + groupId**：超长文本/段落按句子拆为多个小 Node，共享同一 `groupId` 标识同源整块，由 Java 侧据 `groupId` 合成父子 Chunk
+- **图片预估字数参与 flush**：图片本身无文本，但以 `IMAGE_ESTIMATED_CHARS=120`（VLM 增强后产出描述的中位数预估）计入前后文本累加的 flush 判断，避免"一遇到图片就无条件截断文本聚类"导致长文本+图被跨 chunk 切开
 - **图片落盘**：PDF/DOCX/Markdown 中的图片提取并保存到 `IMAGE_STORE_DIR/{userId}/{documentId}/`，返回相对 URL（`/chunk_images/{userId}/{documentId}/img_n1.png`）
 - **健康检查**：`GET /health`
 
@@ -39,7 +40,7 @@ document_analysis_service (8000)
 |---|---|
 | FastAPI 0.115.6 + Uvicorn | Web 框架与 ASGI 运行时 |
 | python-multipart | multipart/form-data 文件上传 |
-| PyMuPDF (fitz) | PDF 文本/图片抽取、字号扫描 |
+| PyMuPDF (fitz) 1.24+ | PDF 文本/图片抽取、字号扫描 |
 | pdfplumber | PDF 表格抽取 |
 | python-docx | DOCX 段落/表格/图片遍历 |
 | mistune 3 | Markdown 结构识别（AST） |
@@ -58,7 +59,7 @@ document_analysis_service/
 └── parsers/
     ├── __init__.py        # 子包说明 + PdfParser/DocxParser 懒加载（PEP 562）
     ├── router.py          # 唯一派发入口：detect_document_type + parse
-    ├── _common.py         # 共享纯函数：node id 生成器、titlePath、哈希、弹性阈值、表格 HTML、语言检测
+    ├── _common.py         # 共享纯函数：node id 生成器、titlePath、哈希、弹性阈值、表格 HTML、语言检测、IMAGE_ESTIMATED_CHARS
     ├── pdf_parser.py      # PDF 解析（PyMuPDF + pdfplumber）
     ├── docx_parser.py     # DOCX 解析（python-docx）
     ├── markdown_parser.py # Markdown 解析（mistune 3 AST + 手写领域逻辑）

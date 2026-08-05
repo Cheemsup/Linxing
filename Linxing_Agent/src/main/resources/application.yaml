@@ -10,15 +10,15 @@ spring:
       max-request-size: 50MB
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://${PG_HOST}:${PG_PORT}/${PG_DATABASE}
-    username: ${PG_USER}
-    password: ${PG_PASSWORD}
+    url: jdbc:postgresql://${PG_HOST:127.0.0.1}:${PG_PORT:5432}/${PG_DATABASE:vectordb}
+    username: ${PG_USER:postgres}
+    password: ${PG_PASSWORD:}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-      database: ${REDIS_DATABASE:}
+      database: ${REDIS_DATABASE:0}
       timeout: 3000ms
       lettuce:
         pool:
@@ -37,45 +37,49 @@ server:
   port: 8080
 
 llm:
-  default-provider: ${LLM_DEFAULT_PROVIDER}
+  default-provider: ${LLM_DEFAULT_PROVIDER:deepseek}
   temperature: 0.3
   timeout-seconds: 180
   max-tokens: 8192
   providers:
     minimax:
-      model: ${MINIMAX_MODEL}
-      api-key: ${MINIMAX_API_KEY}
-      base-url: ${MINIMAX_BASE_URL}
-      group-id: ${MINIMAX_GROUP_ID}
+      model: ${MINIMAX_MODEL:MiniMax-M2.7}
+      api-key: ${MINIMAX_API_KEY:}
+      base-url: ${MINIMAX_BASE_URL:https://api.minimax.chat/v1}
+      group-id: ${MINIMAX_GROUP_ID:}
     deepseek:
-      model: ${DEEPSEEK_MODEL}
-      api-key: ${DEEPSEEK_API_KEY}
-      base-url: ${DEEPSEEK_BASE_URL}
+      model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+      api-key: ${DEEPSEEK_API_KEY:}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
       return-thinking: true
       send-thinking: ${DEEPSEEK_SEND_THINKING:true}
     glm:
-      model: ${GLM_MODEL}
-      api-key: ${GLM_API_KEY}
-      base-url: ${GLM_BASE_URL}
+      model: ${GLM_MODEL:glm-4.6v-flash}
+      api-key: ${GLM_API_KEY:}
+      base-url: ${GLM_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
     kimi:
-      model: ${KIMI_MODEL}
-      api-key: ${KIMI_API_KEY}
-      base-url: ${KIMI_BASE_URL}
+      model: ${KIMI_MODEL:moonshot-v1-8k}
+      api-key: ${KIMI_API_KEY:}
+      base-url: ${KIMI_BASE_URL:https://api.moonshot.cn/v1}
     other1:
-      model: ${OTHER1_MODEL}
-      api-key: ${OTHER1_API_KEY}
-      base-url: ${OTHER1_BASE_URL}
+      model: ${OTHER1_MODEL:MiniMax-M3}
+      api-key: ${OTHER1_API_KEY:}
+      base-url: ${OTHER1_BASE_URL:https://jisu.aicodee.com/v1}
 
 rag:
-  store-path: ${RAG_STORE_PATH}
+  store-path: ${RAG_STORE_PATH:./files_store}
   vector-store:
-    host: ${RAG_VECTOR_HOST}
-    port: ${RAG_VECTOR_PORT}
-    database: ${RAG_VECTOR_DATABASE}
-    user: ${RAG_VECTOR_USER}
-    password: ${RAG_VECTOR_PASSWORD}
+    host: ${RAG_VECTOR_HOST:localhost}
+    port: ${RAG_VECTOR_PORT:5432}
+    database: ${RAG_VECTOR_DATABASE:vectordb}
+    user: ${RAG_VECTOR_USER:postgres}
+    password: ${RAG_VECTOR_PASSWORD:}
     table: embeddings
     dimension: 512
+  search:
+    # Cross-Encoder 重排序分数（sigmoid 归一化后）的相关性阈值，低于此值的结果舍弃，可能导致 RAG 为空
+    # 0 表示关闭阈值过滤；ms-marco-MiniLM-L-6-v2 经验保守值 0.35，后续按真实语料校准
+    score-threshold: 0.35
   reranker:
     enabled: true
     batch-size: 8
@@ -106,9 +110,9 @@ cors:
   allowed-origins: http://localhost:3000
 
 jwt:
-  secret-key: ${JWT_SECRET_KEY}
-  ttl: ${JWT_TTL}
-  token-name: ${JWT_TOKEN_NAME}
+  secret-key: ${JWT_SECRET_KEY:}
+  ttl: ${JWT_TTL:18000000}
+  token-name: ${JWT_TOKEN_NAME:Authorization}
 
 agent:
   skills:
@@ -125,7 +129,7 @@ agent:
     # Long-term Memory Workspace：受限沙盒，按 userId 子目录隔离
     longterm:
       workspace:
-        root-dir: ${AGENT_MEMORY_LONGTERM_ROOT:#{null}}
+        root-dir: ${AGENT_MEMORY_LONGTERM_ROOT:./files_store/memory}
       worker:
         max-steps: ${AGENT_MEMORY_WORKER_MAX_STEPS:6}   # Memory Worker ReAct 小循环最大 LLM 轮次
   token:
@@ -154,7 +158,7 @@ agent:
           - resolve
   web-search:
     tavily:
-      api-key: ${TAVILY_API_KEY}
+      api-key: ${TAVILY_API_KEY:}
       max-results: ${TAVILY_MAX_RESULTS:5}
 
 logging:

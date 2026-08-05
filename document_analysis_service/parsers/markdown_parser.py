@@ -32,7 +32,11 @@ import re
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from parsers._common import compute_hash, should_flush_under_elastic
+from parsers._common import (
+    IMAGE_ESTIMATED_CHARS,
+    compute_hash,
+    should_flush_under_elastic,
+)
 
 logger = logging.getLogger("docling_analysis_service.parsers.markdown_parser")
 
@@ -61,6 +65,10 @@ SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
 
 # 强段落分隔：多换行/双换行
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
+
+# Markdown 图片语法正则：![alt](url)，用于统计段落内图片数（预估语义字数参与 flush 判断）
+# 与 _emit_text_with_images 内联正则保持一致
+IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 # Markdown 扩展名
 MARKDOWN_EXTENSIONS = {"md", "markdown"}
@@ -432,7 +440,16 @@ class MarkdownParser:
                         )
             else:
                 # 3. 正常段落：累加到阈值（弹性区间，减少阈值附近对强关联语义的人为切断）
-                add_len = len(trimmed_para) + (2 if buffer else 0)
+                # 图片预估字数参与判断：含图段落把"图片数 × IMAGE_ESTIMATED_CHARS"计入 add_len，
+                # 使得 buffer 已较满时若再来含图段落能更准地提前 flush（避免长文本与图混在同一 emit 中
+                # 被超长拆分为 groupId 子块、进而被 Java 装箱隔离规则跨 chunk 切开）。
+                # 短文本+图场景因预估 120 字仍远低于弹性上界，不会误触发 flush，保持合并。
+                image_count = len(IMAGE_PATTERN.findall(trimmed_para))
+                add_len = (
+                    len(trimmed_para)
+                    + image_count * IMAGE_ESTIMATED_CHARS
+                    + (2 if buffer else 0)
+                )
                 if should_flush_under_elastic(len(buffer), add_len, self.threshold):
                     # 超过弹性上界，先输出当前 buffer（含图片拆分）
                     self._emit_text_with_images(
@@ -698,10 +715,9 @@ class MarkdownParser:
         if not text or not text.strip():
             return
 
-        image_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
         last_end = 0
         has_image = False
-        for m in image_pattern.finditer(text):
+        for m in IMAGE_PATTERN.finditer(text):
             has_image = True
             frag = text[last_end:m.start()]
             if frag.strip():

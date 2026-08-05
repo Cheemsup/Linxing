@@ -360,12 +360,28 @@ public class HistoryRecoveryService {
             //有工具调用：先一条带 toolExecutionRequests 的 AiMessage，再按请求顺序逐个追加配对结果
             AiMessage ai = AiMessage.from(msg.getContent() != null ? msg.getContent() : "", toolReqs);
             out.add(ai);
-            //按请求顺序追加对应的工具结果，结果缺失则跳过避免配对错乱
+            //按请求顺序追加对应的工具结果。
+            //0726 兜底：result 缺失时静默跳过会让 AiMessage(tool_calls) 后跟不全的 ToolExecutionResultMessage，
+            //触发 OpenAI 协议硬错 "insufficient tool messages following tool_calls message"。
+            //改为补占位符 ToolExecutionResultMessage，保证序列永远配对合法；同时告警定位缺失的 step。
+            int missing = 0;
             for (ToolExecutionRequest req : toolReqs) {
                 String result = resultById.get(req.id());
-                if (result != null) {
-                    out.add(ToolExecutionResultMessage.from(req, result));
+                if (result == null) {
+                    missing++;
+                    log.warn("[Recovery] tool_result 缺失，补占位符: msgId={}, toolCallId={}, tool={}",
+                            msg.getId(), req.id(), req.name());
+                    result = "[此工具结果已丢失：toolCallId=" + req.id()
+                            + ", tool=" + req.name()
+                            + "，DB/Mirror 中未找到对应 tool_result step]";
                 }
+                out.add(ToolExecutionResultMessage.from(req, result));
+            }
+            //L2 自检：配对不齐时告警（已补占位，序列合法，但提示数据源有问题需排查）
+            if (missing > 0) {
+                log.warn("[Recovery] tool_call/tool_result 配对不齐: msgId={}, toolCalls={}, missing={}, "
+                                + "请排查 StepRecorder 持久化或 Mirror 即时写是否丢 step",
+                        msg.getId(), toolReqs.size(), missing);
             }
             return out;
         }

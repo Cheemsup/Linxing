@@ -97,7 +97,7 @@ COMMENT ON COLUMN chunks.chunk_text IS 'chunk的原始文本型内容';
 COMMENT ON COLUMN chunks.chunk_type IS '块类型：general, section, qa_pair, context_weak, code, table 等';
 COMMENT ON COLUMN chunks.title_path IS '标题路径，如"项目Alpha > 2025-01 会议 > 决策"，用于增强语义和前端展示';
 COMMENT ON COLUMN chunks.context_prefix IS '为弱上下文块生成的背景描述文本，检索时拼接到向量化文本前';
-COMMENT ON COLUMN chunks.source_strategy IS '该块的生成策略名称';
+COMMENT ON COLUMN chunks.source_strategy IS '该块的生成策略名称（**Node体系下已不再使用，但也可以重新接入使用**）';
 COMMENT ON COLUMN chunks.is_searchable IS '是否参与向量检索（仅小粒度块为true）';
 COMMENT ON COLUMN chunks.ts_content IS '全文检索向量，由chunk_text使用to_tsvector生成';
 COMMENT ON COLUMN chunks.sort_order IS '同一文档内 chunk 的全局排序序号，保证与原始文档内容顺序一致';

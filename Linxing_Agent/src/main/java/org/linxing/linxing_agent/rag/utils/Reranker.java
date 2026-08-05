@@ -199,6 +199,24 @@ public class Reranker {
     }
 
     /**
+     * 与 {@link #pickTopK} 相同的稳定排序+截断逻辑，但保留 Cross-Encoder 分数（返回 {@link ScoredResult}）。
+     * <p>供需要对分数做 sigmoid 归一化 / 阈值过滤的调用方使用——
+     * {@link #pickTopK} 在 {@code .map(ScoredResult::result)} 时丢弃了 Cross-Encoder 分，
+     * 而 {@link VectorSearchResult#score()} 对未做父块展开的结果是原始向量相似度，并非 Cross-Encoder 分，
+     * 二者语义不一致，故归一化/阈值过滤必须基于此处保留的 {@link ScoredResult#score()}。
+     */
+    public List<ScoredResult> pickTopKScored(List<ScoredResult> scored, int topK) {
+        if (scored == null || scored.isEmpty()) {
+            return List.of();
+        }
+        return scored.stream()
+                .sorted(Comparator.comparingDouble((ScoredResult sr) -> sr.score()).reversed()
+                        .thenComparingInt(sr -> sr.result().chunkId() != null ? sr.result().chunkId() : Integer.MAX_VALUE))
+                .limit(topK)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 模型不可用/异常时的稳定兜底：按候选已有 score 降序、同分按 chunkId 升序，再 limit(topK)。
      * 避免不同 topK 走不同排序路径导致前几名漂移。
      */

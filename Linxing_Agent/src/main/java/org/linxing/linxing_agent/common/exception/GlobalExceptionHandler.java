@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.exception.ExamNotFoundException;
 import org.linxing.linxing_agent.agent.exception.ExamParseException;
 import org.linxing.linxing_agent.agent.exception.ExamValidationException;
+import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryAccessException;
 import org.linxing.linxing_agent.common.result.Result;
 import org.linxing.linxing_agent.user.exception.AccountDisabledException;
 import org.linxing.linxing_agent.user.exception.AccountNotFoundException;
@@ -81,6 +82,12 @@ public class GlobalExceptionHandler {
         });
         log.warn("请求参数校验失败: {}", errors);
         return Result.error("参数校验失败: " + errors);
+    }
+
+    @ExceptionHandler(MemoryAccessException.class)
+    public Result<Void> handleMemoryAccess(MemoryAccessException ex) {
+        log.warn("Memory 访问异常: {}", ex.getMessage());
+        return Result.error(ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

@@ -95,25 +95,53 @@ public class SearchServiceImpl implements ISearchService {
         //   必须在 limit(topK) 之前做，否则不同 topK 截断后再父块去重会破坏前缀子集关系
         List<Reranker.ScoredResult> expanded = expandScoredToParent(scored, userId);
 
-        //按分数稳定排序后截断 topK（不同 topK 下前 N 条恒为更大 topK 结果的前 N 条）
-        List<VectorSearchResult> results = reranker.pickTopK(expanded, effectiveTopK);
+        //按 Cross-Encoder 分数稳定排序后截断 topK（保留分数，供归一化/阈值过滤使用）
+        //   pickTopKScored 与原 pickTopK 排序逻辑一致，仅保留 ScoredResult.score（Cross-Encoder 原始 logits）
+        List<Reranker.ScoredResult> topScored = reranker.pickTopKScored(expanded, effectiveTopK);
 
-        return results.stream()
-                .map(r -> SearchResult.builder()
-                        .chunkId(r.chunkId())
-                        .documentId(r.documentId())
-                        .fileName(r.fileName())
-                        .titlePath(r.titlePath())
-                        .chunkType(r.chunkType())
-                        .chunkText(r.chunkText())
-                        .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
-                        .score(r.score() != null ? r.score() : 0.0)
-                        .build())
+        //对 Cross-Encoder 原始 logits 做 sigmoid 归一化到 [0,1]，再按阈值舍弃低分结果
+        //   即使导致结果为空也舍弃——空结果由消费侧（RagSearchTool）降级提示
+        double threshold = ragProperties.getSearch().getScoreThreshold();
+        List<Reranker.ScoredResult> filtered = new ArrayList<>(topScored.size());
+        for (Reranker.ScoredResult sr : topScored) {
+            double normalized = sigmoid(sr.score());
+            if (threshold <= 0.0 || normalized >= threshold) {
+                filtered.add(new Reranker.ScoredResult(sr.result(), normalized));
+            }
+        }
+        if (filtered.size() < topScored.size()) {
+            log.debug("[搜索] 用户{} 分数阈值过滤: topK候选={} 过滤后保留={} (threshold={})",
+                    userId, topScored.size(), filtered.size(), threshold);
+        }
+
+        return filtered.stream()
+                .map(sr -> {
+                    VectorSearchResult r = sr.result();
+                    return SearchResult.builder()
+                            .chunkId(r.chunkId())
+                            .documentId(r.documentId())
+                            .fileName(r.fileName())
+                            .titlePath(r.titlePath())
+                            .chunkType(r.chunkType())
+                            .chunkText(r.chunkText())
+                            .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
+                            //对外暴露 sigmoid 归一化后的 [0,1] 分数
+                            .score(sr.score())
+                            .build();
+                })
                 //按score降序，同分时按chunkId升序作稳定tie-breaker
                 //——避免不同topK下同分父块顺序漂移导致前几名不一致
                 .sorted(Comparator.comparingDouble((SearchResult r) -> r.getScore()).reversed()
                         .thenComparingInt(r -> r.getChunkId() != null ? r.getChunkId() : Integer.MAX_VALUE))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * sigmoid 归一化：将 Cross-Encoder 原始 logits 映射到 (0,1) 区间。
+     * 单调递增，不改变排序，仅赋予分数可解释的语义（0.5 ≈ 相关性中性点）。
+     */
+    private static double sigmoid(double x) {
+        return 1.0 / (1.0 + Math.exp(-x));
     }
 
     /**

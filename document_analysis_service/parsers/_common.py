@@ -46,6 +46,14 @@ def compute_hash(data: bytes) -> str:
 # 仅作用于"同一原文流累加"场景（弱段落累加 / 句子累加），不改变跨强段落/标题的硬边界。
 ELASTIC_RATIO = 0.2
 
+# 图片预估字数：图片本身无文本，但其 VLM 语义增强后通常产出 50~200 字描述。
+# 在 Python 解析阶段 VLM 尚未运行，图片的真实语义字数不可知，故以中位数偏稳的 120 字预估，
+# 让图片作为一个"虚拟文本块"参与前后文本累加的 flush 判断，避免"一遇到图片就无条件截断文本聚类"
+# 把本该连续的文本 prematurely 切碎（尤其超长段被拆成 groupId 子块后跨 chunk 隔离）。
+# 取值依据：120 字相对 CHUNK_THRESHOLD=1000 占 12%，单张图不会撑爆预算，
+# 连续 8~9 张图无文本时才会自然触发切出，符合直觉。Java 装箱阶段用的是 VLM 增强后的真实字数，与此预估无关。
+IMAGE_ESTIMATED_CHARS = 120
+
 
 def elastic_upper_bound(threshold: int, ratio: float = ELASTIC_RATIO) -> int:
     """弹性上界：累加长度超过此值才切出当前块。"""

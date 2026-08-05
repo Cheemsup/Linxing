@@ -141,6 +141,8 @@ public class RagSearchTool implements Tool {
 
     /**
      * 核心搜索逻辑，两个入口共用。
+     * <p>检索结果经 Cross-Encoder sigmoid 归一化 + 阈值过滤后，若为空（无高相关命中），
+     * 返回降级提示文本而非空 JSON 数组，避免 LLM 误判为工具故障而反复重试。
      */
     private String doSearch(Integer userId, String query, int topK) throws Exception {
         if (query == null || query.isBlank()) {
@@ -149,6 +151,11 @@ public class RagSearchTool implements Tool {
         int resultCount = topK > 0 ? Math.min(topK, 10) : 5;
         log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, resultCount);
         List<SearchResult> results = searchService.search(userId, query, resultCount, true);
+        if (results == null || results.isEmpty()) {
+            log.info("[RagSearchTool] 用户{} 检索结果经阈值过滤后为空: query={}", userId, query);
+            return "未在知识库中检索到与查询相关的高相关内容（所有候选的相关性分数均低于阈值）。"
+                    + "请据此回应用户：知识库中未找到相关信息，并避免编造内容。";
+        }
         return objectMapper.writeValueAsString(results);
     }
 

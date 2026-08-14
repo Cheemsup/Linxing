@@ -29,6 +29,10 @@ public final class AgentPrompts {
             + "save_exam 成功后，只需告知用户测验已生成并提供链接（如[查看测验](/quiz?examId=123)），"
             + "不要在回答中重复输出试题内容和答案，答案不应在聊天界面暴露。\n"
             + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
+            + "长期记忆写约束：仅当用户在对话中明确要求修改长期记忆时才调用 write_memory，"
+            + "并在参数中回传 read_memory 结果里给出的 baseline_mtime/baseline_size 做冲突检测；"
+            + "非用户明确要求不主动改写记忆文件。检索历史学习归档使用 search_history。"
+            + "需要查看某记忆文件全文时调用 read_memory，不要凭空回忆。\n\n"
             + DYNAMIC_SECTION_PLACEHOLDER;
 
     public static final String SYSTEM_PROMPT_TEMPLATE_PROGRESSIVE =
@@ -53,5 +57,8 @@ public final class AgentPrompts {
             + "save_exam 成功后，只需告知用户测验已生成并提供链接（如[查看测验](/quiz?examId=123)），"
             + "不要在回答中重复输出试题内容和答案，答案不应在聊天界面暴露。\n"
             + "回答时务必标注信息来源（文件名和标题路径）。\n\n"
+            + "长期记忆写约束：仅当用户在对话中明确要求修改长期记忆时才调用 write_memory，"
+            + "并在参数中回传 read_memory 结果里给出的 baseline_mtime/baseline_size 做冲突检测；"
+            + "非用户明确要求不主动改写记忆文件。检索历史学习归档使用 search_history。\n\n"
             + DYNAMIC_SECTION_PLACEHOLDER;
 }

@@ -1,27 +1,33 @@
 <template>
   <div class="memory-panel">
-    <!-- 左侧：文件列表 -->
+    <!-- 左侧：文件列表（树形） -->
     <aside class="memory-sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title">记忆</span>
-        <button
-          class="refresh-btn"
-          title="刷新列表"
-          @click="loadFiles"
-          :disabled="loading"
-        >↻</button>
+        <div class="header-actions">
+          <button
+            class="btn-text sidebar-action-btn"
+            title="一键重建核心模板（Agent.md / User.md / Directory.md），Current 与 History 不受影响"
+            @click="rebuildTemplates"
+            :disabled="rebuilding"
+          >重建</button>
+          <button
+            class="btn-text sidebar-action-btn"
+            title="刷新列表"
+            @click="loadFiles"
+            :disabled="loading"
+          >刷新</button>
+        </div>
       </div>
       <ul class="file-list" v-loading="loading">
-        <li
-          v-for="path in files"
-          :key="path"
-          :class="['file-item', { active: path === currentPath }]"
-          @click="selectFile(path)"
-          :title="path"
-        >
-          <span class="file-name">{{ displayName(path) }}</span>
-          <span class="file-path">{{ path }}</span>
-        </li>
+        <MemoryTreeNode
+          v-for="node in fileTree"
+          :key="node.path"
+          :node="node"
+          :depth="0"
+          :current-path="currentPath"
+          @select="selectFile"
+        />
         <li v-if="!loading && files.length === 0" class="empty-tip">
           暂无记忆文件
         </li>
@@ -79,13 +85,93 @@
 
 <script>
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { h } from 'vue'
 import { memoryApi } from '@/api/agent/memory'
 import { useMarkdownRenderer } from '@/composables/useMarkdownRenderer'
 
 const { renderToHtml } = useMarkdownRenderer()
 
+/**
+ * 记忆文件树节点：递归渲染文件夹/文件。
+ * 文件夹点击切换展开（默认折叠）；文件点击抛 select 事件由父组件加载内容。
+ * 注：项目为 runtime-only Vue，不能在内联子组件用 template 字符串，故用 render 函数。
+ */
+const MemoryTreeNode = {
+  name: 'MemoryTreeNode',
+  props: {
+    node: { type: Object, required: true },
+    depth: { type: Number, default: 0 },
+    currentPath: { type: String, default: '' }
+  },
+  emits: ['select'],
+  data() {
+    return { expanded: false }
+  },
+  computed: {
+    isDir() {
+      return this.node.type === 'dir'
+    },
+    isActive() {
+      return !this.isDir && this.node.path === this.currentPath
+    },
+    isTemplate() {
+      return !this.isDir && this.node.name.startsWith('_')
+    },
+    // 缩进：每层 14px，根层（depth=0）也留 4px 起始
+    indentStyle() {
+      return { paddingLeft: (4 + this.depth * 14) + 'px' }
+    }
+  },
+  methods: {
+    toggle() {
+      if (this.isDir) this.expanded = !this.expanded
+    },
+    onSelect() {
+      if (!this.isDir) this.$emit('select', this.node.path)
+    }
+  },
+  render() {
+    const self = this
+    if (self.isDir) {
+      const row = h('div', {
+        class: 'tree-node tree-dir',
+        style: self.indentStyle,
+        onClick: self.toggle
+      }, [
+        h('span', { class: ['tree-arrow', { expanded: self.expanded }] }, '▸'),
+        h('span', { class: 'tree-folder-icon' }, '❒'),
+        h('span', { class: 'tree-label tree-folder-label' }, self.node.name)
+      ])
+      const children = h('ul', {
+        class: 'tree-children',
+        style: { display: self.expanded ? '' : 'none' }
+      }, self.node.children.map(child => h(MemoryTreeNode, {
+        key: child.path,
+        node: child,
+        depth: self.depth + 1,
+        currentPath: self.currentPath,
+        onSelect: (p) => self.$emit('select', p)
+      })))
+      return h('li', { class: 'tree-node-wrap' }, [row, children])
+    }
+    const row = h('div', {
+      class: ['tree-node tree-file', { active: self.isActive }],
+      style: self.indentStyle,
+      title: self.node.path,
+      onClick: self.onSelect
+    }, [
+      h('span', { class: 'tree-arrow placeholder' }, '▸'),
+      h('span', { class: 'tree-file-icon' }, '∊'),
+      h('span', { class: 'tree-label tree-file-label' }, self.node.name),
+      self.isTemplate ? h('span', { class: 'tree-template-badge' }, '模板') : null
+    ])
+    return h('li', { class: 'tree-node-wrap' }, row)
+  }
+}
+
 export default {
   name: 'MemoryPanel',
+  components: { MemoryTreeNode },
   data() {
     return {
       files: [],
@@ -94,7 +180,8 @@ export default {
       editContent: '',      // 编辑缓冲
       mode: 'view',         // 'view' | 'edit'
       loading: false,
-      saving: false
+      saving: false,
+      rebuilding: false
     }
   },
   computed: {
@@ -103,6 +190,15 @@ export default {
     },
     previewHtml() {
       return renderToHtml(this.rawContent)
+    },
+    /**
+     * 将扁平路径数组构建为嵌套树。
+     * 文件夹节点 { type:'dir', name, path, children, expanded:false }；
+     * 文件节点 { type:'file', name, path }。
+     * 文件夹排前，同类按名字字典序。根级文件与根级文件夹并列。
+     */
+    fileTree() {
+      return buildTree(this.files)
     }
   },
   mounted() {
@@ -188,6 +284,37 @@ export default {
       }
     },
 
+    // 一键重建核心模板：覆盖 Agent.md / User.md / Directory.md，Current 与 History 不受影响
+    async rebuildTemplates() {
+      try {
+        await ElMessageBox.confirm(
+          '将强制覆盖 Agent.md / User.md / Directory.md 三个核心模板文件，Current 学习计划与 History 历史归档不受影响。确定继续？',
+          '一键重建核心模板',
+          { confirmButtonText: '重建', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return
+      }
+      this.rebuilding = true
+      try {
+        const { data } = await memoryApi.rebuildTemplates()
+        if (data.code === 1) {
+          ElMessage.success(`已重建 ${data.data?.length || 0} 个核心模板`)
+          await this.loadFiles()
+          // 若当前正查看的文件被重建，刷新其内容
+          if (this.currentPath && data.data?.includes(this.currentPath)) {
+            await this.selectFile(this.currentPath)
+          }
+        } else {
+          ElMessage.error(data.msg || '重建失败')
+        }
+      } catch (e) {
+        ElMessage.error('重建失败: ' + (e.response?.data?.msg || e.message))
+      } finally {
+        this.rebuilding = false
+      }
+    },
+
     // 有未保存修改时弹确认；返回 false 表示用户取消
     async confirmIfDirty() {
       if (!this.dirty || this.mode !== 'edit') return true
@@ -201,14 +328,52 @@ export default {
       } catch {
         return false
       }
-    },
-
-    // 取路径末段作为主名，完整路径作副名
-    displayName(path) {
-      const parts = path.split('/')
-      return parts[parts.length - 1]
     }
   }
+}
+
+/**
+ * 扁平路径数组 → 嵌套树。
+ * 例：['Agent.md', 'History/A.md', 'Learning/Current/B.md']
+ *   → [{file Agent.md}, {dir History [file A.md]}, {dir Learning [dir Current [file B.md]]}]
+ * 文件夹默认 expanded=false；排序：dir 优先、再按 name 字典序。
+ */
+function buildTree(paths) {
+  const root = { children: [] }
+  for (const p of paths) {
+    const segs = p.split('/')
+    let cur = root
+    segs.forEach((seg, i) => {
+      const isLeaf = i === segs.length - 1
+      if (isLeaf) {
+        cur.children.push({ type: 'file', name: seg, path: p })
+      } else {
+        const dirPath = segs.slice(0, i + 1).join('/')
+        let next = cur.children.find(n => n.type === 'dir' && n.name === seg)
+        if (!next) {
+          next = { type: 'dir', name: seg, path: dirPath, children: [] }
+          cur.children.push(next)
+        }
+        cur = next
+      }
+    })
+  }
+  // 递归排序：dir 优先，同类按 name
+  const sortNode = (n) => {
+    if (n.type === 'dir') {
+      n.children.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+      n.children.forEach(sortNode)
+    }
+  }
+  root.children.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  root.children.forEach(sortNode)
+  return root.children
 }
 </script>
 
@@ -246,23 +411,16 @@ export default {
   letter-spacing: 2px;
 }
 
-.refresh-btn {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 16px;
-  color: #8a948f;
-  padding: 2px 6px;
-  border-radius: 4px;
-  transition: color 0.2s, background 0.2s;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.refresh-btn:hover:not(:disabled) {
-  color: #b8763d;
-  background: rgba(184, 118, 61, 0.08);
-}
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+
+/* 侧边栏头部文字按钮：比工具栏更紧凑，适配 260px 侧边栏 */
+.sidebar-action-btn {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 .file-list {
@@ -273,36 +431,104 @@ export default {
   flex: 1;
 }
 
-.file-item {
-  padding: 10px 12px;
+/* 树节点行：箭头 + 图标 + 标签。
+   :deep() 穿透到内联递归子组件 MemoryTreeNode 的 DOM */
+:deep(.tree-node) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  padding-right: 10px;
   border-radius: 6px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   transition: background 0.15s;
   border-left: 3px solid transparent;
+  user-select: none;
 }
-.file-item:hover {
+:deep(.tree-node:hover) {
   background: #faf6ee;
 }
-.file-item.active {
+:deep(.tree-node.active) {
   background: #faf6ee;
   border-left-color: #b8763d;
 }
 
-.file-name {
-  font-size: 14px;
-  color: #1a2e2a;
-  font-weight: 500;
+/* 展开箭头：折叠 ▸、展开旋转 90° 到 ▾ */
+:deep(.tree-arrow) {
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+  color: #8a948f;
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 0.15s, color 0.15s;
+}
+:deep(.tree-arrow.expanded) {
+  transform: rotate(90deg);
+  color: #b8763d;
+}
+:deep(.tree-arrow.placeholder) {
+  visibility: hidden;
 }
 
-.file-path {
-  font-size: 11px;
+/* 文件夹/文件小图标 */
+:deep(.tree-folder-icon),
+:deep(.tree-file-icon) {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+}
+:deep(.tree-folder-icon) {
+  color: #b8763d;
+  opacity: 0.75;
+}
+:deep(.tree-file-icon) {
   color: #a89e8a;
+}
+
+:deep(.tree-label) {
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+:deep(.tree-folder-label) {
+  color: #1a2e2a;
+  font-weight: 600;
+}
+:deep(.tree-file-label) {
+  color: #2a322e;
+  font-weight: 400;
+}
+:deep(.tree-node.active .tree-file-label) {
+  color: #b8763d;
+  font-weight: 500;
+}
+
+/* 结构样板文件（_ 开头，如 _template.md）徽标：区别于真实记忆文件 */
+:deep(.tree-template-badge) {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #f0ead9;
+  color: #a89e8a;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* 子节点容器：去掉默认 ul 缩进 */
+:deep(.tree-children) {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+:deep(.tree-node-wrap) {
+  list-style: none;
 }
 
 .empty-tip {

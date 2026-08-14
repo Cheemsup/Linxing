@@ -2,102 +2,99 @@ package org.linxing.linxing_agent.agent.memory.longterm.worker;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryAccessException;
-import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryWorkspace;
+import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryFileWriter;
 import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * History 自动归档器：检测 {@code Learning/Current.md} 的学习主题切换，将旧阶段固化到 {@code History/}。
+ * History 归档器：将超额的 Current 主题归档到 {@code History/{yyyy-MM}/{topic}.md}。
  *
- * <p>归档时机：在 {@link MemoryWorkerService} 用 LLM 产出的新内容覆盖 {@code Current.md} 之前调用
- * {@link #archiveIfStageSwitched}——检测旧/新 Topic 是否变化，若变化则先把旧 Current 写入
- * {@code History/{旧主题}.md}（带完成时间），再把新内容覆盖 Current。
+ * <p>归档时机：{@link CurrentTopicRegistry} 检测到 {@code Learning/Current/} 下主题数超过 3 时，
+ * 把 {@code started_at} 最老的主题移入 History。本类负责单文件归档动作，
+ * {@link CurrentTopicRegistry} 负责超额判定与触发。
  *
- * <p>归档文件内容：学习主题 / 学习成果 / 学习总结 / 完成时间，取自旧 Current 的对应 Section。
+ * <p>归档路径：{@code History/{yyyy-MM}/{topic}.md}，月份取归档时刻（决策 2：归档时刻简单可排序，
+ * 学习起止区间作为文件内元信息保留供合并参考）。
  *
- * TODO：此功能太不成熟，还待进一步设计和完善。
- * <p>暂时弃用（2026.07.22）：调用方 WriteMemoryTool 已摘除对 archiveIfStageSwitched 的调用，
- * 本类作为孤立 Bean 保留（无人注入），待设计完善后在 WriteMemoryTool.execute 内按 TODO 标记恢复。
+ * <p>归档文件内容：学习主题 / 学习成果 / 学习总结 / 完成时间，取自旧 Current 的 Plan/Next Goal 等 Section。
+ * header 字符串（{@code ## 学习主题} / {@code ## 完成时间}）是 {@code search_history} 等扫描的契约，保持稳定。
+ *
+ * <p>2026.08.06 重写：判定维度从"Topic 变化"换成"超额归档"（决策 4+5）。
+ * 文本解析工具（extractTopic/extractSectionBody/sanitizeFileName）从旧版复用。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class HistoryArchiver {
 
+    /** History 根目录 */
     private static final String HISTORY_DIR = "History";
-    private static final String TRASH_DIR = "History/.trash";
+    /** 已合并的原始归档存放目录（避免重复合并导致信息衰减） */
+    public static final String RAW_DIR = ".raw";
+    /** 每周合并产物文件名 */
+    public static final String MERGED_FILE = "_merged.md";
     private static final String TOPIC_HEADER = "## Topic";
     private static final String PLAN_HEADER = "## Plan";
     private static final String NEXT_GOAL_HEADER = "## Next Goal";
-    private static final DateTimeFormatter FILE_TS = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
 
-    private final MemoryWorkspace memoryWorkspace;
+    private final MemoryFileWriter memoryFileWriter;
 
     /**
-     * 检测旧/新 Current 的 Topic 是否切换；若切换，先归档旧 Current，返回 true（调用方随后覆盖 Current 为新内容）。
-     * <p>无切换、Topic 解析失败、新内容无 Topic（异常）时均返回 false（不归档，不阻断覆盖）。
+     * 将一个 Current 主题归档到 {@code History/{yyyy-MM}/{topic}.md}。
+     * <p>归档时刻定月份（决策 2），内容取自旧 Current 的 Plan/Next Goal 等 Section。
+     * 落盘走 {@link MemoryFileWriter#writeForce}（系统归档，无 CAS，但有原子写 + 备份）。
      *
-     * @param userId        用户 ID
-     * @param oldCurrent     旧 Current.md 全文（覆盖前）
-     * @param newCurrentText 新 Current.md 全文（LLM 产出，即将覆盖）
-     * @return 是否已执行归档
+     * @param userId         用户 ID
+     * @param topic          学习主题（用于文件名与归档内容）
+     * @param currentContent 旧 Current 文件全文（含 frontmatter，归档时剥离）
+     * @param startedAt      主题开始时间（作为文件内元信息保留，供合并参考）
      */
-    public boolean archiveIfStageSwitched(Integer userId, String oldCurrent, String newCurrentText) {
-        String oldTopic = extractTopic(oldCurrent);
-        String newTopic = extractTopic(newCurrentText);
-        if (oldTopic == null || oldTopic.isBlank() || newTopic == null || newTopic.isBlank()) {
-            // 旧或新无有效 Topic：不判定切换，避免误归档（含首阶段 Topic 尚未填写的情况）
-            return false;
-        }
-        if (oldTopic.equalsIgnoreCase(newTopic)) {
-            return false;//同主题：仅内容更新，不归档
-        }
-        // 阶段切换：归档旧 Current
-        archive(userId, oldTopic, oldCurrent);
-        return true;
+    public void archive(Integer userId, String topic, String currentContent, OffsetDateTime startedAt) {
+        String safeName = sanitizeFileName(topic);
+        OffsetDateTime now = OffsetDateTime.now();
+        String monthDir = now.format(MONTH_FMT);
+        String archivePath = HISTORY_DIR + "/" + monthDir + "/" + safeName + ".md";
+        String archiveContent = buildArchiveContent(topic, currentContent, startedAt, now);
+        memoryFileWriter.writeForce(userId, archivePath, archiveContent);
+        log.info("[HistoryArchiver] 超额归档 userId={} topic={} startedAt={} -> {}",
+                userId, topic, startedAt, archivePath);
     }
 
     /**
-     * 将旧 Current 固化到 History/{topic}.md，并备份到 History/.trash/。
+     * 计算指定时间所在月份的归档目录相对路径（如 {@code History/2026-08}）。
      */
-    private void archive(Integer userId, String oldTopic, String oldCurrent) {
-        String safeName = sanitizeFileName(oldTopic);
-        String archivePath = HISTORY_DIR + "/" + safeName + ".md";
-        String archiveContent = buildArchiveContent(oldTopic, oldCurrent);
-        // 兜底备份：防止误判丢 Current
-        String trashPath = TRASH_DIR + "/" + safeName + "-" + OffsetDateTime.now().format(FILE_TS) + ".md";
-        try {
-            memoryWorkspace.write(userId, archivePath, archiveContent);
-            memoryWorkspace.write(userId, trashPath, oldCurrent);
-            log.info("[HistoryArchiver] 学习阶段归档 userId={} topic={} -> {}", userId, oldTopic, archivePath);
-        } catch (MemoryAccessException e) {
-            log.warn("[HistoryArchiver] 归档失败 userId={} topic={}: {}", userId, oldTopic, e.getMessage());
-        }
+    public static String monthDir(OffsetDateTime time) {
+        return HISTORY_DIR + "/" + time.format(MONTH_FMT);
     }
 
     /**
-     * 构建归档文件内容：学习主题/学习成果/学习总结/完成时间，取自旧 Current 的 Plan/Next Goal 等 Section。
+     * 构建归档文件内容：学习主题/学习成果/学习总结/完成时间。
+     * <p>学习成果取自旧 Current 的 {@code ## Plan}，学习总结取自 {@code ## Next Goal}，
+     * 完成时间为归档时刻（ISO offset）。Current 的 frontmatter 不复制进 History。
      */
-    private String buildArchiveContent(String topic, String oldCurrent) {
+    private String buildArchiveContent(String topic, String oldCurrent,
+                                        OffsetDateTime startedAt, OffsetDateTime completedAt) {
         String plan = extractSectionBody(oldCurrent, PLAN_HEADER);
         String nextGoal = extractSectionBody(oldCurrent, NEXT_GOAL_HEADER);
-        String completedAt = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         StringBuilder sb = new StringBuilder();
         sb.append("# History: ").append(topic).append("\n\n");
         sb.append("## 学习主题\n").append(topic).append("\n\n");
         sb.append("## 学习成果\n").append(plan.isBlank() ? "(无)" : plan).append("\n\n");
         sb.append("## 学习总结\n").append(nextGoal.isBlank() ? "(无)" : nextGoal).append("\n\n");
-        sb.append("## 完成时间\n").append(completedAt).append("\n");
+        if (startedAt != null) {
+            sb.append("## 开始时间\n").append(startedAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append("\n\n");
+        }
+        sb.append("## 完成时间\n").append(completedAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)).append("\n");
         return sb.toString();
     }
 
     /**
      * 从 Current.md 提取 Topic：首个 {@code ## Topic} 之后到下一个二级标题前的首段非空文本。
      */
-    private static String extractTopic(String current) {
+    public static String extractTopic(String current) {
         String body = extractSectionBody(current, TOPIC_HEADER);
         if (body == null || body.isBlank()) {
             return null;
@@ -115,7 +112,7 @@ public class HistoryArchiver {
     /**
      * 提取指定二级标题（如 {@code ## Plan}）之后的 Section body，到下一个二级标题或文末。
      */
-    private static String extractSectionBody(String md, String header) {
+    public static String extractSectionBody(String md, String header) {
         if (md == null || md.isBlank()) {
             return "";
         }
@@ -131,7 +128,7 @@ public class HistoryArchiver {
     /**
      * 文件名安全化：保留中文/字母/数字，其余字符替换为下划线。
      */
-    private static String sanitizeFileName(String topic) {
+    public static String sanitizeFileName(String topic) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < topic.length(); i++) {
             char c = topic.charAt(i);

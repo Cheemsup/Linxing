@@ -18,6 +18,11 @@ export const memoryApi = {
   // 整体覆盖写入指定相对路径的 Markdown
   writeFile(path, content) {
     return api.post('/agent/memory/file', { path, content })
+  },
+
+  // 一键重建核心模板（Agent.md / User.md / Directory.md），强制覆盖；Current/History 用户数据不动
+  rebuildTemplates() {
+    return api.post('/agent/memory/rebuild')
   }
 }
 

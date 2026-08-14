@@ -16,7 +16,10 @@ import java.util.concurrent.ThreadPoolExecutor;
  *
  * <p><b>拒绝策略 {@link ThreadPoolExecutor.DiscardPolicy}</b>：队列满时静默丢弃——
  * Memory 更新非正确性必需，丢弃不影响主流程（下轮对话仍会再触发）。
+ *
+ * @deprecated 2026.08.06 决策 7：对话后自动触发已移除，{@code memoryWorkerExecutor} Bean 保留可注入但当前无引用。
  */
+@Deprecated
 @Configuration
 public class MemoryWorkerAsyncConfig {
 

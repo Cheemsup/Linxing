@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.agent.core.AgentContext;
 import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryAccessException;
+import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryFileWriter;
 import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryWorkspace;
 import org.linxing.linxing_agent.agent.tool.Tool;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
@@ -27,9 +28,11 @@ public class ReadMemoryTool implements Tool {
     private static final String DISPLAY_LABEL = "读取长期记忆";
     private static final String WHEN_TO_USE = "当你需要读取某个长期记忆文件的完整内容时使用";
     private static final String DESCRIPTION = "读取当前用户长期记忆 Workspace 内指定 Markdown 文件的完整内容。"
-            + "参数 path 为相对路径，如 Agent.md、Learning/Current.md、History/AgentMemory.md。";
+            + "参数 path 为相对路径，如 Agent.md、Learning/Current/Java.md、History/2026-08/Java.md。"
+            + "返回内容末尾附带 mtime/size 基线，写入时回传 write_memory 做 CAS 冲突检测。";
 
     private final MemoryWorkspace memoryWorkspace;
+    private final MemoryFileWriter memoryFileWriter;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -86,7 +89,14 @@ public class ReadMemoryTool implements Tool {
         try {
             memoryWorkspace.initUserWorkspaceIfAbsent(userId);
             String content = memoryWorkspace.read(userId, path);
-            return ToolCallResult.success(request.getToolCallId(), NAME, content);
+            // 末尾附带 mtime/size 基线，供 Agent 写入时回传 write_memory 做 CAS
+            MemoryFileWriter.FileBaseline baseline = memoryFileWriter.readBaseline(userId, path);
+            String result = content;
+            if (baseline != null) {
+                result = content + "\n\n<!-- meta: mtime=" + baseline.lastModifiedMillis()
+                        + ", size=" + baseline.size() + " -->";
+            }
+            return ToolCallResult.success(request.getToolCallId(), NAME, result);
         } catch (MemoryAccessException e) {
             log.warn("[ReadMemoryTool] 读取记忆失败 userId={} path={}: {}", userId, path, e.getMessage());
             return ToolCallResult.failure(request.getToolCallId(), NAME, "读取长期记忆失败: " + e.getMessage());

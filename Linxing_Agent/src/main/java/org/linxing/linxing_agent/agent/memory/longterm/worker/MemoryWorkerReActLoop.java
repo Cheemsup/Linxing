@@ -24,7 +24,11 @@ import java.util.List;
 
 /**
  * Memory Worker ReAct 小循环：回答完成后异步判断并更新长期记忆 Markdown。
+ *
+ * @deprecated 2026.08.06 决策 7：对话后自动触发已移除，本小循环不再被调用，保留待评估是否复活。
+ *             SYSTEM_PROMPT 已更新为多主题 Current + 按月 History 结构，若复活需配合实际链路验证。
  */
+@Deprecated
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -33,10 +37,13 @@ public class MemoryWorkerReActLoop {
     private static final String SYSTEM_PROMPT =
             "你是长期记忆维护器。判断本轮对话是否产生了需要长期化的信息："
                     + "用户角色或偏好的变化、当前学习状态/主题/计划的变化、学习阶段的切换。\n"
+                    + "记忆结构：当前学习主题存放于 Learning/Current/{topic}.md（多主题，最多 3 个，"
+                    + "超出时最老主题自动归档），已完成学习阶段归档于 History/{yyyy-MM}/{topic}.md（按月分级，"
+                    + "每周自动合并简写为 _merged.md）。\n"
                     + "约束：长期记忆只保存当前最新状态；不记录闲聊、临时信息、单次任务细节；"
                     + "不新增或删除 Section（一二级标题固定），仅修改 Section 内容。\n"
                     + "工作方式：先调 list_memory 查看有哪些记忆文件，再 read_memory 读取你可能要改的文件全文，"
-                    + "确认后再 write_memory 整体覆盖写入。\n"
+                    + "确认后再 write_memory 整体覆盖写入（带 read_memory 返回的 baseline mtime+size 做冲突检测）。\n"
                     + "若本轮无需更新任何记忆，直接输出 final 文本（如 done），不再调用工具。";
 
     private final LlmManager llmManager;

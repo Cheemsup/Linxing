@@ -22,20 +22,11 @@ import org.linxing.linxing_agent.agent.tool.ToolCallResult;
  * LLM 产出的 tool_call arguments 直接透传，无需手工解析或拼装 JSON。
  * <p>学习阶段归档由 {@link WriteMemoryTool} 内部处理，本类不感知。
  *
- * TODO：分析是否应该进一步解耦其与org.linxing.linxing_agent.agent.tool这个包的关系，仿照org/linxing/linxing_agent/agent/memory/window的静态方式注入
- *
- * <p><b>决议（2026.07.22）：不改，保留当前 Bean 注入方式。</b>
- * <p>经分析，当前耦合不污染主 Agent 体系，反而是有意设计：
- * <ul>
- *   <li>{@code WriteMemoryTool} 覆写 {@code shouldRegisterToMainAgent()=false}，被
- *       {@link org.linxing.linxing_agent.agent.tool.ToolRegistry} 显式跳过——不进注册中心、不进目录。</li>
- *   <li>{@code ReadMemoryTool}/{@code ListMemoryTool} 默认 {@code true}，有意暴露为主 Agent 只读工具
- *       （主对话中 Agent 需 read_memory/@引用 读取记忆全文）——进目录是设计意图，非泄漏。</li>
- * </ul>
- * <p>由此实现"读开放/写收口"的精确权限：写记忆仅 Memory Worker 内部可见，读记忆对主 Agent 开放。
- * <p>对比 window 的静态注入模式（{@link org.linxing.linxing_agent.agent.memory.window.projection.snip.SkipTurnReActContext}）：
- * 静态方法无法被 ToolRegistry 发现与过滤，反而会失去这套开关能力。故此处保留 Bean 注入，否决该 TODO。
+ * @deprecated 2026.08.06 决策 7：对话后自动触发已移除，本载体不再被实例化，保留待评估。
+ *             注意：{@code WriteMemoryTool} 现已 {@code shouldRegisterToMainAgent()=true} 开放给主 Agent，
+ *             原文档所述"写收口"已不成立——写权限改由提示词约束（仅用户显式要求时写入）。
  */
+@Deprecated
 public class MemoryWorkerReActContext {
 
     @Getter

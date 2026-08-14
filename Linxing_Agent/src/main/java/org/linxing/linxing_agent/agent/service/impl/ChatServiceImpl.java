@@ -19,7 +19,6 @@ import org.linxing.linxing_agent.agent.memory.window.recovery.HistoryRecoverySer
 import org.linxing.linxing_agent.agent.memory.window.recovery.RecoveredHistory;
 import org.linxing.linxing_agent.agent.memory.window.builder.ContextAssembly;
 import org.linxing.linxing_agent.agent.memory.window.builder.ContextBuilder;
-import org.linxing.linxing_agent.agent.memory.longterm.worker.MemoryWorkerService;
 import org.linxing.linxing_agent.agent.utils.SourceExtractor;
 import org.linxing.linxing_agent.rag.constant.OperationType;
 import org.linxing.linxing_agent.common.userInfoMaintainer.BaseContext;
@@ -56,7 +55,6 @@ public class ChatServiceImpl implements IChatService {
     private final AgentStepMapper agentStepMapper;
     private final SummaryService summaryService;
     private final HistoryRecoveryService historyRecoveryService;
-    private final MemoryWorkerService memoryWorkerService;
 
     /**
      * 核心对话入口：解析会话→保存用户消息→溯源历史→Agent循环→记录日志
@@ -193,14 +191,8 @@ public class ChatServiceImpl implements IChatService {
         runtimeMirrorService.appendMessage(sessionId, assistantMsg);
         patchMirrorStepChatMessageIds(sessionId, assistantMsg.getId());
 
-        // Memory Worker 异步触发：Redis Mirror 写回后、return ChatResponse 前。
-        // 独立 memoryWorkerExecutor 线程，不阻塞主循环
-        try {
-            memoryWorkerService.runAfterConversation(userId, sessionId, originalQuery, result);
-        } catch (Exception e) {
-            log.warn("[MemoryWorker] 触发失败, userId={} sessionId={}: {}",
-                    userId, sessionId, e.getMessage());
-        }
+        // 长期记忆改写不再对话后自动触发（决策 7）：仅用户主动 HTTP 编辑 /
+        // 用户在对话里显式让 Agent 调 write_memory 两条路径。cron 负责历史合并。
 
         return ChatResponse.builder()
                 .answer(result.getAnswer())

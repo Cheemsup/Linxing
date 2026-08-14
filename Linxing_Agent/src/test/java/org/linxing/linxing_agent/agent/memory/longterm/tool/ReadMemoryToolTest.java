@@ -4,6 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.linxing.linxing_agent.agent.core.AgentContext;
+import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryFileWriter;
+import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryTemplates;
 import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryWorkspace;
 import org.linxing.linxing_agent.agent.memory.longterm.workspace.MemoryWorkspaceProperties;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
@@ -37,8 +39,11 @@ class ReadMemoryToolTest {
     private ReadMemoryTool newTool() {
         MemoryWorkspaceProperties props = new MemoryWorkspaceProperties();
         props.setRootDir(tempDir.toString());
-        MemoryWorkspace workspace = new MemoryWorkspace(props);
-        return new ReadMemoryTool(workspace, new tools.jackson.databind.ObjectMapper());
+        MemoryTemplates templates = new MemoryTemplates();
+        templates.load();
+        MemoryWorkspace workspace = new MemoryWorkspace(props, templates);
+        MemoryFileWriter writer = new MemoryFileWriter(workspace);
+        return new ReadMemoryTool(workspace, writer, new tools.jackson.databind.ObjectMapper());
     }
 
     private AgentContext mockContext() {

@@ -11,7 +11,12 @@ import java.util.concurrent.Executor;
 
 /**
  * Memory Worker：回答完成后异步触发长期记忆维护。
+ *
+ * @deprecated 2026.08.06 决策 7：对话后自动触发已移除（{@code ChatServiceImpl} 不再调用本类）。
+ *             长期记忆改写仅由用户主动 HTTP 编辑 / 用户在对话里显式让 Agent 调 {@code write_memory} 两条路径，
+ *             历史 cron 合并由 {@link HistoryMergeScheduler} 承担。本类保留待评估是否复活。
  */
+@Deprecated
 @Slf4j
 @Service
 @RequiredArgsConstructor

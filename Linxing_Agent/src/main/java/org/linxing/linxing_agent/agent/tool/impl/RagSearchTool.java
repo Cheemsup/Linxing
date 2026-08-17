@@ -24,7 +24,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RagSearchTool implements Tool {
 
-    private static final String NAME = "search_knowledge_base";
+    /** 工具名常量 public，供来源提取等模块识别该工具的 TOOL_RESULT 步骤 */
+    public static final String NAME = "search_knowledge_base";
     private static final String DESCRIPTION = "搜索用户个人知识库中的笔记和文档，返回相关的文本片段及其来源信息。"
             + "当需要查找用户笔记中存储的信息、知识点、或任何用户自己记录的内容时使用此工具。";
     private static final String BRIEF = "搜索用户个人知识库，返回相关笔记片段";
@@ -149,10 +150,12 @@ public class RagSearchTool implements Tool {
             throw new IllegalArgumentException("查询关键词不能为空");
         }
         int resultCount = topK > 0 ? Math.min(topK, 10) : 5;
-        log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, resultCount);
+        // 0816 起注释：请求级噪音日志
+        // log.info("[RagSearchTool] 用户{} 搜索: query={}, topK={}", userId, query, resultCount);
         List<SearchResult> results = searchService.search(userId, query, resultCount, true);
         if (results == null || results.isEmpty()) {
-            log.info("[RagSearchTool] 用户{} 检索结果经阈值过滤后为空: query={}", userId, query);
+            // 0816 起注释：请求级噪音日志
+            // log.info("[RagSearchTool] 用户{} 检索结果经阈值过滤后为空: query={}", userId, query);
             return "未在知识库中检索到与查询相关的高相关内容（所有候选的相关性分数均低于阈值）。"
                     + "请据此回应用户：知识库中未找到相关信息，并避免编造内容。";
         }

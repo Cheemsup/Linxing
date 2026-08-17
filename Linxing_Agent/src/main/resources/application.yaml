@@ -41,6 +41,13 @@ llm:
   temperature: 0.3
   timeout-seconds: 180
   max-tokens: 8192
+  # 0814 重试机制改造：LLM 调用失败重试配置
+  # max-retries 作用于非流式模型的 langchain4j 内置重试次数；退避参数供主对话循环内单轮重试使用
+  retry:
+    max-retries: ${LLM_RETRY_MAX_RETRIES:2}
+    initial-backoff-ms: ${LLM_RETRY_INITIAL_BACKOFF_MS:500}
+    backoff-multiplier: ${LLM_RETRY_BACKOFF_MULTIPLIER:2}
+    jitter-ratio: ${LLM_RETRY_JITTER_RATIO:0.2}
   providers:
     minimax:
       model: ${MINIMAX_MODEL:MiniMax-M2.7}
@@ -160,6 +167,21 @@ agent:
     tavily:
       api-key: ${TAVILY_API_KEY:}
       max-results: ${TAVILY_MAX_RESULTS:5}
+
+# ==================== Langfuse 观测 ====================
+# 自定义 ChatModelListener 直连 OTel SDK → Langfuse OTLP 端点，凭据从原 quarkus 段迁移至此。
+# enabled=false 时构建 no-op Tracer，不透传任何 span，系统零开销。当前已置 true 用于冒烟验证，
+# 需要临时关闭可在启动时设 LANGFUSE_ENABLED=false。
+langfuse:
+  enabled: ${LANGFUSE_ENABLED:false}
+  # OTLP HTTP 端点。注意：Java SDK 程序化 setEndpoint() 不自动追加信号路径（环境变量自动装配才会），
+  # 而 Langfuse 只服务完整路径 .../api/public/otel/v1/traces；base 形式 .../api/public/otel 直 POST 会 404。
+  endpoint: ${LANGFUSE_ENDPOINT}
+  public-key: ${LANGFUSE_PUBLIC_KEY}
+  secret-key: ${LANGFUSE_SECRET_KEY}
+  environment: ${LANGFUSE_ENVIRONMENT:dev}
+  version: ${LANGFUSE_VERSION:0.0.1-SNAPSHOT}
+  trace-offline-calls: ${LANGFUSE_TRACE_OFFLINE_CALLS:false}
 
 logging:
   level:

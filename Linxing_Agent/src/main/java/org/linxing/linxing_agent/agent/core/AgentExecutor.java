@@ -5,6 +5,8 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.exception.RetriableException;
+import dev.langchain4j.exception.UnresolvedModelServerException;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
@@ -14,11 +16,19 @@ import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.linxing.linxing_agent.agent.tool.ToolRegistry;
 import org.linxing.linxing_agent.agent.tool.ToolSpec;
+import org.linxing.linxing_agent.common.RetryMetrics;
+import org.linxing.linxing_agent.common.config.LlmProperties;
+import org.linxing.linxing_agent.observability.AgentObservability;
+import org.linxing.linxing_agent.observability.ObservableContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -52,13 +62,22 @@ public class AgentExecutor {
     private final ToolRegistry toolRegistry;
     private final ToolExecutionTimeout toolExecutionTimeout;
     private final ContextBuilder contextBuilder;
+    private final LlmProperties llmProperties;
+    private final RetryMetrics retryMetrics;
+    private final AgentObservability agentObservability;
 
     public AgentExecutor(ToolRegistry toolRegistry,
                          ToolExecutionTimeout toolExecutionTimeout,
-                         ContextBuilder contextBuilder) {
+                         ContextBuilder contextBuilder,
+                         LlmProperties llmProperties,
+                         RetryMetrics retryMetrics,
+                         AgentObservability agentObservability) {
         this.toolRegistry = toolRegistry;
         this.toolExecutionTimeout = toolExecutionTimeout;
         this.contextBuilder = contextBuilder;
+        this.llmProperties = llmProperties;
+        this.retryMetrics = retryMetrics;
+        this.agentObservability = agentObservability;
     }
 
     /**
@@ -98,13 +117,11 @@ public class AgentExecutor {
                     .toolSpecifications(roundSpecs)
                     .build();
 
-            //调用流式LLM并等待完整响应
-            ChatResponse response;
+            //调用流式LLM并等待完整响应（0814 重试机制：瞬态失败且未 emit 时循环内单轮重试）
             StreamingResponseFuture future;
+            ObservableContext.setCurrentStep(stepNumber);//0816 Langfuse：标记主循环当前 step，listener 据此写 generation span 的 step_number
             try {
-                future = new StreamingResponseFuture(listener, stepNumber);
-                chatModel.chat(chatRequest, future);
-                response = future.await(600, TimeUnit.SECONDS);
+                future = invokeWithRetry(chatModel, chatRequest, listener, stepNumber);
             } catch (Exception e) {
                 log.error("[AgentExecutor] LLM调用失败: {}", e.getMessage(), e);
                 recorder.record(AgentStepEvent.builder()
@@ -123,7 +140,11 @@ public class AgentExecutor {
                         .steps(recorder.getRecordedSteps())
                         .totalSteps(stepNumber)
                         .build();
+            } finally {
+                ObservableContext.clearCurrentStep();
             }
+
+            ChatResponse response = future.getResponse();
 
             AiMessage aiMessage = response.aiMessage();
 
@@ -191,6 +212,8 @@ public class AgentExecutor {
                             .build();
 
                     ToolCallResult toolResult;
+                    long toolStartNanos = System.nanoTime();//0816 Langfuse：tool span 墙钟耗时起点
+                    AgentObservability.ToolHandle toolObs = agentObservability.beginTool(toolReq, toolKind);
                     try {
                         if (toolSpec == null) {
                             toolResult = ToolCallResult.failure(toolReq.id(), toolReq.name(),
@@ -201,7 +224,7 @@ public class AgentExecutor {
                                     ? workflowToolTimeoutSeconds
                                     : toolTimeoutSeconds;
                             toolResult = toolExecutionTimeout.executeWithTimeout(
-                                    toolSpec, toolCallRequest, context, timeout);//将tool传入带计时的执行类中执行
+                                    toolSpec, toolCallRequest, context, timeout, toolObs.getContext());//将tool传入带计时的执行类中执行
                         }
                     } finally {
                         // 0724 改造B：工具执行结束（含异常/未知工具）后弹栈——子 Agent 的 start/end 已在
@@ -209,6 +232,8 @@ public class AgentExecutor {
                         // 必须在 tool_result 落盘前弹，使 tool_result 的 parent 取到 NULL（与 tool_call 平级）。
                         recorder.popParentStepId();
                     }
+                    agentObservability.endTool(toolObs, toolResult,
+                            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - toolStartNanos));
 
                     //回调通知 builder：渐进披露模式下 resolve 成功会触发工具/技能动态激活（策略内化于 builder）
                     //0724 改进三：透传 recorder，激活技能时由 builder 推 skill_activated 事件
@@ -295,5 +320,98 @@ public class AgentExecutor {
     private String truncate(String text, int maxLen) {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
+    }
+
+    private static final Random RANDOM = new Random();
+
+    /**
+     * 调用流式LLM并等待完整响应；对"瞬态失败且尚未 emit 任何 token"的失败按指数退避重试（0814 改造）。
+     * <p>重试安全性的三个前提：
+     * <ul>
+     *   <li>工具在本轮成功返回后才执行 → 重试不重复工具调用/落库；</li>
+     *   <li>memory 在 await 成功后才变更 → 重试不污染运行容器；</li>
+     *   <li>已 emit 内容（SSE 已推送 answer/thinking token）不重试 → 避免前端重复输出。</li>
+     * </ul>
+     * 参数来自 {@code llm.retry}（改造 B 落地），单次 180s 模型超时不变、不累计。
+     * 重试行为同步上报到 {@link RetryMetrics}（改造 D，轻量计数 + 定时汇总）。
+     *
+     * @return 已完成（await 成功）的 future，调用方经 {@link StreamingResponseFuture#getResponse()} 取结果
+     * @throws RuntimeException 重试耗尽、不可重试或已 emit 时抛原异常
+     */
+    private StreamingResponseFuture invokeWithRetry(OpenAiStreamingChatModel chatModel, ChatRequest chatRequest,
+                                                    AgentStepListener listener, int stepNumber) {
+        LlmProperties.Retry retry = llmProperties.getRetry();
+        int maxRetries = retry.getMaxRetries();
+        boolean retried = false;
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            StreamingResponseFuture future = new StreamingResponseFuture(listener, stepNumber);
+            try {
+                chatModel.chat(chatRequest, future);
+                future.await(600, TimeUnit.SECONDS);
+                if (retried) {
+                    retryMetrics.onRetrySuccess();
+                }
+                return future;
+            } catch (Exception e) {
+                String type = RetryMetrics.classify(e);
+                boolean retryable = isRetryable(e) && !future.hasEmitted();
+                if (!retryable || attempt >= maxRetries) {
+                    if (retried) {
+                        retryMetrics.onRetryExhausted(type);
+                    } else {
+                        retryMetrics.onNonRetryable(type);
+                    }
+                    throw e;
+                }
+                retried = true;
+                retryMetrics.onRetry(type);
+                long backoff = backoffDelayMillis(retry, attempt);
+                log.warn("[retry] LLM调用失败，第 {}/{} 次重试，{}ms 后重试: type={}, err={}",
+                        attempt + 1, maxRetries, backoff, type, e.getMessage());
+                sleepQuietly(backoff);
+            }
+        }
+        // 防御：循环必然 return 或 throw
+        throw new IllegalStateException("invokeWithRetry 不应到达此处");
+    }
+
+    /**
+     * 可重试异常白名单：langchain4j {@link RetriableException} 系（5xx/429/408）+ 网络 IO + DNS 解析失败。
+     * <p>复用异常类型而非解析 HTTP 状态码，与 langchain4j 内置分类一致；其中 DNS 解析
+     * （{@link UnresolvedModelServerException}）虽属 NonRetriableException，但为瞬态，显式纳入白名单。
+     * <p>沿 cause 链逐层判定：流式失败经 {@code await()} 包装为 RuntimeException，真正根因在链上，
+     * 只查顶层会漏掉 429 限流等最该重试的异常。
+     */
+    private boolean isRetryable(Throwable t) {
+        Throwable cause = t;
+        while (cause != null) {
+            if (cause instanceof RetriableException
+                    || cause instanceof IOException
+                    || cause instanceof HttpTimeoutException
+                    || cause instanceof UnresolvedAddressException
+                    || cause instanceof UnresolvedModelServerException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * 指数退避 + 抖动：initialBackoffMs × multiplier^attempt × (1 ± jitterRatio 随机)。
+     */
+    private long backoffDelayMillis(LlmProperties.Retry retry, int attempt) {
+        double base = retry.getInitialBackoffMs() * Math.pow(retry.getBackoffMultiplier(), attempt);
+        double factor = 1 + (RANDOM.nextDouble() * 2 - 1) * retry.getJitterRatio();
+        return Math.max(1L, (long) (base * factor));
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("LLM重试等待被中断", ie);
+        }
     }
 }

@@ -17,6 +17,7 @@ import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.rag.utils.Reranker;
 import org.linxing.linxing_agent.rag.utils.VectorUtils;
 import org.linxing.linxing_agent.rag.vo.SearchResultVO;
+import org.linxing.linxing_agent.observability.AgentObservability;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.ObjectMapper;
@@ -37,103 +38,176 @@ public class SearchServiceImpl implements ISearchService {
     private static final JavaType NODE_META_LIST_TYPE = OBJECT_MAPPER.getTypeFactory()
             .constructCollectionType(List.class, Map.class);
 
+    /** 0816 Phase2 改进3：retrieval span 语义常量（与 RagSearchTool 工具名一致） */
+    private static final String RETRIEVAL_TOOL_NAME = "search_knowledge_base";
+    private static final String RETRIEVAL_VECTOR_STORE = "pgvector";
+    private static final String RETRIEVAL_SIMILARITY = "cosine";
+    private static final String RETRIEVAL_RERANKER = "ms-marco-MiniLM-L-6-v2";
+    /** retrieval span metadata.scores 保留的归一化分数个数上限 */
+    private static final int MAX_SCORES_KEPT = 10;
+
     private final EmbeddingModel embeddingModel;
     private final EmbeddingMapper embeddingMapper;
     private final ChunkMapper chunkMapper;
     private final RagProperties ragProperties;
     private final Reranker reranker;
+    private final AgentObservability agentObservability;
 
     @Override
     public List<SearchResult> search(Integer userId, String query, int topK, boolean hybrid) {
         int effectiveTopK = topK > 0 ? topK : ragProperties.getSearch().getDefaultTopK();
         int recallSize = ragProperties.getSearch().getRecallSize();
+        double threshold = ragProperties.getSearch().getScoreThreshold();
+        boolean hybridUsed = hybrid && ragProperties.getSearch().isHybridEnabled();
 
-        Embedding queryEmbedding = embeddingModel.embed(query).content();
-        String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
+        // 0816 Phase2 改进3：RAG 检索观测。覆盖主循环（Tool: search_knowledge_base 子 span）/ 子 Agent
+        // （Agent: xxx 子 span）两入口；HTTP 直连无观测上下文时返回 no-op，静默跳过，无额外开销。
+        AgentObservability.RetrievalHandle retrieval = agentObservability.beginRetrieval(
+                RETRIEVAL_TOOL_NAME, query, effectiveTopK, hybrid);
 
-        //进行向量搜索，得到结果
-        List<VectorSearchResult> vectorResults =
-                embeddingMapper.vectorSearch(userId, queryVectorString, recallSize);
+        // 诊断统计采集（沿查询路径逐步累计，span 关闭时写入 metadata.*）
+        int vectorCandidates = 0;
+        int bm25Candidates = 0;
+        List<Double> topScores = new ArrayList<>(MAX_SCORES_KEPT);
 
-        List<VectorSearchResult> candidates;//最终结果
+        try {
+            Embedding queryEmbedding = embeddingModel.embed(query).content();
+            String queryVectorString = VectorUtils.toArray(queryEmbedding.vector());
 
-        //用户选择混合搜索 && 系统开放混合搜索功能，则进行混合搜索
-        if (hybrid && ragProperties.getSearch().isHybridEnabled()) {
-            String tsquery = KeywordExtractor.extractToTsquery(query);
-            if (!tsquery.isEmpty()) {
-                int bm25RecallSize = ragProperties.getSearch().getBm25RecallSize();
-                //进行BM25搜索，得到结果
-                List<Bm25SearchResult> bm25Results =
-                        chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
-                log.debug("[搜索] 用户{} 混合检索: 向量候选={}, BM25候选={}",
-                        userId, vectorResults.size(), bm25Results.size());
+            //进行向量搜索，得到结果
+            List<VectorSearchResult> vectorResults =
+                    embeddingMapper.vectorSearch(userId, queryVectorString, recallSize);
+            vectorCandidates = vectorResults.size();
 
-                //根据两种结果分数权重进行融合排序，得到最终结果
-                candidates = ReciprocalRankFusion.fuse(
-                        vectorResults,
-                        bm25Results,
-                        ragProperties.getSearch().getVectorWeight(),
-                        ragProperties.getSearch().getBm25Weight()
-                );
-                log.debug("[搜索] 用户{} RRF融合后候选数: {}", userId, candidates.size());
+            List<VectorSearchResult> candidates;//最终结果
+
+            //用户选择混合搜索 && 系统开放混合搜索功能，则进行混合搜索
+            if (hybridUsed) {
+                String tsquery = KeywordExtractor.extractToTsquery(query);
+                if (!tsquery.isEmpty()) {
+                    int bm25RecallSize = ragProperties.getSearch().getBm25RecallSize();
+                    //进行BM25搜索，得到结果
+                    List<Bm25SearchResult> bm25Results =
+                            chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
+                    bm25Candidates = bm25Results.size();
+                    log.debug("[搜索] 用户{} 混合检索: 向量候选={}, BM25候选={}",
+                            userId, vectorResults.size(), bm25Results.size());
+
+                    //根据两种结果分数权重进行融合排序，得到最终结果
+                    candidates = ReciprocalRankFusion.fuse(
+                            vectorResults,
+                            bm25Results,
+                            ragProperties.getSearch().getVectorWeight(),
+                            ragProperties.getSearch().getBm25Weight()
+                    );
+                    log.debug("[搜索] 用户{} RRF融合后候选数: {}", userId, candidates.size());
+                } else {
+                    log.debug("[搜索] 用户{} 未提取到有效关键词，仅使用向量检索", userId);
+                    candidates = vectorResults;
+                }
             } else {
-                log.debug("[搜索] 用户{} 未提取到有效关键词，仅使用向量检索", userId);
                 candidates = vectorResults;
             }
-        } else {
-            candidates = vectorResults;
-        }
 
-        if (candidates.isEmpty()) {
+            if (candidates.isEmpty()) {
+                // 空候选：正常业务结果（hit=false），闭合 span 避免泄漏
+                agentObservability.endRetrieval(retrieval, List.of(), buildRetrievalStats(
+                        recallSize, vectorCandidates, bm25Candidates, hybridUsed, threshold,
+                        0, 0, topScores));
+                return List.of();
+            }
+
+            //对全部候选统一 Cross-Encoder 打分（与 topK 无关，保证不同 topK 下打分对象一致）
+            List<Reranker.ScoredResult> scored = reranker.scoreAll(query, candidates);
+
+            //父块去重展开（small2big），用父块代表小块参与最终排序
+            //   必须在 limit(topK) 之前做，否则不同 topK 截断后再父块去重会破坏前缀子集关系
+            List<Reranker.ScoredResult> expanded = expandScoredToParent(scored, userId);
+
+            //按 Cross-Encoder 分数稳定排序后截断 topK（保留分数，供归一化/阈值过滤使用）
+            //   pickTopKScored 与原 pickTopK 排序逻辑一致，仅保留 ScoredResult.score（Cross-Encoder 原始 logits）
+            List<Reranker.ScoredResult> topScored = reranker.pickTopKScored(expanded, effectiveTopK);
+
+            //对 Cross-Encoder 原始 logits 做 sigmoid 归一化到 [0,1]，再按阈值舍弃低分结果
+            //   即使导致结果为空也舍弃——空结果由消费侧（RagSearchTool）降级提示
+            List<Reranker.ScoredResult> filtered = new ArrayList<>(topScored.size());
+            for (Reranker.ScoredResult sr : topScored) {
+                double normalized = sigmoid(sr.score());
+                if (topScores.size() < MAX_SCORES_KEPT) {
+                    topScores.add(normalized);
+                }
+                if (threshold <= 0.0 || normalized >= threshold) {
+                    filtered.add(new Reranker.ScoredResult(sr.result(), normalized));
+                }
+            }
+            if (filtered.size() < topScored.size()) {
+                log.debug("[搜索] 用户{} 分数阈值过滤: topK候选={} 过滤后保留={} (threshold={})",
+                        userId, topScored.size(), filtered.size(), threshold);
+            }
+
+            List<SearchResult> results = filtered.stream()
+                    .map(sr -> {
+                        VectorSearchResult r = sr.result();
+                        return SearchResult.builder()
+                                .chunkId(r.chunkId())
+                                .documentId(r.documentId())
+                                .fileName(r.fileName())
+                                .titlePath(r.titlePath())
+                                .chunkType(r.chunkType())
+                                .chunkText(r.chunkText())
+                                .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
+                                //对外暴露 sigmoid 归一化后的 [0,1] 分数
+                                .score(sr.score())
+                                .build();
+                    })
+                    //按score降序，同分时按chunkId升序作稳定tie-breaker
+                    //——避免不同topK下同分父块顺序漂移导致前几名不一致
+                    .sorted(Comparator.comparingDouble((SearchResult r) -> r.getScore()).reversed()
+                            .thenComparingInt(r -> r.getChunkId() != null ? r.getChunkId() : Integer.MAX_VALUE))
+                    .collect(Collectors.toList());
+
+            agentObservability.endRetrieval(retrieval, toRetrievalSummaries(results), buildRetrievalStats(
+                    recallSize, vectorCandidates, bm25Candidates, hybridUsed, threshold,
+                    topScored.size(), filtered.size(), topScores));
+            return results;
+        } catch (RuntimeException e) {
+            // 检索异常：闭合 span 并标 ERROR，避免 span 泄漏；异常照常向上传播
+            agentObservability.endRetrievalError(retrieval, e);
+            throw e;
+        }
+    }
+
+    /**
+     * 构建 retrieval 诊断统计（0816 Phase2 改进3）。
+     * threshold 为 0 表示阈值过滤关闭，但 metadata 仍如实记录配置值。
+     */
+    private AgentObservability.RetrievalStats buildRetrievalStats(int recallSize, int vectorCandidates,
+                                                                  int bm25Candidates, boolean hybrid,
+                                                                  double threshold, int beforeFilter,
+                                                                  int afterFilter, List<Double> topScores) {
+        return new AgentObservability.RetrievalStats(
+                RETRIEVAL_VECTOR_STORE, RETRIEVAL_SIMILARITY, RETRIEVAL_RERANKER,
+                recallSize, vectorCandidates, bm25Candidates, hybrid, threshold,
+                beforeFilter, afterFilter, topScores);
+    }
+
+    /**
+     * 结果 → retrieval span output 摘要（chunkId/fileName/titlePath/score，不含 chunkText 控体积）。
+     */
+    private List<Map<String, Object>> toRetrievalSummaries(List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
             return List.of();
         }
-
-        //对全部候选统一 Cross-Encoder 打分（与 topK 无关，保证不同 topK 下打分对象一致）
-        List<Reranker.ScoredResult> scored = reranker.scoreAll(query, candidates);
-
-        //父块去重展开（small2big），用父块代表小块参与最终排序
-        //   必须在 limit(topK) 之前做，否则不同 topK 截断后再父块去重会破坏前缀子集关系
-        List<Reranker.ScoredResult> expanded = expandScoredToParent(scored, userId);
-
-        //按 Cross-Encoder 分数稳定排序后截断 topK（保留分数，供归一化/阈值过滤使用）
-        //   pickTopKScored 与原 pickTopK 排序逻辑一致，仅保留 ScoredResult.score（Cross-Encoder 原始 logits）
-        List<Reranker.ScoredResult> topScored = reranker.pickTopKScored(expanded, effectiveTopK);
-
-        //对 Cross-Encoder 原始 logits 做 sigmoid 归一化到 [0,1]，再按阈值舍弃低分结果
-        //   即使导致结果为空也舍弃——空结果由消费侧（RagSearchTool）降级提示
-        double threshold = ragProperties.getSearch().getScoreThreshold();
-        List<Reranker.ScoredResult> filtered = new ArrayList<>(topScored.size());
-        for (Reranker.ScoredResult sr : topScored) {
-            double normalized = sigmoid(sr.score());
-            if (threshold <= 0.0 || normalized >= threshold) {
-                filtered.add(new Reranker.ScoredResult(sr.result(), normalized));
-            }
+        List<Map<String, Object>> summaries = new ArrayList<>(results.size());
+        for (SearchResult r : results) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("chunkId", r.getChunkId());
+            m.put("fileName", r.getFileName());
+            m.put("titlePath", r.getTitlePath());
+            m.put("score", Math.round(r.getScore() * 10000.0) / 10000.0);
+            summaries.add(m);
         }
-        if (filtered.size() < topScored.size()) {
-            log.debug("[搜索] 用户{} 分数阈值过滤: topK候选={} 过滤后保留={} (threshold={})",
-                    userId, topScored.size(), filtered.size(), threshold);
-        }
-
-        return filtered.stream()
-                .map(sr -> {
-                    VectorSearchResult r = sr.result();
-                    return SearchResult.builder()
-                            .chunkId(r.chunkId())
-                            .documentId(r.documentId())
-                            .fileName(r.fileName())
-                            .titlePath(r.titlePath())
-                            .chunkType(r.chunkType())
-                            .chunkText(r.chunkText())
-                            .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
-                            //对外暴露 sigmoid 归一化后的 [0,1] 分数
-                            .score(sr.score())
-                            .build();
-                })
-                //按score降序，同分时按chunkId升序作稳定tie-breaker
-                //——避免不同topK下同分父块顺序漂移导致前几名不一致
-                .sorted(Comparator.comparingDouble((SearchResult r) -> r.getScore()).reversed()
-                        .thenComparingInt(r -> r.getChunkId() != null ? r.getChunkId() : Integer.MAX_VALUE))
-                .collect(Collectors.toList());
+        return summaries;
     }
 
     /**

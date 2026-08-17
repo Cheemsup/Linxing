@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -19,6 +20,9 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
     private final CountDownLatch latch = new CountDownLatch(1);
     private final AtomicReference<ChatResponse> responseHolder = new AtomicReference<>();
     private final AtomicReference<Throwable> errorHolder = new AtomicReference<>();
+
+    /** 是否已向 SSE 推送过内容（answer/thinking token）。用于判定本轮失败能否安全重试 */
+    private final AtomicBoolean emitted = new AtomicBoolean(false);
 
     private final AgentStepListener listener;
     private final int stepNumber;
@@ -46,13 +50,29 @@ public class StreamingResponseFuture implements StreamingChatResponseHandler {
         return thinkingBuffer.length() > 0;
     }
 
+    /**
+     * 本轮是否已向 SSE 推送过内容。重试仅允许发生在未 emit 的失败上（已 emit 会重复输出）。
+     */
+    public boolean hasEmitted() {
+        return emitted.get();
+    }
+
+    /**
+     * 获取已完成（await 成功）的完整响应。
+     */
+    public ChatResponse getResponse() {
+        return responseHolder.get();
+    }
+
     @Override
     public void onPartialResponse(String partialResponse) {
+        emitted.set(true);
         listener.onStream(partialResponse, "answer", stepNumber);
     }
 
     @Override
     public void onPartialThinking(PartialThinking partialThinking) {
+        emitted.set(true);
         thinkingBuffer.append(partialThinking.text());
         listener.onStream(partialThinking.text(), "thinking", stepNumber);
     }

@@ -95,7 +95,9 @@ public class StudyPlanner {
                 .errorHandler(errorContext -> {
                     String agentName = errorContext.agentName();
                     Throwable ex = errorContext.exception();
-                    String errMsg = ex != null ? ex.getMessage() : "unknown error";
+                    String errMsg = ex != null
+                            ? ex.getMessage() + " | rootCause=" + getRootCauseMessage(ex)
+                            : "unknown error";
                     log.error("Agent error in workflow: agent={}, error={}", agentName, errMsg, ex);
                     recorder.record(AgentStepTypes.SUB_AGENT, AgentStepTypes.PHASE_STUDY_PLAN,
                             StepRecorder.buildSubAgentData(agentName, "error",
@@ -131,7 +133,7 @@ public class StudyPlanner {
                     .examSaved(false)
                     .examTriggered(generateExam)
                     .clarificationTriggered(needsClarification)
-                    .error("工作流执行失败: " + e.getMessage())
+                    .error("工作流执行失败: " + e.getMessage() + " | rootCause=" + getRootCauseMessage(e))
                     .build();
         }
 
@@ -164,5 +166,22 @@ public class StudyPlanner {
         }
 
         return result;
+    }
+
+    /**
+     * 取异常链最深根因的 message，供错误诊断使用。
+     * <p>langchain4j-agentic 会把内部异常反射包装为 AgentInvocationException，真正根因在
+     * {@code getCause()} 链上；只取 {@code getMessage()} 会丢失根因信息（0726 遗留问题）。
+     * 沿 cause 链走到最深非 null cause，返回其"异常类型 + message"。
+     */
+    private static String getRootCauseMessage(Throwable ex) {
+        Throwable root = ex;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String msg = root.getMessage();
+        return msg != null && !msg.isBlank()
+                ? root.getClass().getSimpleName() + ": " + msg
+                : root.getClass().getSimpleName();
     }
 }

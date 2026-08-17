@@ -68,6 +68,33 @@ class SaveStudyPlanToolTest {
     }
 
     @Test
+    void saveStudyPlan_shouldWriteObservationOutput() throws Exception {
+        // Given
+        String containerId = "study_plan_obs";
+        ObjectNode metadata = objectMapper.createObjectNode()
+                .put("title", "Rust 学习计划")
+                .put("goal", "掌握 Rust 基础");
+        ArrayNode phases = objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode().put("title", "第1阶段"))
+                .add(objectMapper.createObjectNode().put("title", "第2阶段"));
+        JsonContainer container = new JsonContainer(containerId, "study_plan", metadata,
+                java.util.Map.of("phases", phases));
+        SubAgentContext.currentStore().putContainer(containerId, container);
+        when(studyPlanService.parseAndSave(eq(42), any(), eq(StudyPlanServiceImpl.ValidationStrategy.COLLECT_ALL)))
+                .thenReturn(7);
+
+        // When
+        tool.saveStudyPlan(containerId);
+
+        // Then: 观测属性写入全量 JSON（供 Langfuse 子 Agent span output 回放）
+        String observed = SubAgentContext.current().getAttribute(SubAgentContext.ATTR_OBSERVATION_OUTPUT);
+        assertThat(observed)
+                .contains("\"title\":\"Rust 学习计划\"")
+                .contains("\"phases\"")
+                .contains("第1阶段");
+    }
+
+    @Test
     void saveStudyPlan_shouldRejectWrongContainerType() {
         String containerId = "exam_abc123";
         JsonContainer container = new JsonContainer(containerId, "exam",

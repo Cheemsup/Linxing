@@ -230,6 +230,8 @@ public class SaveExamTool implements Tool {
             SubAgentContext context = SubAgentContext.current();
             if (context != null) {
                 context.setAttribute(ATTR_SAVE_RESULT, new SaveResult(examId, questionCount));
+                // 0816 Phase2 改进2：观测用全量输出，供子 Agent span output 回放（不依赖 LLM 最终文本）
+                context.setAttribute(SubAgentContext.ATTR_OBSERVATION_OUTPUT, examRoot.toString());
             }
 
             log.info("[SaveExamTool] @Tool 保存测验成功，userId={}, examId={}, linkedPlanId={}",

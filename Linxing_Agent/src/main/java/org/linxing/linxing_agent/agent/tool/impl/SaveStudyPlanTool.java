@@ -238,6 +238,8 @@ public class SaveStudyPlanTool implements Tool {
             SubAgentContext context = SubAgentContext.current();
             if (context != null) {
                 context.setAttribute(ATTR_SAVE_RESULT, new SaveResult(planId, phaseCount));
+                // 0816 Phase2 改进2：观测用全量输出，供子 Agent span output 回放（不依赖 LLM 最终文本）
+                context.setAttribute(SubAgentContext.ATTR_OBSERVATION_OUTPUT, planRoot.toString());
             }
 
             log.info("[SaveStudyPlanTool] @Tool 保存学习计划成功，userId={}, planId={}", userId, planId);

@@ -17,6 +17,7 @@ import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.CreateContainerTo
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.RemoveFromContainerTool;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.ReplaceContainerMetadataTool;
 import org.linxing.linxing_agent.agent.tool.impl.jsoncontainer.ReplaceInContainerTool;
+import org.linxing.linxing_agent.observability.AgentObservability;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -49,6 +50,7 @@ public class ContentGenerationStage {
     private final SaveStudyPlanTool saveStudyPlanTool;
     private final SaveExamTool saveExamTool;
     private final ExamServiceImpl examService;
+    private final AgentObservability agentObservability;
 
     /**
      * 构建内容生成阶段工作流。
@@ -75,7 +77,7 @@ public class ContentGenerationStage {
                 .listener(SubAgentStepListener.create(
                         PLAN_AGENT_NAME, "plan",
                         PLAN_DISPLAY_LABEL, PLAN_OUTPUT_KEY, recorder,
-                        AgentStepTypes.PHASE_STUDY_PLAN))
+                        AgentStepTypes.PHASE_STUDY_PLAN, agentObservability))
                 .build();
 
         // 测验生成 Agent
@@ -89,7 +91,7 @@ public class ContentGenerationStage {
                 .listener(SubAgentStepListener.create(
                         EXAM_AGENT_NAME, "exam",
                         EXAM_DISPLAY_LABEL, EXAM_OUTPUT_KEY, recorder,
-                        AgentStepTypes.PHASE_STUDY_PLAN))
+                        AgentStepTypes.PHASE_STUDY_PLAN, agentObservability))
                 .build();
 
         // 根据 generate_exam 条件决定是否执行 examAgent

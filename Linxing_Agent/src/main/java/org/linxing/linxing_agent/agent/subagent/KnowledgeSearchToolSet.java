@@ -79,7 +79,8 @@ public class KnowledgeSearchToolSet {
             return "查询关键词不能为空";
         }
         try {
-            log.info("[KnowledgeSearchTools] 知识库搜索: userId={}, query={}", userId, query);
+            // 0816 起注释：请求级噪音日志
+            // log.info("[KnowledgeSearchTools] 知识库搜索: userId={}, query={}", userId, query);
             List<SearchResult> results = searchService.search(userId, query, 5, true);
             if (results.isEmpty()) {
                 return "未找到相关笔记内容";
@@ -113,7 +114,8 @@ public class KnowledgeSearchToolSet {
             return "查询关键词不能为空";
         }
         try {
-            log.info("[KnowledgeSearchTools] 联网搜索: query={}", query);
+            // 0816 起注释：请求级噪音日志
+            // log.info("[KnowledgeSearchTools] 联网搜索: query={}", query);
             WebSearchRequest searchRequest = WebSearchRequest.builder()
                     .searchTerms(query)
                     .maxResults(maxResults)

@@ -3,10 +3,15 @@ package org.linxing.linxing_agent.agent.core;
 import dev.langchain4j.agentic.observability.AfterAgentToolExecution;
 import dev.langchain4j.agentic.observability.AgentInvocationError;
 import dev.langchain4j.agentic.observability.AgentListener;
+import dev.langchain4j.agentic.observability.AgentRequest;
 import dev.langchain4j.agentic.observability.AgentResponse;
 import dev.langchain4j.agentic.observability.BeforeAgentToolExecution;
 import org.linxing.linxing_agent.agent.entity.AgentStep;
+import org.linxing.linxing_agent.agent.subagent.SubAgentContext;
+import org.linxing.linxing_agent.observability.AgentObservability;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -45,36 +50,52 @@ public class SubAgentStepListener implements AgentListener {
     private final String displayLabel;
     private final String outputKey;
     private final String phase;
+    /** 0816 Langfuse：观测门面，非空时在 before/after/error 钩子建/闭子 Agent span；可为 null（不追踪） */
+    private final AgentObservability agentObservability;
+
+    /** 嵌套子 Agent span 句柄栈（inheritedBySubagents 使父 listener 可被深层子 Agent 复用，用栈保证配对） */
+    private final ThreadLocal<Deque<AgentObservability.SubAgentHandle>> obsStack =
+            ThreadLocal.withInitial(ArrayDeque::new);
 
     private SubAgentStepListener(StepRecorder recorder, String agentName, String agentRole,
-                                 String displayLabel, String outputKey, String phase) {
+                                 String displayLabel, String outputKey, String phase,
+                                 AgentObservability agentObservability) {
         this.recorder = recorder;
         this.agentName = agentName;
         this.agentRole = agentRole;
         this.displayLabel = displayLabel;
         this.outputKey = outputKey;
         this.phase = phase;
+        this.agentObservability = agentObservability;
     }
 
     /**
      * 工厂入口：为子 Agent 创建监听器实例。
      *
-     * @param agentName     Agent 名称（内部标识，作为 agent_id）
-     * @param agentRole     Agent 角色（用于前端兜底映射）
-     * @param displayLabel  前端展示名（如"收集资料"）
-     * @param outputKey     输出 key（可 null）
-     * @param recorder      步骤记录器
-     * @param phase         阶段标识（用于 step 事件分组）
+     * @param agentName           Agent 名称（内部标识，作为 agent_id）
+     * @param agentRole           Agent 角色（用于前端兜底映射）
+     * @param displayLabel        前端展示名（如"收集资料"）
+     * @param outputKey           输出 key（可 null）
+     * @param recorder            步骤记录器
+     * @param phase               阶段标识（用于 step 事件分组）
+     * @param agentObservability  Langfuse 观测门面（0816，可传 null 关闭子 Agent span 追踪）
      */
     public static AgentListener create(String agentName, String agentRole,
                                        String displayLabel,
                                        String outputKey, StepRecorder recorder,
-                                       String phase) {
-        return new SubAgentStepListener(recorder, agentName, agentRole, displayLabel, outputKey, phase);
+                                       String phase, AgentObservability agentObservability) {
+        return new SubAgentStepListener(recorder, agentName, agentRole, displayLabel, outputKey, phase,
+                agentObservability);
     }
 
     @Override
     public void beforeAgentInvocation(dev.langchain4j.agentic.observability.AgentRequest agentRequest) {
+        // 0816 Langfuse：建子 Agent span（Agent: xxx）并置为当前上下文，使子 Agent 内部 LLM 调用挂其下
+        AgentObservability.SubAgentHandle obs = agentObservability != null
+                ? agentObservability.beginSubAgent(agentName, agentRole, extractInput(agentRequest))
+                : null;
+        obsStack.get().push(obs);
+
         // 切换 agent 上下文为子 Agent name（后续子 step 的 agent_id）
         recorder.pushAgentId(agentName);
         // 推 sub_agent start 事件并拿到 step id 作为子 step 的 parent。
@@ -112,6 +133,7 @@ public class SubAgentStepListener implements AgentListener {
                 .label(displayLabel)
                 .stepData(endData)
                 .build());
+        closeSubAgentObs(extractOutput(response), null);
         popContextIfPresent();
     }
 
@@ -128,6 +150,7 @@ public class SubAgentStepListener implements AgentListener {
                 .stepData(endData)
                 .error(getErrorMessage(error))
                 .build());
+        closeSubAgentObs(null, error.error());
         popContextIfPresent();
     }
 
@@ -196,6 +219,47 @@ public class SubAgentStepListener implements AgentListener {
     public boolean inheritedBySubagents() {
         // 让父 listener 继承到嵌套子 Agent，保证深层子 Agent 内部 step 也被采集
         return true;
+    }
+
+    /**
+     * 弹栈并闭子 Agent span（栈顶 = 最近一次 beforeAgentInvocation 建的句柄）。
+     * 无 handle（before 未建 span 或嵌套未配对）时 endSubAgent 内部判空跳过。
+     */
+    private void closeSubAgentObs(String output, Throwable error) {
+        Deque<AgentObservability.SubAgentHandle> stack = obsStack.get();
+        AgentObservability.SubAgentHandle obs = stack.isEmpty() ? null : stack.poll();
+        if (agentObservability != null) {
+            agentObservability.endSubAgent(obs, output, error);
+        }
+        if (stack.isEmpty()) {
+            obsStack.remove();
+        }
+    }
+
+    /** 子 Agent 问题：inputs map 序列化为可读文本（空则回退 agent 名） */
+    private String extractInput(AgentRequest agentRequest) {
+        Map<String, Object> inputs = agentRequest != null ? agentRequest.inputs() : null;
+        if (inputs != null && !inputs.isEmpty()) {
+            return String.valueOf(inputs);
+        }
+        return agentName;
+    }
+
+    /**
+     * 子 Agent 输出：优先取 {@link SubAgentContext} 中的观测输出（Save 工具组装的全量 JSON），
+     * 回退 {@code AgentResponse.output()}（plan/exam 受 prompt 约束仅返回 container_id）。
+     * 0816 Phase2 改进2，见 reference/TODOS/langfuse/0816LangfuseObservabilityPhase2.md。
+     */
+    private String extractOutput(AgentResponse response) {
+        SubAgentContext ctx = SubAgentContext.current();
+        if (ctx != null) {
+            Object observed = ctx.getAttribute(SubAgentContext.ATTR_OBSERVATION_OUTPUT);
+            if (observed != null) {
+                return String.valueOf(observed);
+            }
+        }
+        Object output = response != null ? response.output() : null;
+        return output != null ? String.valueOf(output) : null;
     }
 
     /**

@@ -227,6 +227,29 @@
             <version>${jtokkit.version}</version>
         </dependency>
 
+        <!-- ==================== OpenTelemetry（Langfuse 观测导出） ==================== -->
+        <!-- 路线：自定义 ChatModelListener 直连 OTel SDK，span 属性按 Langfuse v4 OTLP 语义约定写入 -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.55.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-trace</artifactId>
+            <version>1.55.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+            <version>1.55.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>1.55.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>

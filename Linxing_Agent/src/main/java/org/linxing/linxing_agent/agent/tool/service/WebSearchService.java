@@ -72,7 +72,8 @@ public class WebSearchService {
         }
 
         int resultCount = maxResults > 0 ? Math.min(maxResults, 10) : defaultMaxResults;
-        log.info("[WebSearchService] 搜索: query={}, maxResults={}", query, resultCount);
+        // 0816 起注释：请求级噪音日志
+        // log.info("[WebSearchService] 搜索: query={}, maxResults={}", query, resultCount);
 
         WebSearchRequest searchRequest = WebSearchRequest.builder()
                 .searchTerms(query)

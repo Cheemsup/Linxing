@@ -1,9 +1,11 @@
 package org.linxing.linxing_agent.agent.core;
 
 import lombok.extern.slf4j.Slf4j;
+import io.opentelemetry.context.Scope;
 import org.linxing.linxing_agent.agent.tool.ToolCallRequest;
 import org.linxing.linxing_agent.agent.tool.ToolCallResult;
 import org.linxing.linxing_agent.agent.tool.ToolSpec;
+import org.linxing.linxing_agent.observability.ObservableContext;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -75,14 +77,18 @@ public class ToolExecutionTimeout {
      * 在独立线程中执行工具调用，并施加超时限制（分段计时）。
      * 执行期间通过独立心跳任务每 {@link #HEARTBEAT_INTERVAL_SECONDS} 秒推送 tool_progress（仅 SSE，不入库）。
      *
-     * @param toolSpec       工具规格
-     * @param request        工具调用请求
-     * @param context        Agent 运行时上下文（持有 stepListener，用于心跳推送）
-     * @param timeoutSeconds 超时秒数（仅计算工具实际执行时间，不含 HumanInTheLoop 等待）
+     * @param toolSpec          工具规格
+     * @param request           工具调用请求
+     * @param context           Agent 运行时上下文（持有 stepListener，用于心跳推送）
+     * @param timeoutSeconds    超时秒数（仅计算工具实际执行时间，不含 HumanInTheLoop 等待）
+     * @param observableContext 0816 Langfuse：agent 线程捕获的观测上下文（tool span 引用 + trace 属性），
+     *                          工具线程 makeCurrent 恢复，使工具内 LLM 调用（子 Agent）的 generation 挂到 tool span 下；
+     *                          为 null 时跳过（非主链路调用或观测未启用）
      * @return 工具调用结果；超时或异常时返回 failure
      */
     public ToolCallResult executeWithTimeout(ToolSpec toolSpec, ToolCallRequest request,
-                                              AgentContext context, int timeoutSeconds) {
+                                              AgentContext context, int timeoutSeconds,
+                                              ObservableContext observableContext) {
         String toolName = toolSpec.getName();
         long totalNanos = TimeUnit.SECONDS.toNanos(timeoutSeconds);
 
@@ -92,6 +98,7 @@ public class ToolExecutionTimeout {
         // 工作线程：执行工具，完成后 complete future
         executor.submit(() -> {
             CONTEXT_HOLDER.set(timeoutCtx);
+            Scope obsScope = observableContext != null ? observableContext.makeCurrent() : null;
             try {
                 ToolCallResult result = toolSpec.execute(request, context);//工具执行
                 if (!future.isDone()) {
@@ -101,6 +108,9 @@ public class ToolExecutionTimeout {
                 // 工具抛出异常或被 interrupt
                 future.completeExceptionally(t);
             } finally {
+                if (obsScope != null) {
+                    obsScope.close();//恢复工具线程 OTel 上下文 + 弹观测栈
+                }
                 CONTEXT_HOLDER.remove();
             }
         });

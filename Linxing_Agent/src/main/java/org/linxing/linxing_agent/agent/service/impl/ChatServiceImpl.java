@@ -33,6 +33,7 @@ import org.linxing.linxing_agent.agent.mapper.AgentStepMapper;
 import org.linxing.linxing_agent.agent.service.IRuntimeMirrorService;
 import org.linxing.linxing_agent.agent.service.IChatMessageService;
 import org.linxing.linxing_agent.agent.service.IChatService;
+import org.linxing.linxing_agent.observability.AgentObservability;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -55,6 +56,7 @@ public class ChatServiceImpl implements IChatService {
     private final AgentStepMapper agentStepMapper;
     private final SummaryService summaryService;
     private final HistoryRecoveryService historyRecoveryService;
+    private final AgentObservability agentObservability;
 
     /**
      * 核心对话入口：解析会话→保存用户消息→溯源历史→Agent循环→记录日志
@@ -65,12 +67,17 @@ public class ChatServiceImpl implements IChatService {
     @Override
     public ChatResponse chat(ChatRequest request, AgentStepListener listener) {
         Integer userId = resolveUserId(request);
-        log.info("收到来自 [用户{}] 的问题: {}", userId, truncate(request.getQuestion(), 80));
+        // 0816 起注释：请求级噪音日志
+        // log.info("收到来自 [用户{}] 的问题: {}", userId, truncate(request.getQuestion(), 80));
 
+        //0816 Langfuse：trace 根，声明在 try 外供 catch 收尾（endTraceRoot 对 null 安全）
+        AgentObservability.TraceHandle trace = null;
         try {
             String originalQuery = request.getQuestion();
 
             Integer sessionId = chatMessageService.resolveSession(userId, request.getSessionId());//解析或创建会话
+
+            trace = agentObservability.beginTraceRoot(userId, sessionId, request.getRequestId(), originalQuery);
 
             // 统一步骤记录器：主循环与工作流共享同一实例，保证 session 级 step_order 单调递增
             //TODO：考虑将StepRecorder改为单例模式使用
@@ -141,9 +148,11 @@ public class ChatServiceImpl implements IChatService {
                     ? agentResponse.getSourceDetails().size() : 0;
             recordActivityLog(userId, sourceCount);//记录活动日志
 
+            agentObservability.endTraceRoot(trace, agentResponse.getAnswer(), null);
             return agentResponse;
 
         } catch (Exception e) {
+            agentObservability.endTraceRoot(trace, null, e);
             log.error("[用户{}] 处理请求时发生异常: {}", userId, e.getMessage(), e);
             return buildEmptyResponse(request.getSessionId(),
                     "抱歉，处理您的问题时出现了错误，请稍后重试。如果问题持续存在，请联系管理员。");

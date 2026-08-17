@@ -40,7 +40,8 @@ public class JwtTokenUserInterceptor implements HandlerInterceptor {
                     ? claims.get(JwtClaims.USERNAME).toString()
                     : null;
             
-            log.info("用户认证成功: userId={}, username={}", userId, username);
+            // 0816 起注释：每个请求/前端刷新都会触发，噪音大；JWT 校验失败日志保留
+            // log.info("用户认证成功: userId={}, username={}", userId, username);
             
             UserInfo userInfo = UserInfo.builder()
                     .userId(userId)

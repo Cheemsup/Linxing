@@ -4,6 +4,7 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.observability.LangfuseChatModelListenerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -19,10 +20,12 @@ public class LlmManager {
     private final Map<String, OpenAiChatModel> models = new LinkedHashMap<>();
     private final Map<String, OpenAiStreamingChatModel> streamingModels = new LinkedHashMap<>();
     private final LlmProperties llmProperties;
+    private final LangfuseChatModelListenerFactory langfuseListenerFactory;
     private String defaultProvider;
 
-    public LlmManager(LlmProperties llmProperties) {
+    public LlmManager(LlmProperties llmProperties, LangfuseChatModelListenerFactory langfuseListenerFactory) {
         this.llmProperties = llmProperties;
+        this.langfuseListenerFactory = langfuseListenerFactory;
     }
 
     @PostConstruct
@@ -47,8 +50,10 @@ public class LlmManager {
                     .temperature(llm.getTemperature())
                     .timeout(Duration.ofSeconds(llm.getTimeoutSeconds()))
                     .maxTokens(llm.getMaxTokens())
-                    .logRequests(false)//打印http请求信息
-                    .logResponses(true);//打印模型响应信息
+                    .maxRetries(llm.getRetry().getMaxRetries())
+                    .listeners(langfuseListenerFactory.create(name));//0816 Langfuse 观测：每轮 LLM 调用打 generation span
+                    // .logRequests(false)//打印http请求信息
+                    // .logResponses(true);//打印模型响应信息
 
             if (config.getReturnThinking() != null) {
                 modelBuilder.returnThinking(config.getReturnThinking());
@@ -111,8 +116,9 @@ public class LlmManager {
                 .temperature(llm.getTemperature())
                 .timeout(Duration.ofSeconds(llm.getTimeoutSeconds()))
                 .maxTokens(llm.getMaxTokens())
-                .logRequests(true)
-                .logResponses(true)
+                // .logRequests(true)
+                // .logResponses(true)
+                .listeners(langfuseListenerFactory.create(provider))//0816 Langfuse 观测：主对话/子Agent 流式调用打 generation span
                 .sendThinking(config.getSendThinking())
                 .returnThinking(config.getReturnThinking())
                 .build();

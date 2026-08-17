@@ -12,6 +12,7 @@ import org.linxing.linxing_agent.agent.core.StepRecorder;
 import org.linxing.linxing_agent.agent.core.SubAgentStepListener;
 import org.linxing.linxing_agent.agent.tool.impl.RagSearchTool;
 import org.linxing.linxing_agent.agent.tool.impl.WebSearchTool;
+import org.linxing.linxing_agent.observability.AgentObservability;
 import org.springframework.stereotype.Service;
 
 /**
@@ -38,6 +39,7 @@ public class KnowledgeCollectionStage {
     private final HumanInTheLoopFactory humanInTheLoopFactory;
     private final WebSearchTool webSearchTool;
     private final RagSearchTool ragSearchTool;
+    private final AgentObservability agentObservability;
 
     /**
      * 构建知识收集阶段的 UntypedAgent。
@@ -75,7 +77,7 @@ public class KnowledgeCollectionStage {
                 .listener(SubAgentStepListener.create(
                         KNOWLEDGE_AGENT_NAME, "knowledge_search",
                         KNOWLEDGE_DISPLAY_LABEL, "materials", recorder,
-                        AgentStepTypes.PHASE_KNOWLEDGE_SEARCH))
+                        AgentStepTypes.PHASE_KNOWLEDGE_SEARCH, agentObservability))
                 .build();
 
         // ---- 顺序编排：先澄清（条件）再收集 ----

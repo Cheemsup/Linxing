@@ -94,6 +94,33 @@ class SaveExamToolTest {
     }
 
     @Test
+    void saveExam_shouldWriteObservationOutput() throws Exception {
+        // Given
+        String containerId = "exam_obs";
+        ObjectNode metadata = objectMapper.createObjectNode().put("title", "Rust 测验");
+        ArrayNode questions = objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode()
+                        .put("type", "single_choice")
+                        .put("stem", "题干")
+                        .put("answer", "A"));
+        JsonContainer container = new JsonContainer(containerId, "exam", metadata,
+                java.util.Map.of("questions", questions));
+        SubAgentContext.currentStore().putContainer(containerId, container);
+        when(examService.parseAndSave(eq(42), any(), eq(ExamServiceImpl.ValidationStrategy.COLLECT_ALL), isNull()))
+                .thenReturn(9);
+
+        // When
+        tool.saveExam(containerId, "");
+
+        // Then: 观测属性写入全量 JSON（供 Langfuse 子 Agent span output 回放）
+        String observed = SubAgentContext.current().getAttribute(SubAgentContext.ATTR_OBSERVATION_OUTPUT);
+        assertThat(observed)
+                .contains("\"title\":\"Rust 测验\"")
+                .contains("\"questions\"")
+                .contains("题干");
+    }
+
+    @Test
     void saveExam_shouldRejectWrongContainerType() {
         String containerId = "study_plan_abc123";
         JsonContainer container = new JsonContainer(containerId, "study_plan",

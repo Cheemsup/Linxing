@@ -13,6 +13,14 @@ import java.util.Map;
  */
 public final class SubAgentContext implements JsonContainerStore {
 
+    /**
+     * 观测属性 key：子 Agent 工作流产出全量 JSON（供 Langfuse span output 回放）。
+     * <p>由 {@code SaveStudyPlanTool}/{@code SaveExamTool} 的 @Tool 入口在容器组装后写入全量 JSON，
+     * {@code SubAgentStepListener} 关闭子 Agent span 时优先读取（回退 {@code AgentResponse.output()}）。
+     * 0816 Phase2 改进2，见 reference/TODOS/langfuse/0816LangfuseObservabilityPhase2.md。
+     */
+    public static final String ATTR_OBSERVATION_OUTPUT = "subagent:observation:output";
+
     private static final ThreadLocal<SubAgentContext> HOLDER = new ThreadLocal<>();
 
     @Getter

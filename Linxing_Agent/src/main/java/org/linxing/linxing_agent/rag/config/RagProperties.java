@@ -125,8 +125,8 @@ public class RagProperties {
     public static class PythonService {
         /** 服务 URL。本机默认 18000（8000 被 Hyper-V/WSL 保留段占用，bind 报 Errno 13），Python 侧 config.py 默认一致 */
         private String url = "http://localhost:18000";
-        /** 请求超时秒数（大文件解析耗时较长） */
-        private int timeoutSeconds = 120;
+        /** 请求超时秒数（大文件解析耗时较长；MinerU 云端异步轮询大头在等待，默认 600s） */
+        private int timeoutSeconds = 600;
         /** 是否启用 Python 服务 */
         private boolean enabled = true;
         /** 图片存储根目录（应与 Python 侧 IMAGE_STORE_DIR 一致，默认使用 storePath 下的 chunk_images） */

@@ -2,7 +2,12 @@
 PDF 解析器
 
 职责：将 PDF 文档解析为统一的 Node JSON 序列。
-引擎：PyMuPDF (fitz) 抽取文本 / 图片，pdfplumber 抽取表格。
+引擎（主）：MinerU 云托管解析（parsers/mineru_client.py）。云端产出 zip 内含
+  *_content_list.json 结构化内容列表（type/text/text_level/img_path/table_body/code_body/
+  list_items/page_idx/bbox），本解析器据此映射为 Node JSON，保留 page/bbox/formula；
+  content_list 缺失时兜底读 full.md 喂 MarkdownParser。
+引擎（备）：本地 PyMuPDF (fitz) 抽取文本 / 图片，pdfplumber 抽取表格（_parse_legacy）。
+  当未配置 MINERU_API_KEY、文件超 MinerU 上限、或云端任一环节失败时自动回退。
 与 parsers 包内其它解析器（markdown / html / code / linebased / docx）平行。
 
 Node JSON 协议（与 Java 侧 NodeDTO 对应）：
@@ -29,8 +34,10 @@ Node JSON 协议（与 Java 侧 NodeDTO 对应）：
    不再整块超长 Node 返回 Java 侧；Java 侧据 groupId 合成父子 chunk。超长拆出的子块不参与跨页缝合
 """
 
+import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -89,10 +96,17 @@ class PdfParser:
         self,
         image_store_dir: str,
         image_url_prefix: str = "/chunk_images",
+        mineru_client=None,
+        mineru_max_size_mb: float = 200.0,
     ):
         self.image_store_dir = Path(image_store_dir)
         self.image_url_prefix = image_url_prefix.rstrip("/")
-        logger.info("PdfParser 初始化完成，图片存储目录: %s", self.image_store_dir)
+        # MinerU 云解析客户端；None 表示未配置（走本地 PyMuPDF 兜底）
+        self._mineru_client = mineru_client
+        # MinerU 官方单文件大小上限（超限直接走本地兜底，不硬失败）
+        self._mineru_max_size_mb = mineru_max_size_mb
+        logger.info("PdfParser 初始化完成，图片存储目录: %s，MinerU 客户端: %s",
+                    self.image_store_dir, "已配置" if mineru_client else "未配置(走本地兜底)")
 
     # ============================== 对外入口 ==============================
 
@@ -101,6 +115,46 @@ class PdfParser:
     ) -> List[dict]:
         """
         解析 PDF，返回 Node JSON 列表。
+
+        主路径：MinerU 云托管解析（配置了 API key 且文件不超限）；
+        任一环节失败或未配置 → 回退本地 PyMuPDF（_parse_legacy）。
+
+        :param file_path: PDF 本地路径
+        :param document_id: 文档 ID（图片目录隔离）
+        :param user_id: 用户 ID（图片目录隔离）
+        :return: Node dict 列表
+        """
+        file_path = Path(file_path)
+
+        # 配置了 MinerU 客户端且文件未超云端上限 → 走云端
+        if self._mineru_client is not None:
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            if size_mb <= self._mineru_max_size_mb:
+                try:
+                    return self._parse_with_mineru(
+                        file_path, document_id, user_id
+                    )
+                except Exception as e:
+                    # 云端失败/超时是本路径最大不确定性，回退本地兜底保证入库不阻塞
+                    logger.warning(
+                        "MinerU 解析失败，回退本地 PyMuPDF: %s (%s)",
+                        file_path, e, exc_info=True,
+                    )
+            else:
+                logger.warning(
+                    "文件 %.1fMB 超过 MinerU 上限 %.0fMB，直接走本地 PyMuPDF: %s",
+                    size_mb, self._mineru_max_size_mb, file_path,
+                )
+        else:
+            logger.info("未配置 MINERU_API_KEY，PDF 走本地 PyMuPDF: %s", file_path)
+
+        return self._parse_legacy(file_path, document_id, user_id)
+
+    def _parse_legacy(
+        self, file_path: str, document_id: int, user_id: int
+    ) -> List[dict]:
+        """
+        （兜底路径）基于 PyMuPDF + pdfplumber 的本地解析。
 
         :param file_path: PDF 本地路径
         :param document_id: 文档 ID（图片目录隔离）
@@ -206,6 +260,351 @@ class PdfParser:
 
         logger.info("PdfParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes))
         return nodes
+
+    # ============================== MinerU 云解析路径 ==============================
+
+    def _parse_with_mineru(
+        self, file_path: Path, document_id: int, user_id: int
+    ) -> List[dict]:
+        """
+        MinerU 云端解析主路径：上传 PDF → 云端提取 → 下载 zip →
+        读 *_content_list.json 结构化内容列表 → 映射为 Node JSON。
+
+        content_list 缺失时兜底读 full.md 喂 MarkdownParser（保链路不断，表格 HTML 可能被降级）。
+        """
+        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info("PdfParser(MinerU) 开始解析: %s", file_path)
+
+        # 1. 云端执行一次完整提取并解压（提取失败的异常由 parse() 捕获并回退本地）
+        result_dir = self._mineru_client.extract(
+            str(file_path), data_id=str(document_id)
+        )
+        try:
+            return self._consume_mineru_result(
+                result_dir, image_output_dir, document_id, user_id, file_path,
+            )
+        finally:
+            # 清理云端产物解压目录（图片已复制到 image_output_dir，md 兜底也已读完）
+            try:
+                shutil.rmtree(result_dir, ignore_errors=True)
+            except Exception:
+                logger.debug("清理 MinerU 解压目录失败(可忽略): %s", result_dir)
+
+    def _consume_mineru_result(
+        self, result_dir: Path, image_output_dir: Path,
+        document_id: int, user_id: int, file_path: Path,
+    ) -> List[dict]:
+        """
+        消费 MinerU 解压目录，产出 Node JSON。
+
+        主路径：读 *_content_list.json 映射；缺失时兜底 full.md → MarkdownParser。
+        """
+        # 2. 主路径：结构化内容列表（阅读顺序 flat block，含 page_idx/bbox）
+        content_list_path = self._mineru_client.find_content_list(result_dir)
+        if content_list_path is not None:
+            content_list = json.loads(content_list_path.read_text(encoding="utf-8"))
+            if isinstance(content_list, list) and content_list:
+                nodes = self._nodes_from_content_list(
+                    content_list, result_dir, image_output_dir,
+                    user_id, document_id,
+                )
+                # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+                nodes = cap_text_nodes(nodes)
+                logger.info(
+                    "PdfParser(MinerU) 解析完成: %s, 共 %d 个 Node (content_list)",
+                    file_path, len(nodes),
+                )
+                return nodes
+            logger.warning("MinerU content_list 为空或非列表: %s", content_list_path)
+
+        # 3. 兜底：full.md → MarkdownParser（复用其 titlePath/超长拆分/图片落盘能力）
+        md_path = self._mineru_client.find_markdown(result_dir)
+        if md_path is not None:
+            logger.warning(
+                "MinerU 无可用 content_list，改用 full.md 经 MarkdownParser 解析: %s", md_path
+            )
+            from .markdown_parser import MarkdownParser
+            md_parser = MarkdownParser(
+                image_store_dir=str(self.image_store_dir),
+                image_url_prefix=self.image_url_prefix,
+            )
+            return md_parser.parse(str(md_path), document_id, user_id)
+
+        raise RuntimeError("MinerU 结果 zip 中既无 content_list 也无 markdown 产物")
+
+    def _nodes_from_content_list(
+        self,
+        content_list: List[dict],
+        result_dir: Path,
+        image_output_dir: Path,
+        user_id: int,
+        document_id: int,
+    ) -> List[dict]:
+        """
+        将 MinerU content_list（阅读顺序的扁平 block 列表）映射为 Node JSON。
+
+        类型映射：
+          title    → heading（text_level → level，1-6）
+          text     → text（超长按句子拆 + 共享 groupId）
+          image    → image（img_path 复制到图片目录；caption/hash/page/bbox）
+          table    → table（table_body HTML；rowCount/colCount 由 HTML 推断）
+          code     → code（code_body → text；detect_code_language 推断语言）
+          equation → formula（text=LaTeX；Java NodeConverter FORMULA 全链路已支持）
+          list     → text（list_items 拼接；超长拆 + groupId）
+        维护 title_stack 推导 titlePath，与其它解析器一致。
+        """
+        nodes: List[dict] = []
+        node_seq = make_node_seq()
+        title_stack: List[Tuple[int, str]] = []
+
+        for block in content_list:
+            block_type = block.get("type")
+            page = self._content_page(block)
+            bbox = self._content_bbox(block)
+            title_path = build_title_path(title_stack)
+
+            if block_type == "title":
+                level = self._content_title_level(block)
+                text = (block.get("text") or "").strip()
+                if text:
+                    # 更新标题栈：弹出 level >= 当前的，压入当前（与本地解析一致）
+                    while title_stack and title_stack[-1][0] >= level:
+                        title_stack.pop()
+                    title_stack.append((level, text))
+                    nodes.append({
+                        "id": next(node_seq),
+                        "type": "heading",
+                        "text": text,
+                        "level": level,
+                        "titlePath": build_title_path(title_stack),
+                        "page": page,
+                        "bbox": bbox,
+                    })
+
+            elif block_type == "text":
+                text = (block.get("text") or "").strip()
+                if text:
+                    self._emit_content_text(
+                        nodes, node_seq, text, title_path, page, bbox,
+                    )
+
+            elif block_type == "image":
+                node = self._content_image_node(
+                    block, result_dir, image_output_dir, user_id, document_id,
+                    node_seq, title_path, page, bbox,
+                )
+                if node is not None:
+                    nodes.append(node)
+
+            elif block_type == "table":
+                node = self._content_table_node(
+                    block, node_seq, title_path, page, bbox,
+                )
+                if node is not None:
+                    nodes.append(node)
+
+            elif block_type == "code":
+                text = (block.get("code_body") or block.get("text") or "").strip()
+                if text:
+                    nodes.append({
+                        "id": next(node_seq),
+                        "type": "code",
+                        "text": text,
+                        "language": detect_code_language(text),
+                        "titlePath": title_path,
+                        "page": page,
+                        "bbox": bbox,
+                    })
+
+            elif block_type == "equation":
+                # 公式：text 为 LaTeX，Java FormulaNode 直接还原显示
+                text = (block.get("text") or "").strip()
+                if text:
+                    nodes.append({
+                        "id": next(node_seq),
+                        "type": "formula",
+                        "text": text,
+                        "titlePath": title_path,
+                        "page": page,
+                        "bbox": bbox,
+                    })
+
+            elif block_type == "list":
+                items = block.get("list_items") or []
+                text = "\n".join(
+                    str(i).strip() for i in items if str(i).strip()
+                )
+                if text:
+                    self._emit_content_text(
+                        nodes, node_seq, text, title_path, page, bbox,
+                    )
+
+            else:
+                logger.debug("MinerU content_list 未知 block 类型，跳过: %s", block_type)
+
+        return nodes
+
+    def _emit_content_text(
+        self, nodes, node_seq, text, title_path, page, bbox,
+    ):
+        """输出 content_list 文本为 text Node（超长按句子拆 + 共享 groupId），带 page/bbox。"""
+        text = text.strip()
+        if not text:
+            return
+        if len(text) <= _CHUNK_THRESHOLD:
+            nodes.append({
+                "id": next(node_seq),
+                "type": "text",
+                "text": text,
+                "groupId": None,
+                "titlePath": title_path,
+                "page": page,
+                "bbox": bbox,
+            })
+        else:
+            group_id = next(node_seq)
+            for sub_text in self._split_by_sentence_with_threshold(text, _CHUNK_THRESHOLD):
+                sub_text = sub_text.strip()
+                if not sub_text:
+                    continue
+                nodes.append({
+                    "id": next(node_seq),
+                    "type": "text",
+                    "text": sub_text,
+                    "groupId": group_id,
+                    "titlePath": title_path,
+                    "page": page,
+                    "bbox": bbox,
+                })
+
+    def _content_image_node(
+        self, block, result_dir, image_output_dir, user_id, document_id,
+        node_seq, title_path, page, bbox,
+    ):
+        """content_list 的 image 块：img_path 相对 result_dir 复制到图片目录，产出 image Node。
+
+        MinerU 的 img_path 形如 images/<hash>.jpg，位于 zip 解压目录内。
+        """
+        img_rel = (block.get("img_path") or "").strip()
+        if not img_rel:
+            logger.debug("MinerU image 块缺 img_path，跳过")
+            return None
+        src_path = (result_dir / img_rel).resolve()
+        if not src_path.is_file():
+            logger.warning("MinerU 图片文件不存在，跳过: %s", src_path)
+            return None
+
+        image_bytes = src_path.read_bytes()
+        ext = src_path.suffix.lower().lstrip(".")
+        if not ext:
+            ext = "png"
+
+        node_id = next(node_seq)
+        img_filename = f"img_{node_id[1:]}.{ext}"
+        img_path = image_output_dir / img_filename
+        # 自足创建目录（_parse_with_mineru 已建，此处防御性兜底）
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(img_path, "wb") as f:
+            f.write(image_bytes)
+
+        # 图片尺寸（PIL 失败则留空）
+        width, height = None, None
+        try:
+            with Image.open(img_path) as pil_img:
+                width, height = pil_img.size
+        except Exception:
+            pass
+
+        # 图片题注：content_list 的 image_caption 为字符串列表，取首条
+        caption = None
+        raw_caption = block.get("image_caption") or []
+        if isinstance(raw_caption, list) and raw_caption:
+            caption = raw_caption[0]
+        elif isinstance(raw_caption, str) and raw_caption.strip():
+            caption = raw_caption
+
+        relative_url = (
+            f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+        )
+        return {
+            "id": node_id,
+            "type": "image",
+            "imagePath": relative_url,
+            "caption": caption,
+            "titlePath": title_path,
+            "page": page,
+            "bbox": bbox,
+            "width": width,
+            "height": height,
+            "hash": compute_hash(image_bytes),
+        }
+
+    def _content_table_node(self, block, node_seq, title_path, page, bbox):
+        """content_list 的 table 块：table_body 为完整 HTML，直接用；行/列数由 HTML 推断。"""
+        html = (block.get("table_body") or "").strip()
+        if not html:
+            logger.debug("MinerU table 块缺 table_body，跳过")
+            return None
+        row_count, col_count = self._table_dims_from_html(html)
+        return {
+            "id": next(node_seq),
+            "type": "table",
+            "html": html,
+            "rowCount": row_count,
+            "colCount": col_count,
+            "titlePath": title_path,
+            "page": page,
+            "bbox": bbox,
+        }
+
+    @staticmethod
+    def _table_dims_from_html(html: str) -> Tuple[Optional[int], Optional[int]]:
+        """从表格 HTML 推断行/列数（<tr> 数量；首行内 <td>/<th> 数量）。"""
+        rows = re.findall(r"<tr[ >]", html, re.IGNORECASE)
+        first_row = re.search(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL)
+        cols = None
+        if first_row:
+            cells = re.findall(r"<t[dh][ >]", first_row.group(1), re.IGNORECASE)
+            if cells:
+                cols = len(cells)
+        return (len(rows) if rows else None), cols
+
+    @staticmethod
+    def _content_page(block: dict) -> int:
+        """content_list 的 page_idx 为 0 基，转 1 基页码。"""
+        page_idx = block.get("page_idx")
+        if page_idx is None:
+            return 1
+        try:
+            return int(page_idx) + 1
+        except (TypeError, ValueError):
+            return 1
+
+    @staticmethod
+    def _content_bbox(block: dict) -> Optional[List[float]]:
+        """content_list 的 bbox 为 [x0, y0, x1, y1]（归一化 0-1000），转 [x0, y0, width, height]。
+
+        Java 侧仅把 bbox 存 nodeMetadata（定位用，不涉及像素坐标还原），故直接透传归一化坐标。
+        """
+        bbox = block.get("bbox")
+        if not bbox or len(bbox) < 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            return [x0, y0, x1 - x0, y1 - y0]
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _content_title_level(block: dict) -> int:
+        """text_level → heading level（clamp 1-6，NodeDTO 支持 1-6）。"""
+        try:
+            level = int(block.get("text_level") or 1)
+        except (TypeError, ValueError):
+            level = 1
+        return max(1, min(level, 6))
 
     # ============================== body 字号基线 ==============================
 

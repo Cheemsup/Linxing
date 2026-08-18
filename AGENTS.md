@@ -119,6 +119,39 @@ Agent 驱动的个人学习平台 —— 自研 ReAct Agent 主循环 + `langcha
 - `tool/` — ReadMemoryTool / WriteMemoryTool / ListMemoryTool（Agent 可调用的记忆工具）
 - `MemoryController` — 用户入口（`/agent/memory/*`），用户写直接落盘，绕过异步 Memory Worker
 
+### Langfuse 可观测性（agent 运行观测）
+
+一次用户 chat 请求 = 1 条 Trace（root span `agent-run`，`ChatServiceImpl` 入口建 / 出口闭），span 按 Langfuse v4 OTLP 语义约定写入。设计稿见 `reference/TODOS/langfuse/0816LangfuseObservability.md`（Phase1）与 `0816LangfuseObservabilityPhase2.md`（Phase2，P0 三项）。
+
+**方案路线**：自定义 `LangfuseChatModelListener` + OTel SDK 直连 Langfuse OTLP 端点（`OtelTraceConfig`）。**不采用 langchain4j 原生 Observation**——1.13.0 原生只能自动给 model/token/duration/error，input/output/cost 全需自写 handler；且本项目手写 ReAct 循环（直接 `chat(request, handler)`），与官方 AiServices/StreamingChatBuilder 样例调用形态完全不同。全部属性名收敛于 `observability/LangfuseAttributeKeys`。
+
+**组件**（包 `org.linxing.linxing_agent.observability`）：
+
+| 组件 | 职责 |
+|---|---|
+| `OtelTraceConfig` | 构建 `Tracer` Bean。`langfuse.enabled=false` 返回 no-op Tracer，不建 exporter、零开销；OTLP exporter 自动补全 `/v1/traces` 路径、Basic auth（pk:sk）、`x-langfuse-ingestion-version: 4` 头；`LoggingSpanExporter` 把每批导出成败显式打到日志（冒烟期定位「span 建了但 Langfuse 没收到」） |
+| `LangfuseProperties` | `langfuse.*` 配置绑定（enabled/endpoint/public-key/secret-key/environment/version/trace-offline-calls） |
+| `AgentObservability` | 观测门面：root/tool/retrieval/sub-agent span 建闭 + trace 级属性每 span 冗余注入（`applyTraceAttrs`） |
+| `ObservableContext` | ThreadLocal 栈传播观测上下文（span 引用 + trace 属性 + 主循环 step 号），`makeCurrent` 跨线程恢复 |
+| `LangfuseChatModelListener`(+`LangfuseChatModelListenerFactory`) | generation span（每轮 LLM 调用）；attributes map 贯穿三回调跨线程携带 span 引用 |
+| `MessageSerializer` | ChatMessage/ChatResponse → OpenAI-compatible JSON；图片摘要化不落 base64；统一截断 |
+| `SubAgentStepListener` | 子 Agent span（before/after/error 钩子建闭 `Agent: xxx`，见 `agent/core/`） |
+
+**span 层级**：
+
+```
+Trace（一次 chat 请求）
+└─ root span: agent-run（SERVER，承载 session/user/request_id/question/answer/tags/version/environment）
+   ├─ generation span: chat（CLIENT，每轮 LLM 调用；gen_ai.* + usage_details + metadata.step_number/thinking_tokens/temperature）
+   ├─ Tool: {toolName}（主循环每次工具调用；metadata.kind=tool + tool_kind/success/duration_ms）
+   │   └─ 工具内 LLM 调用（子 Agent）的 generation 挂 tool span 下
+   ├─ Retriever: search_knowledge_base（RAG 检索；metadata: vector_store/similarity/reranker/recall_size/
+   │      vector_candidates/bm25_candidates/hybrid/score_threshold/before_filter/after_filter/hit/scores）
+   └─ Agent: {agentName}（工作流子 Agent；metadata.kind=agent + role）
+```
+
+**接入点**：`ChatServiceImpl`（`beginTraceRoot`/`endTraceRoot`）、`AgentExecutor`（主循环每轮工具调用 `beginTool`/`endTool` + `ObservableContext.setCurrentStep` 写 generation 的 step_number）、`ToolExecutionTimeout`（工具线程 `makeCurrent` 恢复 agent 线程捕获的上下文，使工具内 LLM 调用挂 tool span 下）、`SubAgentStepListener`（子 Agent span）、`SearchServiceImpl`（`beginRetrieval`/`endRetrieval`/`endRetrievalError`，主循环 + 子 Agent 两入口，HTTP 直连无观测上下文时 no-op）、`LlmManager`（流式 + 非流式 builder 均挂 listener，全站 LLM 调用均打 generation span）。
+
 ## Critical gotchas
 
 ### 前端代理剥离 `/api` 前缀
@@ -144,9 +177,11 @@ JWT 拦截器 `addPathPatterns("/**")`，仅排除 `/user/login` 与 `/user/regi
 
 ### Python 文档解析服务
 `document_analysis_service` 是 Node-Based RAG 的唯一解析入口，通过 `rag.python-service.url` 调用。需先于后端启动：
+- **PDF 主路径走 MinerU 云托管解析**（`parsers/mineru_client.py`，官方 v4 Bearer token，配置 `MINERU_API_KEY` 后启用）：上传→轮询→下载结果 zip，读 `content_list.json` 映射 Node（含 page/bbox/formula/表格 HTML/代码，支持扫描件 OCR）；未配置 key、超 MinerU 上限（200MB/200页）、或云端失败时自动回退本地 PyMuPDF + pdfplumber 兜底（`_parse_legacy`）
 - pdf/docx 单例懒加载并注入图片目录（`IMAGE_STORE_DIR`），避免未用时强制加载 fitz/pdfplumber/python-docx
 - 图片直接保存到 Java 的 `storePath/chunk_images/{userId}/{docId}/`，Java 无需搬运
 - 图片预估字数 120 参与含图段落累加 flush 判断（避免一遇图就截断文本聚类）
+- MinerU 云端异步轮询耗时大头在等待，Java 侧 `rag.python-service.timeout-seconds` 默认 600s，Python 侧 `MINERU_TIMEOUT_SECONDS`（默认 480s）须小于该值（云端超时后回退本地留余量）
 - 详见 [document_analysis_service/README.md](document_analysis_service/README.md)
 
 ### Redis 缓存
@@ -158,6 +193,16 @@ Redis 承担三类缓存：
 ### Rerank / Embedding（硅基流动 API）
 重排序走硅基流动 `POST /v1/rerank`（`SiliconFlowScoringModel` 实现 `ScoringModel`，配置 `rag.api.reranker.*`，默认 `BAAI/bge-reranker-v2-m3`）。API 返回 `relevance_score` 已归一化 [0,1]，`Reranker.scoreAll`/`pickTopKScored` 保留该分数，`SearchServiceImpl` 直接与 `rag.search.score-threshold` 比较，无需 sigmoid。
 向量化走 OpenAI 兼容 `POST /v1/embeddings`（`OpenAiEmbeddingModel` bean，配置 `rag.api.embedding.*`，默认 `BAAI/bge-m3` 1024 维），维度受 `rag.vector-store.dimension` 与 DB 列 `vector(1024)` 约束。旧本地 ONNX（`ms-marco-MiniLM-L-6-v2`，纯英文模型无法处理中文）已停用并删除模型文件。
+
+### Langfuse 观测（enabled 默认 false 零开销，但有几个易错点）
+- **`langfuse.enabled` 默认 false**：需在 `application-dev.yaml` 配 `langfuse.endpoint`（Langfuse 控制台 `/api/public/otel`）与 `public-key`/`secret-key`（Basic auth）。
+- **endpoint 必须是完整路径 `.../api/public/otel/v1/traces`**：Java SDK 程序化 `setEndpoint()` 按字面使用传入 URL、不会自动追加信号路径（仅环境变量自动装配 `OTEL_EXPORTER_OTLP_ENDPOINT` 会追加），base 形式直 POST 会 404。`OtelTraceConfig.resolveEndpoint` 已统一补全，勿在配置里写重复路径。
+- **`observation.type` 只支持 `span / generation / event`**：tool / 子 Agent / retriever 一律写 `type=span`，语义靠 `Tool: xxx` / `Agent: xxx` / `Retriever: xxx` 命名前缀 + `metadata.kind` 表达（官方写端不识别 type=tool/agent）。
+- **trace 级属性必须每 span 冗余传播**（`AgentObservability.applyTraceAttrs`）：session/user/tags/version/environment/request_id/question 只在 root 写会让 Langfuse 按 user/session 过滤时缺数据。
+- **input/output 截断**：input 4000 chars，output / messages / response 20000 chars；图片不落 base64 原文（摘要化为 `[图片]` 标记 + 来源/长度）。
+- **cost 不在代码侧算**：`langfuse.observation.cost_details` 字段预留但未写，成本由 Langfuse 控制台 **model 定价表** 按 usage tokens 计算（本项目为自定义/中转 provider，需在控制台为各模型配一次定价）。
+- **`langfuse.trace-offline-calls` 默认 false**：离线 LLM 调用（RAG 语义增强 / 摘要 / Memory Worker 后台）无观测上下文时静默跳过，不入 trace。
+- 子 Agent 内部工具调用只产生 step 事件（无 `Tool: xxx` span）；其内部 RAG 检索由 `SearchServiceImpl` 独立打的 `Retriever:` span 覆盖（子 Agent span 下）。
 
 ### Maven 显式声明源码目录
 `pom.xml` 显式设置 `<sourceDirectory>src/main/java</sourceDirectory>` 与 `<testSourceDirectory>src/test/java</testSourceDirectory>`。这是默认值但被显式声明，勿改动。
@@ -184,6 +229,7 @@ Redis 承担三类缓存：
 | `jsoup` 1.18.3 | HTML 解析（旧 HtmlChunkStrategy，Node 体系下未使用） |
 | `jieba-analysis` 1.0.2 | 中文分词（BM25） |
 | `pdfbox` 3.0.1 | PDF 解析（旧路径，Node 体系下 PDF 由 Python 服务解析） |
+| `opentelemetry-api` / `opentelemetry-sdk` / `opentelemetry-sdk-trace` / `opentelemetry-exporter-otlp` 1.55.0 | Langfuse 观测：OTel SDK 直连 OTLP 端点导出 span |
 | `spring-security-crypto` | 密码加密 |
 
 ### Python 文档解析服务（`document_analysis_service/`）
@@ -192,8 +238,9 @@ Redis 承担三类缓存：
 |---|---|
 | `fastapi` 0.115.6 + `uvicorn[standard]` 0.34.0 | Web 框架 |
 | `python-multipart` 0.0.20 | multipart/form-data 文件上传 |
-| `PyMuPDF` (fitz) >=1.24.0 | PDF 文本/图片抽取 |
-| `pdfplumber` >=0.11.0 | PDF 表格抽取 |
+| `requests` >=2.31.0 | MinerU 云托管 API 客户端（申请上传 URL / PUT 上传 / 轮询 / 下载 zip） |
+| `PyMuPDF` (fitz) >=1.24.0 | PDF 本地兜底解析：文本/图片抽取、字号扫描 |
+| `pdfplumber` >=0.11.0 | PDF 本地兜底解析：表格抽取 |
 | `python-docx` >=1.1.0 | DOCX 解析 |
 | `mistune` >=3.3.2 | Markdown 结构识别 |
 | `beautifulsoup4` >=4.15.0 | HTML DOM 遍历 |

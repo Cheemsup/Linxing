@@ -119,7 +119,7 @@ rag:
     chat-response-ttl: ${RAG_CACHE_CHAT_RESPONSE_TTL:2100}
   python-service:
     url: ${PYTHON_SERVICE_URL:http://localhost:18000}
-    timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:120}
+    timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:600}
     enabled: ${PYTHON_SERVICE_ENABLED:true}
     image-store-dir: ${RAG_STORE_PATH}/chunk_images
     python-path: ${PYTHON_PATH:}
@@ -146,9 +146,6 @@ agent:
     timeout-seconds: ${AGENT_TOOL_TIMEOUT_SECONDS:180}
     workflow-timeout-seconds: ${AGENT_TOOL_WORKFLOW_TIMEOUT_SECONDS:600}
   memory:
-    type: ${AGENT_MEMORY_TYPE:window}
-    max-messages: ${AGENT_MEMORY_MAX_MESSAGES:40}
-    max-tokens: ${AGENT_MEMORY_MAX_TOKENS:32000}
     # Long-term Memory Workspace：受限沙盒，按 userId 子目录隔离
     longterm:
       workspace:

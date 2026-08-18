@@ -33,6 +33,7 @@ webconsole (Vue) ──/api 代理剥离──▶ Linxing_Agent (8080)
 - **三段式上下文管理**：Projection（Rewrite 纯规则 / Snip LLM ReAct / Summary 同步落盘）+ Redis Runtime Mirror 双 Hash 回溯
 - **长期记忆 Workspace**：按用户隔离的半结构化 Markdown 文件区，异步 Memory Worker ReAct 维护，用户可经 `/agent/memory` 直接编辑落盘
 - **多 LLM 供应商管理**：注册中心统一管理 MiniMax / DeepSeek / GLM / Kimi 等，均走 OpenAI 兼容 API
+- **Langfuse 运行观测**：自定义 `ChatModelListener` 直连 OTel SDK，一次对话一条 Trace（generation / tool / RAG 检索 / 子 Agent span + session/user 关联），`enabled` 默认关闭零开销
 - **JWT 认证 + 多租户**：所有业务表带 `user_id`，拦截器统一鉴权
 
 ## 技术栈（Tech Stack）
@@ -53,6 +54,7 @@ webconsole (Vue) ──/api 代理剥离──▶ Linxing_Agent (8080)
 | jjwt 0.12.6 | JWT 认证 |
 | jtokkit 1.1.0 | OpenAI 兼容 BPE tokenizer（上下文 token 估算） |
 | onnxruntime 1.20.0 | 本地重排序推理 |
+| OpenTelemetry SDK 1.55.0 | Langfuse 观测导出（api / sdk-trace / sdk / exporter-otlp） |
 | jsoup 1.18.3 / jieba-analysis 1.0.2 | HTML 解析（旧路径未用）/ 中文分词（BM25） |
 
 ## 项目结构（Project Structure）
@@ -142,7 +144,7 @@ Linxing_Agent/
 ### 调用 document_analysis_service
 
 - 触发点：文档上传 `/rag/ingest/file` → `IngestServiceImpl` → `DocumentAnalysisFacade.analyze`
-- `DocumentAnalysisFacade` 优先 `PythonDocumentAnalysisServiceImpl`（Spring `RestClient`，`multipart/form-data` POST `/parse`，连接超时 10s，读取超时 `rag.python-service.timeout-seconds` 默认 120s）
+- `DocumentAnalysisFacade` 优先 `PythonDocumentAnalysisServiceImpl`（Spring `RestClient`，`multipart/form-data` POST `/parse`，连接超时 10s，读取超时 `rag.python-service.timeout-seconds` 默认 600s）
 - 请求体含 `file`、`documentId`、`userId`，Python 侧据此把图片落到 `{storePath}/chunk_images/{userId}/{documentId}/`
 - fallback 到 `JavaDocumentAnalysisServiceImpl`，但**该备用方案当前未实现，调用直接抛 `UnsupportedOperationException`** —— 开发时务必先启动 Python 服务
 
@@ -223,6 +225,19 @@ PostgreSQL（默认库名 `vectordb`）需安装 pgvector 扩展。schema 见 [s
 | `rag.cache.mirror-ttl` | 43200 | Runtime Mirror 统一 TTL（mirror:msgs / mirror:steps 共用） |
 | `rag.cache.chat-response-ttl` | 2100 | `chat:response:{requestId}` 幂等缓存（略大于 SSE 超时 30min） |
 | `rag.search.score-threshold` | 0.35 | Cross-Encoder sigmoid 归一化后相关性阈值，0 关闭 |
+
+### Langfuse 观测
+
+`langfuse.*` 段（与 `llm.*` / `rag.*` 平级），自定义 `ChatModelListener` 直连 OTel SDK → Langfuse OTLP 端点。`enabled=false` 时构建 no-op Tracer，不透传任何 span，系统零开销。凭据原从 quarkus 段迁移而来，对应环境变量 `LANGFUSE_ENABLED` / `LANGFUSE_ENDPOINT` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`。
+
+| 配置 | 默认值 | 说明 |
+|---|---|---|
+| `langfuse.enabled` | false | 总开关 |
+| `langfuse.endpoint` | - | OTLP HTTP 端点（Langfuse 控制台 `/api/public/otel`，`/v1/traces` 由 `OtelTraceConfig.resolveEndpoint` 自动补全） |
+| `langfuse.public-key` / `langfuse.secret-key` | - | Langfuse 公钥 / 私钥（Basic auth） |
+| `langfuse.environment` | dev | 部署环境（写入 `langfuse.environment`） |
+| `langfuse.version` | 0.0.1-SNAPSHOT | 应用版本（写入 `langfuse.version` / `langfuse.release`） |
+| `langfuse.trace-offline-calls` | false | 离线 LLM 调用（RAG 增强 / 摘要 / 后台 worker）是否入 trace，首期未接入 |
 
 ## 快速启动（Quick Start）
 
@@ -392,7 +407,19 @@ uvicorn app:app --host 0.0.0.0 --port 18000 / npm run serve
 | `agent/memory/projection/ProjectionLoopExecutor` | Projection 三段式编排：Rewrite（纯规则）+ Snip（LLM ReAct）+ Summary（同步） |
 | `agent/memory/longterm/workspace/MemoryWorkspace` | 长期记忆沙盒（按 userId 隔离，越界校验，懒生成模板） |
 | `agent/memory/longterm/worker/MemoryWorkerReActLoop` | 回答完成后异步维护长期记忆的 ReAct 小循环 |
+| `agent/core/SubAgentStepListener` | 子 Agent 生命周期钩子适配成 step 事件 + 建/闭子 Agent span（Langfuse） |
 | `agent/subagent/StudyPlanner` | study_plan 两阶段 `sequenceBuilder` 编排 |
+
+**Langfuse 观测组件**（`observability/` 包，详见 [AGENTS.md](../AGENTS.md)「Langfuse 可观测性」）：
+
+| 组件 | 职责 |
+|---|---|
+| `observability/OtelTraceConfig` | 构建 `Tracer` Bean；`enabled=false` 返回 no-op；OTLP exporter 补全 `/v1/traces` + Basic auth + ingestion 版本头 |
+| `observability/AgentObservability` | 观测门面：root / tool / retrieval / sub-agent span 建闭 + trace 级属性每 span 冗余注入 |
+| `observability/ObservableContext` | ThreadLocal 栈传播观测上下文，`makeCurrent` 跨线程恢复（agent → tool-exec → 子 Agent 线程） |
+| `observability/LangfuseChatModelListener` | generation span（每轮 LLM 调用），attributes map 贯穿三回调携带 span 引用 |
+| `observability/MessageSerializer` | 消息/响应序列化为 OpenAI-compatible JSON；图片摘要化；统一截断 |
+| `observability/LangfuseAttributeKeys` | 全部 span 属性名常量（Langfuse v4 OTLP 语义约定） |
 
 ### 工具与技能
 
@@ -429,7 +456,7 @@ uvicorn app:app --host 0.0.0.0 --port 18000 / npm run serve
 ./mvnw test               # 运行测试
 ```
 
-测试目录 [src/test/java/](src/test/java/) 覆盖 Agent 执行（`AgentExecutorDisclosureTest`）、工具（`SaveExamToolTest`/`SaveStudyPlanToolTest`/`TavilyApiCompatibilityTest`）、RAG 流程（`NodeBasedRagFlowTest`/`FullDocumentContextTest`/`SemanticContextTest`）、LLM 接入（`LlmManagerTest`/`DeepSeekReasoningTest`）、旧切分策略（已废弃）。
+测试目录 [src/test/java/](src/test/java/) 覆盖 Agent 执行（`AgentExecutorDisclosureTest`）、工具（`SaveExamToolTest`/`SaveStudyPlanToolTest`/`TavilyApiCompatibilityTest`）、RAG 流程（`NodeBasedRagFlowTest`/`FullDocumentContextTest`/`SemanticContextTest`）、LLM 接入（`LlmManagerTest`/`DeepSeekReasoningTest`）、Langfuse 观测（`AgentObservabilityTest`/`LangfuseChatModelListenerTest`/`MessageSerializerTest`，用 CollectingSpanExporter 同步断言 span 层级/属性/状态）、旧切分策略（已废弃）。
 
 ### 日志规范
 

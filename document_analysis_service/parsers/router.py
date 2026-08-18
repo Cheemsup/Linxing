@@ -19,7 +19,16 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from config import IMAGE_STORE_DIR, IMAGE_URL_PREFIX
+from config import (
+    IMAGE_STORE_DIR,
+    IMAGE_URL_PREFIX,
+    MINERU_API_KEY,
+    MINERU_BASE_URL,
+    MINERU_MODEL_VERSION,
+    MINERU_POLL_INTERVAL,
+    MINERU_TIMEOUT_SECONDS,
+    MINERU_MAX_FILE_MB,
+)
 from .linebased_parser import LineBasedParser
 from .code_parser import CodeParser
 from .markdown_parser import MarkdownParser
@@ -76,16 +85,34 @@ def _get_linebased_parser():
 
 
 def _get_pdf_parser():
-    """懒加载 PDF 解析器单例，注入图片存储目录配置。
+    """懒加载 PDF 解析器单例，注入图片存储目录 + MinerU 云客户端。
 
-    延迟导入 fitz/pdfplumber，避免未解析 pdf 时也强制加载这些重型依赖。
+    配置了 MINERU_API_KEY 时构造 MineruClient 注入 PdfParser（MinerU 为主路径，
+    失败/未配置回退本地 PyMuPDF）。延迟导入 fitz/pdfplumber，避免未解析 pdf 时
+    也强制加载这些重型依赖。
     """
     global _pdf_parser
     if _pdf_parser is None:
         from .pdf_parser import PdfParser
+
+        mineru_client = None
+        if MINERU_API_KEY:
+            from .mineru_client import MineruClient
+            mineru_client = MineruClient(
+                api_key=MINERU_API_KEY,
+                base_url=MINERU_BASE_URL,
+                model_version=MINERU_MODEL_VERSION,
+                poll_interval=MINERU_POLL_INTERVAL,
+                timeout_seconds=MINERU_TIMEOUT_SECONDS,
+            )
+            logger.info("PdfParser 启用 MinerU 云解析: model=%s, base=%s",
+                        MINERU_MODEL_VERSION, MINERU_BASE_URL)
+
         _pdf_parser = PdfParser(
             image_store_dir=IMAGE_STORE_DIR,
             image_url_prefix=IMAGE_URL_PREFIX,
+            mineru_client=mineru_client,
+            mineru_max_size_mb=MINERU_MAX_FILE_MB,
         )
     return _pdf_parser
 

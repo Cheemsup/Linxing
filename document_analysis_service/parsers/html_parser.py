@@ -43,9 +43,11 @@ from typing import List, Optional
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from parsers._common import cap_text_nodes
+
 logger = logging.getLogger("docling_analysis_service.parsers.html_parser")
 
-CHUNK_THRESHOLD = 1000
+CHUNK_THRESHOLD = 250
 
 # 强段落分隔：多换行/双换行（fallback 用）
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
@@ -151,7 +153,13 @@ class HtmlParser:
 
         # blocks → Node
         node_seq = self._make_node_seq()
-        return self._blocks_to_nodes(blocks, node_seq)
+        nodes = self._blocks_to_nodes(blocks, node_seq)
+
+        # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+        # （HTML 文本块原本保持原子性，兜底拆分使其与其它解析器一致：超长文本拆为同源小 Node）
+        nodes = cap_text_nodes(nodes)
+
+        return nodes
 
     # ============================== DOM 深度优先遍历 ==============================
 

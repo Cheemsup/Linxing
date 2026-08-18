@@ -97,10 +97,11 @@ public class ChunkIngestCoordinator {
         log.info("文档 {} 开始语义增强，共 {} 个 Node", doc.getId(), nodes.size());
         semanticEnhancementService.enhance(nodes, doc.getFileType());
 
-        int maxChunkSize = ragProperties.getEmbedding().getChunkSize();
+        int maxChunkTokens = RagParameters.MAX_EMBEDDING_TOKENS;
 
         // NodeBasedChunkBuilder 将各个 Node 按照文档顺序排好以及组合，最终得到经由了Node组合的chunk列表
-        List<ChunkResult> chunkResults = nodeBasedChunkBuilder.build(nodes, maxChunkSize);
+        // （装箱以 embedding 450-token 上限为预算，避免超长 chunk 稀释向量语义）
+        List<ChunkResult> chunkResults = nodeBasedChunkBuilder.build(nodes, maxChunkTokens);
 
         if (chunkResults.isEmpty()) {
             documentMapper.updateStatus(doc.getId(), DocumentStatus.FAILED);

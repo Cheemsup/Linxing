@@ -96,12 +96,12 @@ public class ContextEnricher implements ChunkProcessingHandler {
                     "【邻近上文】%s\n" +
                     "【目标片段】%s\n" +
                     "【邻近下文】%s\n" +
-                    "请用1-2句话描述目标片段的背景和主题，注意结合邻近上下文：",
+                    "请用1-2句话（不超过120字）描述目标片段的背景和主题，注意结合邻近上下文：",
                     docTitle, neighbor.before(), chunkText, neighbor.after());
         } else {
             // 兜底：仅 chunkText + 文件名
             prompt = String.format(
-                    "以下文本片段来自文档\"%s\"，请用1-2句话描述它的背景和主题：\n%s",
+                    "以下文本片段来自文档\"%s\"，请用1-2句话（不超过120字）描述它的背景和主题：\n%s",
                     docTitle, chunkText);
         }
 

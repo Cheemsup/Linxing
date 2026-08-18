@@ -75,6 +75,87 @@ def should_flush_under_elastic(
     return buffer_len + add_len > elastic_upper_bound(threshold, ratio)
 
 
+# ============================== Node 字数上限 ==============================
+# Java 侧 embedding 输入上限 450 token，按换算关系 token ≈ 1.5 × 中文字符，
+# 450 token ≈ 300 中文字符。各解析器产出的 text Node 不应超过 MAX_NODE_CHARS：
+# 超长内容在解析期拆为多个小 Node（共享 groupId），而非输出整块超长 Node。
+MAX_NODE_CHARS = 300
+
+# 正文/段落累加阈值默认值：弹性上界 = 阈值 × 1.2 ≈ MAX_NODE_CHARS，
+# 让正常段落累加在 300 字附近自然切出（见 elastic_upper_bound / should_flush_under_elastic）。
+NODE_TARGET_CHARS = 250
+
+
+def split_long_piece(text: str, max_chars: int = MAX_NODE_CHARS) -> List[str]:
+    """将单个超长片段（如无标点的长句）拆为 ≤ max_chars 的多个片段。
+
+    优先在标点/空白处切分避免生硬切断；无边界时字符兜底。
+    仅用于「单句本身超长」的兜底场景——正常段落由 sentence 累加在阈值处自然切分。
+    返回全部非空片段（不丢内容，不截断）。
+    """
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+
+    # 常用中英文切分边界
+    boundary = re.compile(r"[，。、；！？；,.;:!?（）()\s]")
+    pieces: List[str] = []
+    cur = text
+    while len(cur) > max_chars:
+        window = cur[:max_chars]
+        # 从后向前找最近边界，避免切断完整词/句
+        cut = -1
+        for m in boundary.finditer(window):
+            cut = m.end()
+        if cut <= 0:
+            cut = max_chars  # 无边界，字符兜底
+        piece = cur[:cut].strip()
+        if piece:
+            pieces.append(piece)
+        cur = cur[cut:].lstrip()
+
+    tail = cur.strip()
+    if tail:
+        pieces.append(tail)
+    return pieces
+
+
+def cap_text_nodes(nodes: List[dict], max_chars: int = MAX_NODE_CHARS) -> List[dict]:
+    """后置 Node 字数兜底：将超长 text Node 拆为多个小 Node（共享 groupId），
+    保证单个 text Node 不超过 MAX_NODE_CHARS。
+
+    仅作用于 type == "text" 的 Node；heading/code/table/image/formula 保持原子
+    （其 embedding 走语义增强文本，长度已由提示词约束，无超长风险）。
+    拆分依据 split_long_piece（优先标点/空白边界，不丢内容、不截断）：
+    - 已有 groupId 的 Node 沿用原 groupId（同源整块，Java 侧据 groupId 合成父子 chunk）
+    - 无 groupId 的超长 Node 生成新 groupId，标识「同源整块拆出」，与其它解析器
+      超长拆分语义一致，保证 small2big 父块还原不失效。
+    """
+    if max_chars <= 0:
+        return nodes
+
+    out: List[dict] = []
+    for node in nodes:
+        if node.get("type") != "text":
+            out.append(node)
+            continue
+        text = (node.get("text") or "").strip()
+        if len(text) <= max_chars:
+            out.append(node)
+            continue
+
+        pieces = split_long_piece(text, max_chars)
+        group_id = node.get("groupId") or f"g-{node.get('id', 'n')}"
+        for i, piece in enumerate(pieces):
+            piece_node = dict(node)
+            piece_node["id"] = f"{node.get('id', 'n')}-{i}"
+            piece_node["text"] = piece
+            piece_node["groupId"] = group_id
+            out.append(piece_node)
+    return out
+
+
 def guess_image_ext(content_type: str) -> str:
     """根据 MIME 类型猜测图片扩展名，未知类型回退 png。"""
     mapping = {

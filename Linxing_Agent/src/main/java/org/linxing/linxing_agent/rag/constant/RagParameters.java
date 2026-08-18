@@ -24,6 +24,14 @@ public final class RagParameters {
     /** 标题区块拆分阈值：超长标题区块按句子拆分时的字符上限（如 1000）。仅对 > 此阈值的区块做拆分，最佳大小还需要经过测试来不断修正 */
     public static final int CHUNK_THRESHOLD = 600;
 
+    /**
+     * 单个 Chunk 进入 embedding 的最大 token 数上限。
+     * <p>换算关系（用户约定）：token 计数 ≈ 1.5 × 中文字符数，故 450 token ≈ 300 中文字符。
+     * <p>NodeBasedChunkBuilder 装箱以此为上限，超长内容在切块阶段即被约束（而非在 embedding
+     * 阶段生硬截断）；Python 侧各解析器同步将 text Node 控制在 {@code MAX_NODE_CHARS≈300} 字符内。
+     */
+    public static final int MAX_EMBEDDING_TOKENS = 450;
+
     public static final int SEARCH_DEFAULT_TOP_K = 5;
 
     public static final int SEARCH_RECALL_SIZE = 20;

@@ -34,6 +34,7 @@ from typing import List, Optional, Dict, Any
 
 from parsers._common import (
     IMAGE_ESTIMATED_CHARS,
+    cap_text_nodes,
     compute_hash,
     should_flush_under_elastic,
 )
@@ -55,7 +56,7 @@ try:
 except ImportError:
     mistune = None  # type: ignore
 
-CHUNK_THRESHOLD = 1000
+CHUNK_THRESHOLD = 250
 
 # 只识别一二三级标题
 HEADING_PATTERN = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
@@ -148,6 +149,9 @@ class MarkdownParser:
 
         # 核心解析流程
         nodes = self._parse_markdown(text, file_path, image_output_dir, user_id, document_id)
+
+        # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+        nodes = cap_text_nodes(nodes)
 
         logger.info(
             "MarkdownParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes)

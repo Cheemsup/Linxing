@@ -34,9 +34,9 @@ import java.util.Objects;
 public class NodeBasedChunkBuilder {
 
     /**
-     * 默认 Token 估算系数（1 中文字符 ≈ 2 Token）
+     * 默认 Token 估算系数（用户约定换算关系：1 中文字符 ≈ 1.5 Token）
      */
-    private static final double TOKEN_RATIO = 2.0;
+    private static final double TOKEN_RATIO = 1.5;
 
     /**
      * Node 分隔符预估 Token 数（\n\n）
@@ -186,7 +186,7 @@ public class NodeBasedChunkBuilder {
         if (text == null || text.isEmpty()) {
             return 0;
         }
-        // 简单估算：中文字符 * 2，英文单词 * 1
+        // 用户约定换算关系：token 计数 ≈ 1.5 × 中文字符数（英文按同一系数近似，偏保守）
         // 这里用字符数 * TOKEN_RATIO 作为近似
         return (int) (text.length() * TOKEN_RATIO);
     }

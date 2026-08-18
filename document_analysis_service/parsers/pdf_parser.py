@@ -40,6 +40,7 @@ from PIL import Image
 
 from ._common import (
     build_title_path,
+    cap_text_nodes,
     compute_hash,
     detect_code_language,
     guess_image_ext,
@@ -67,9 +68,11 @@ _MONO_FONT_HINTS = ("mono", "consol", "courier", "code", "menlo", "consolas", "j
 # bold 位（PyMuPDF flags 第 4 位，值 16）
 _BOLD_FLAG = 16
 
-# 超长文本块拆分阈值（与 markdown_parser / docx_parser / html_parser 的 CHUNK_THRESHOLD 一致），
-# 超过的 fitz 文本 block 在内部按句子拆为多个小 Node，共享同一 groupId（同源整块），不再整块返回 Java 侧
-_CHUNK_THRESHOLD = 1000
+# 超长文本块拆分阈值（与 markdown_parser / docx_parser / html_parser 一致），
+# 超过的 fitz 文本 block 在内部按句子拆为多个小 Node，共享同一 groupId（同源整块），不再整块返回 Java 侧。
+# 取 NODE_TARGET_CHARS（弹性上界≈MAX_NODE_CHARS≈300 字符）——与 Java 侧 embedding 450-token 上限对齐，
+# 避免超长 chunk 稀释向量语义；cap_text_nodes 兜底保证任何 text Node 不超过 MAX_NODE_CHARS。
+_CHUNK_THRESHOLD = 250
 
 # 句子分隔符（中英文，与 markdown_parser / docx_parser 的 SENTENCE_DELIMITER 一致）
 _SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
@@ -197,6 +200,9 @@ class PdfParser:
         for n in nodes:
             n.pop("_font_size", None)
             n.pop("_is_bold", None)
+
+        # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+        nodes = cap_text_nodes(nodes)
 
         logger.info("PdfParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes))
         return nodes

@@ -88,6 +88,17 @@ public class SearchServiceImpl implements ISearchService {
                     //进行BM25搜索，得到结果
                     List<Bm25SearchResult> bm25Results =
                             chunkMapper.bm25Search(userId, tsquery, bm25RecallSize);
+
+                    //AND 语义过严（多关键词长问句）导致 0 候选时，改用 OR 语义放宽召回，
+                    //确保稀疏检索有候选；ts_rank 排序仍会让多词命中者优先，精度由后续 Rerank 把关
+                    if (bm25Results.isEmpty()) {
+                        String orQuery = KeywordExtractor.extractToTsqueryOr(query);
+                        if (!orQuery.isEmpty() && !orQuery.equals(tsquery)) {
+                            bm25Results = chunkMapper.bm25Search(userId, orQuery, bm25RecallSize);
+                            log.debug("[搜索] 用户{} BM25 AND 0 候选，改用 OR 放宽召回，候选={}",
+                                    userId, bm25Results.size());
+                        }
+                    }
                     bm25Candidates = bm25Results.size();
                     log.debug("[搜索] 用户{} 混合检索: 向量候选={}, BM25候选={}",
                             userId, vectorResults.size(), bm25Results.size());

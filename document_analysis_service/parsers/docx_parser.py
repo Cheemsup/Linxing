@@ -33,6 +33,7 @@ from typing import List, Optional, Tuple
 
 from ._common import (
     build_title_path,
+    cap_text_nodes,
     compute_hash,
     detect_code_language,
     guess_image_ext,
@@ -64,8 +65,10 @@ _INDENT_CODE_PATTERN = re.compile(r"^ {4,}\S")
 # 12pt = Word 常见"段后间距"档位（默认 Normal 通常 8-10pt），覆盖作者显式设大间距的场景。
 _HARD_SEPARATOR_SPACE_AFTER_PT = 12
 
-# 超长聚类拆分阈值（与 markdown_parser / html_parser 的 CHUNK_THRESHOLD 一致）
-CHUNK_THRESHOLD = 1000
+# 超长聚类拆分阈值（与 markdown_parser / html_parser 一致），
+# 取 NODE_TARGET_CHARS（弹性上界≈MAX_NODE_CHARS≈300 字符）——与 Java 侧 embedding 450-token 上限对齐，
+# 避免超长 chunk 稀释向量语义；cap_text_nodes 兜底保证任何 text Node 不超过 MAX_NODE_CHARS。
+CHUNK_THRESHOLD = 250
 
 # 句子分隔符（中英文，与 markdown_parser SENTENCE_DELIMITER 一致）
 _SENTENCE_DELIMITER = re.compile(r"[。！？.!?；;]")
@@ -196,6 +199,9 @@ class DocxParser:
 
         # body 遍历结束，flush 末尾缓冲
         flush_cluster()
+
+        # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+        nodes = cap_text_nodes(nodes)
 
         logger.info("DocxParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes))
         return nodes

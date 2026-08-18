@@ -29,11 +29,13 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-from parsers._common import should_flush_under_elastic
+from parsers._common import cap_text_nodes, should_flush_under_elastic
 
 logger = logging.getLogger("docling_analysis_service.parsers.linebased_parser")
 
-CHUNK_THRESHOLD = 600
+# 与 Java 侧 embedding 450-token 上限对齐：token ≈ 1.5 × 中文字符，450 token ≈ 300 字符。
+# 弹性上界（×1.2）≈ MAX_NODE_CHARS；cap_text_nodes 兜底保证任何 text Node 不超过 MAX_NODE_CHARS。
+CHUNK_THRESHOLD = 250
 
 # 强段落分隔：双换行或多换行（独立语义块）
 STRONG_PARAGRAPH_SEP = r"\n\s*\n"
@@ -87,6 +89,9 @@ class LineBasedParser:
 
         # 三级降级拆分（含 groupId 标注）
         nodes = self._split_with_three_level_strategy(text)
+
+        # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
+        nodes = cap_text_nodes(nodes)
 
         logger.info(
             "LineBasedParser 解析完成: %s, 共 %d 个 Node", file_path, len(nodes)

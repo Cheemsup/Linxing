@@ -42,7 +42,6 @@ public class SearchServiceImpl implements ISearchService {
     private static final String RETRIEVAL_TOOL_NAME = "search_knowledge_base";
     private static final String RETRIEVAL_VECTOR_STORE = "pgvector";
     private static final String RETRIEVAL_SIMILARITY = "cosine";
-    private static final String RETRIEVAL_RERANKER = "ms-marco-MiniLM-L-6-v2";
     /** retrieval span metadata.scores 保留的归一化分数个数上限 */
     private static final int MAX_SCORES_KEPT = 10;
 
@@ -117,27 +116,27 @@ public class SearchServiceImpl implements ISearchService {
                 return List.of();
             }
 
-            //对全部候选统一 Cross-Encoder 打分（与 topK 无关，保证不同 topK 下打分对象一致）
+            //对全部候选统一 Rerank API 打分（与 topK 无关，保证不同 topK 下打分对象一致）
             List<Reranker.ScoredResult> scored = reranker.scoreAll(query, candidates);
 
             //父块去重展开（small2big），用父块代表小块参与最终排序
             //   必须在 limit(topK) 之前做，否则不同 topK 截断后再父块去重会破坏前缀子集关系
             List<Reranker.ScoredResult> expanded = expandScoredToParent(scored, userId);
 
-            //按 Cross-Encoder 分数稳定排序后截断 topK（保留分数，供归一化/阈值过滤使用）
-            //   pickTopKScored 与原 pickTopK 排序逻辑一致，仅保留 ScoredResult.score（Cross-Encoder 原始 logits）
+            //按重排分数稳定排序后截断 topK（保留分数，供阈值过滤使用）
+            //   pickTopKScored 与原 pickTopK 排序逻辑一致，仅保留 ScoredResult.score（Rerank API relevance_score）
             List<Reranker.ScoredResult> topScored = reranker.pickTopKScored(expanded, effectiveTopK);
 
-            //对 Cross-Encoder 原始 logits 做 sigmoid 归一化到 [0,1]，再按阈值舍弃低分结果
+            //Rerank 分数（API relevance_score / 降级时的向量相似度）已在 [0,1]，直接按阈值舍弃低分结果
             //   即使导致结果为空也舍弃——空结果由消费侧（RagSearchTool）降级提示
             List<Reranker.ScoredResult> filtered = new ArrayList<>(topScored.size());
             for (Reranker.ScoredResult sr : topScored) {
-                double normalized = sigmoid(sr.score());
+                double relevance = sr.score();
                 if (topScores.size() < MAX_SCORES_KEPT) {
-                    topScores.add(normalized);
+                    topScores.add(relevance);
                 }
-                if (threshold <= 0.0 || normalized >= threshold) {
-                    filtered.add(new Reranker.ScoredResult(sr.result(), normalized));
+                if (threshold <= 0.0 || relevance >= threshold) {
+                    filtered.add(new Reranker.ScoredResult(sr.result(), relevance));
                 }
             }
             if (filtered.size() < topScored.size()) {
@@ -156,7 +155,7 @@ public class SearchServiceImpl implements ISearchService {
                                 .chunkType(r.chunkType())
                                 .chunkText(r.chunkText())
                                 .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
-                                //对外暴露 sigmoid 归一化后的 [0,1] 分数
+                                //对外暴露 relevance_score（Rerank API 已归一化到 [0,1]）
                                 .score(sr.score())
                                 .build();
                     })
@@ -186,9 +185,18 @@ public class SearchServiceImpl implements ISearchService {
                                                                   double threshold, int beforeFilter,
                                                                   int afterFilter, List<Double> topScores) {
         return new AgentObservability.RetrievalStats(
-                RETRIEVAL_VECTOR_STORE, RETRIEVAL_SIMILARITY, RETRIEVAL_RERANKER,
+                RETRIEVAL_VECTOR_STORE, RETRIEVAL_SIMILARITY, rerankerModelName(),
                 recallSize, vectorCandidates, bm25Candidates, hybrid, threshold,
                 beforeFilter, afterFilter, topScores);
+    }
+
+    /**
+     * retrieval span 的重排序模型标签，随 rag.api.reranker.model 动态变化（未配置时 "none"）。
+     */
+    private String rerankerModelName() {
+        RagProperties.Api.Reranker cfg = ragProperties.getApi().getReranker();
+        String model = cfg != null ? cfg.getModel() : null;
+        return (model == null || model.isBlank()) ? "none" : model;
     }
 
     /**
@@ -208,14 +216,6 @@ public class SearchServiceImpl implements ISearchService {
             summaries.add(m);
         }
         return summaries;
-    }
-
-    /**
-     * sigmoid 归一化：将 Cross-Encoder 原始 logits 映射到 (0,1) 区间。
-     * 单调递增，不改变排序，仅赋予分数可解释的语义（0.5 ≈ 相关性中性点）。
-     */
-    private static double sigmoid(double x) {
-        return 1.0 / (1.0 + Math.exp(-x));
     }
 
     /**
@@ -277,7 +277,7 @@ public class SearchServiceImpl implements ISearchService {
     }
 
     /**
-     * 在 Cross-Encoder 打分之后、limit(topK) 之前做父块去重展开（small2big）。
+     * 在重排序打分之后、limit(topK) 之前做父块去重展开（small2big）。
      */
     private List<Reranker.ScoredResult> expandScoredToParent(List<Reranker.ScoredResult> scored, Integer userId) {
         List<Integer> parentIds = scored.stream()
@@ -320,7 +320,7 @@ public class SearchServiceImpl implements ISearchService {
     }
 
     /**
-     * 将小块打分结果替换为父块文本，保留原 Cross-Encoder 分数与小块id作 tie-breaker。
+     * 将小块打分结果替换为父块文本，保留原重排分数与其小块id作 tie-breaker。
      * parentId 为 null 或父块不存在时原样返回。
      */
     private Reranker.ScoredResult toParentScored(Reranker.ScoredResult sr, Integer parentId, Map<Integer, Chunk> parentMap) {

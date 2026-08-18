@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * 前置条件（运行时需满足，编写时不启动验证）：
  *   - Spring 上下文可启动（PostgreSQL / Redis / pgvector 等依赖就绪，dev profile）
- *   - Python 文档解析服务（document_analysis_service）已在 http://localhost:8000 启动
+ *   - Python 文档解析服务（document_analysis_service）已在 http://localhost:18000 启动
  *     否则 Facade 会 fallback 到尚未实现的 Java 备用方案并抛出异常
  */
 @SpringBootTest

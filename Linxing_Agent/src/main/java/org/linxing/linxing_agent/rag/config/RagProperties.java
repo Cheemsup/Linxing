@@ -19,7 +19,7 @@ public class RagProperties {
     private Embedding embedding = new Embedding();
     private VectorStore vectorStore = new VectorStore();
     private Search search = new Search();
-    private Reranker reranker = new Reranker();
+    private Api api = new Api();
     private Cache cache = new Cache();
     private PythonService pythonService = new PythonService();
     private SemanticEnhancement semanticEnhancement = new SemanticEnhancement();
@@ -45,7 +45,8 @@ public class RagProperties {
         private String user;
         private String password;
         private String table;
-        private int dimension;
+        /** embedding 输出向量维度，写入 DB cast 用；必须与 {@link Api.Embedding#model} 实际输出一致（bge-m3=1024） */
+        private int dimension = 1024;
     }
 
     @Data
@@ -57,7 +58,7 @@ public class RagProperties {
         private double bm25Weight = 0.3;
         private int bm25RecallSize = 20;
         /**
-         * Cross-Encoder 重排序分数的相关性阈值（sigmoid 归一化后）。
+         * Rerank API relevance_score（[0,1] 已归一化）的相关性阈值。
          * <p>低于此阈值的结果视为不相关并舍弃，可能导致 RAG 检索返回空。
          * 设为 0 表示关闭阈值过滤（保留全部 topK 结果，向后兼容）。
          * 默认取 {@link RagParameters#SCORE_THRESHOLD}，可经 rag.search.score-threshold 覆盖。
@@ -66,11 +67,39 @@ public class RagProperties {
     }
 
     @Data
-    public static class Reranker {
-        private boolean enabled;
-        private String modelPath;
-        private String tokenizerPath;
-        private int batchSize = 8;
+    public static class Api {
+        private Embedding embedding = new Embedding();
+        private Reranker reranker = new Reranker();
+
+        @Data
+        public static class Embedding {
+            /** 是否启用 API 向量化；false 或 api-key 为空时 embeddingModel bean 不构建，RAG 向量化不可用 */
+            private boolean enabled;
+            /** 硅基流动 OpenAI 兼容端点，如 https://api.siliconflow.cn/v1 */
+            private String baseUrl;
+            /** 硅基流动 API Key（对应 Authorization: Bearer <key>） */
+            private String apiKey;
+            /** 向量化模型，如 BAAI/bge-m3（固定输出 1024 维） */
+            private String model;
+            /** API 调用超时秒数 */
+            private int timeoutSeconds = 120;
+            /** API 调用失败重试次数 */
+            private int maxRetries = 2;
+        }
+
+        @Data
+        public static class Reranker {
+            /** 是否启用 API 重排序；false 或配置不全时降级为按候选已有分数排序 */
+            private boolean enabled;
+            private String baseUrl;
+            private String apiKey;
+            /** 重排序模型，如 BAAI/bge-reranker-v2-m3 */
+            private String model;
+            /** 单次 API 请求的文档批量大小 */
+            private int batchSize = 8;
+            private int timeoutSeconds = 120;
+            private int maxRetries = 2;
+        }
     }
 
     @Data
@@ -94,8 +123,8 @@ public class RagProperties {
      */
     @Data
     public static class PythonService {
-        /** 服务 URL，默认本地部署 */
-        private String url = "http://localhost:8000";
+        /** 服务 URL。本机默认 18000（8000 被 Hyper-V/WSL 保留段占用，bind 报 Errno 13），Python 侧 config.py 默认一致 */
+        private String url = "http://localhost:18000";
         /** 请求超时秒数（大文件解析耗时较长） */
         private int timeoutSeconds = 120;
         /** 是否启用 Python 服务 */

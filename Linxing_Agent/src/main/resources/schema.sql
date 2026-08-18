@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
     user_id         INT,
     document_id     INT NOT NULL,
     chunk_id        INT NOT NULL,
-    embedding       vector NOT NULL,
+    embedding       vector(1024) NOT NULL, -- 维度与 embedding 模型输出一致（bge-m3=1024），换模型需迁移维度
     "text"          TEXT,
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT embeddings_chunk_id_fkey FOREIGN KEY(chunk_id) REFERENCES chunks(id),
@@ -131,7 +131,7 @@ COMMENT ON COLUMN embeddings.id IS '自增主键ID';
 COMMENT ON COLUMN embeddings.user_id IS '所属用户ID（冗余，便于按用户过滤）';
 COMMENT ON COLUMN embeddings.document_id IS '所属文档ID';
 COMMENT ON COLUMN embeddings.chunk_id IS '关联的chunk ID，一对一关系';
-COMMENT ON COLUMN embeddings.embedding IS '向量数据，pgvector类型';
+COMMENT ON COLUMN embeddings.embedding IS '向量数据，pgvector 类型；维度与 embedding 模型输出一致（bge-m3=1024），需与 rag.vector-store.dimension 及 Insert cast 保持一致';
 COMMENT ON COLUMN embeddings.text IS '可空；实际输入embedding模型的文本，调试使用';
 COMMENT ON COLUMN embeddings.metadata IS '冗余存储的chunk元数据，用于快速过滤：包含parent_chunk_id, chunk_type, title_path, strategy等';
 

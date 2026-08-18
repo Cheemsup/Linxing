@@ -29,13 +29,11 @@ public class SearchController {
         int topK = request.getTopK() != null ? request.getTopK() : 0;
         boolean hybrid = Boolean.TRUE.equals(request.getHybrid());
 
-        // 0816 起注释：请求级噪音日志
         // log.info("[搜索] 用户{} 查询: {}, hybrid={}", userId, truncate(request.getQuery(), 80), hybrid);
 
         List<SearchResult> results = searchService.search(userId, request.getQuery(), topK, hybrid);
         List<SearchResultVO> vos = searchService.toVOList(results);
 
-        // 0816 起注释：响应级噪音日志
         // log.info("[搜索] 用户{} 返回{}条结果", userId, vos.size());
         return Result.success(vos);
     }

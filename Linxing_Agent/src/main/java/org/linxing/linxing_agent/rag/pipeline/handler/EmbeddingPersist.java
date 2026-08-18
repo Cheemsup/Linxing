@@ -3,12 +3,14 @@ package org.linxing.linxing_agent.rag.pipeline.handler;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import lombok.extern.slf4j.Slf4j;
+import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.entity.Chunk;
 import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.entity.FullEmbeddingRecord;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.rag.pipeline.ChunkProcessingContext;
 import org.linxing.linxing_agent.rag.pipeline.ChunkProcessingHandler;
+import org.linxing.linxing_agent.rag.utils.ChainOfThoughtStripper;
 import org.linxing.linxing_agent.rag.utils.VectorUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,8 @@ import java.util.List;
 
 /**
  * 向量嵌入持久化处理器（Order=5），对可检索 Chunk 生成向量嵌入并批量写入数据库，支持缓冲区自动刷新。
+ * 向量化走硅基流动 API（OpenAI 兼容），输出维度由嵌入模型决定（bge-m3=1024），写入时按
+ * {@code rag.vector-store.dimension} cast 到 pgvector 列，维度须与模型输出一致。
  */
 @Slf4j
 @Component
@@ -26,13 +30,15 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
 
     private final EmbeddingModel embeddingModel;
     private final EmbeddingMapper embeddingMapper;
+    private final RagProperties ragProperties;
 
     private final List<FullEmbeddingRecord> buffer = new ArrayList<>();
     private static final int BATCH_SIZE = 20; // 批量写入阈值，累积满 20 条即刷新到数据库
 
-    public EmbeddingPersist(EmbeddingModel embeddingModel, EmbeddingMapper embeddingMapper) {
+    public EmbeddingPersist(EmbeddingModel embeddingModel, EmbeddingMapper embeddingMapper, RagProperties ragProperties) {
         this.embeddingModel = embeddingModel;
         this.embeddingMapper = embeddingMapper;
+        this.ragProperties = ragProperties;
     }
 
     @Override
@@ -51,7 +57,7 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
 
         try {
             String embeddingText = buildEmbeddingText(chunk);
-            // 调用嵌入模型将文本转为 512 维向量（BGE-small-zh）
+            // 调用嵌入模型将文本转为向量（bge-m3 输出 1024 维）
             Embedding embedding = embeddingModel.embed(embeddingText).content();
             // 将 float[] 向量序列化为 PostgreSQL vector 兼容格式，如 [0.1,0.2,...]
             String vectorString = VectorUtils.toArray(embedding.vector());
@@ -87,7 +93,8 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
     public void flush() {
         if (!buffer.isEmpty()) {
             try {
-                embeddingMapper.batchInsertEmbeddings(new ArrayList<>(buffer));
+                embeddingMapper.batchInsertEmbeddings(
+                        new ArrayList<>(buffer), ragProperties.getVectorStore().getDimension());
                 log.debug("批量持久化 {} 条向量记录", buffer.size());
             } catch (Exception e) {
                 log.error("批量持久化向量失败: {}", e.getMessage());
@@ -100,6 +107,7 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
     // contextPrefix 由 LLM 对弱上下文片段补充的背景描述，titlePath 为标题路径，共同增强语义密度
     // Node-Based 架构下 indexText 为各 Node 的 semanticText 拼接（含 VLM 图片描述/LLM 代码解释/表格总结），
     // 确保语义增强结果真正参与向量化；传统策略 Chunk 无 indexText，回退使用 chunkText
+    // 向量化前统一剥除 LLM 增强文本可能泄漏的思维链标记（<think>...</think> 等），避免污染向量
     private String buildEmbeddingText(Chunk chunk) {
         StringBuilder sb = new StringBuilder();
         if (chunk.getContextPrefix() != null && !chunk.getContextPrefix().isEmpty()) {
@@ -109,7 +117,7 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
             sb.append(chunk.getTitlePath()).append(" ");
         }
         sb.append(resolveIndexText(chunk));
-        return sb.toString();
+        return ChainOfThoughtStripper.strip(sb.toString());
     }
 
     /**

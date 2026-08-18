@@ -128,7 +128,7 @@ Agent 驱动的个人学习平台 —— 自研 ReAct Agent 主循环 + `langcha
 所有文件类型统一走 `IngestServiceImpl` → `DocumentAnalysisFacade.analyze` → `ChunkIngestCoordinator.processDocumentFromNodes`。旧 `ChunkIngestCoordinator.processDocument`（基于 `ChunkStrategyFactory` 按文件类型分派）已 `@Deprecated`，调用直接抛 `UnsupportedOperationException`。`rag/strategy/`（8 个旧策略）与 `rag/render/`（3 个 Renderer）包整体 `@Deprecated` 但未删除，结构识别逻辑已迁移至 Python 侧 parsers。
 
 ### Python 服务需先于后端启动
-Node-Based RAG 的文档解析依赖 `document_analysis_service`（默认 `http://localhost:8000`）。`DocumentAnalysisFacade` 失败时会 fallback 到 `JavaDocumentAnalysisServiceImpl`，但 Java 备用方案**当前尚未实现**，调用会报错。开发时务必先启动 Python 服务。
+Node-Based RAG 的文档解析依赖 `document_analysis_service`（默认 `http://localhost:18000`；本机 8000 落在 Hyper-V/WSL 保留端口段不可用）。`DocumentAnalysisFacade` 失败时会 fallback 到 `JavaDocumentAnalysisServiceImpl`，但 Java 备用方案**当前尚未实现**，调用会报错。开发时务必先启动 Python 服务。
 
 ### 语义增强结果必须进入 indexText
 Node-Based 架构的核心价值在于 VLM/LLM 语义增强提升检索质量。`NodeBasedChunkBuilder.buildChunkFromNodes` 同时生成 `chunkText`（Display）与 `indexText`（Index，含语义增强结果）。下游 `EmbeddingPersist`/`FullTextIndexer` 优先读 `indexText`，缺失才回退 `chunkText`。新增检索相关 Handler 时必须沿用此优先级，否则语义增强会变成空转。
@@ -155,8 +155,9 @@ Redis 承担三类缓存：
 - **幂等缓存**（`chat:response:{requestId}`，TTL `rag.cache.chat-response-ttl` 默认 2100s=35min，略大于 SSE 超时 30min）
 - 旧会话消息缓存（`session-messages-ttl`，已 @deprecated，P3 Runtime Mirror 落地后停写）、文档预览缓存（`doc-preview-ttl`）、Agent 步骤缓存（`agent-steps-ttl`，已 @deprecated）
 
-### ONNX runtime
-重排序器使用 `langchain4j-onnx-scoring` + `ms-marco-MiniLM-L-6-v2`。ONNX 原生库由 Java 库自动下载，无需手动安装。`Reranker.scoreAll`/`pickTopKScored` 保留原始 logits 供 sigmoid 归一化，区别于旧 `rerank`/`pickTopK`（丢弃分数）。
+### Rerank / Embedding（硅基流动 API）
+重排序走硅基流动 `POST /v1/rerank`（`SiliconFlowScoringModel` 实现 `ScoringModel`，配置 `rag.api.reranker.*`，默认 `BAAI/bge-reranker-v2-m3`）。API 返回 `relevance_score` 已归一化 [0,1]，`Reranker.scoreAll`/`pickTopKScored` 保留该分数，`SearchServiceImpl` 直接与 `rag.search.score-threshold` 比较，无需 sigmoid。
+向量化走 OpenAI 兼容 `POST /v1/embeddings`（`OpenAiEmbeddingModel` bean，配置 `rag.api.embedding.*`，默认 `BAAI/bge-m3` 1024 维），维度受 `rag.vector-store.dimension` 与 DB 列 `vector(1024)` 约束。旧本地 ONNX（`ms-marco-MiniLM-L-6-v2`，纯英文模型无法处理中文）已停用并删除模型文件。
 
 ### Maven 显式声明源码目录
 `pom.xml` 显式设置 `<sourceDirectory>src/main/java</sourceDirectory>` 与 `<testSourceDirectory>src/test/java</testSourceDirectory>`。这是默认值但被显式声明，勿改动。
@@ -170,10 +171,10 @@ Redis 承担三类缓存：
 | `langchain4j` 1.13.0 | 核心 RAG 框架 |
 | `langchain4j-agentic` | 多 Agent 工作流（@Agent / conditionalBuilder / humanInTheLoopBuilder） |
 | `langchain4j-web-search-engine-tavily` 1.13.0-beta23 | Tavily 联网搜索 |
-| `langchain4j-embeddings-bge-small-zh-v15` | 本地嵌入模型（512 维） |
+| `langchain4j-embeddings-bge-small-zh-v15` | 本地嵌入模型（已停用，改调硅基流动 API bge-m3） |
 | `langchain4j-pgvector` 0.1.6 | PG 向量存储 |
 | `langchain4j-open-ai` | LLM 客户端（多供应商走 OpenAI 兼容 API） |
-| `langchain4j-onnx-scoring` + `onnxruntime` 1.20.0 | Cross-encoder 重排序 |
+| `langchain4j-onnx-scoring` + `onnxruntime` 1.20.0 | 已停用的本地 Cross-encoder 重排序（改调硅基流动 API rerank） |
 | `mybatis-spring-boot-starter` 4.0.0 | ORM（XML mappers） |
 | `druid-spring-boot-4-starter` 1.2.28 | 连接池（专用 Spring Boot 4 starter） |
 | `spring-boot-starter-data-redis`（Lettuce） | Redis 缓存 / Runtime Mirror |

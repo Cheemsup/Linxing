@@ -82,16 +82,32 @@ rag:
     user: ${RAG_VECTOR_USER:postgres}
     password: ${RAG_VECTOR_PASSWORD:}
     table: embeddings
-    dimension: 512
+    # embedding 输出维度，必须与 api.embedding 实际输出一致（bge-m3=1024）
+    dimension: ${RAG_VECTOR_DIMENSION:1024}
   search:
-    # Cross-Encoder 重排序分数（sigmoid 归一化后）的相关性阈值，低于此值的结果舍弃，可能导致 RAG 为空
-    # 0 表示关闭阈值过滤；ms-marco-MiniLM-L-6-v2 经验保守值 0.35，后续按真实语料校准
+    # Rerank API relevance_score（0-1 归一化）的相关性阈值，低于此值的结果舍弃，可能导致 RAG 为空
+    # 0 表示关闭阈值过滤；bge-reranker-v2-m3 经验保守值 0.35，后续按真实语料校准
     score-threshold: 0.35
-  reranker:
-    enabled: true
-    batch-size: 8
-    model-path: classpath:models/ms-marco-MiniLM-L-6-v2/model.onnx
-    tokenizer-path: classpath:models/ms-marco-MiniLM-L-6-v2/tokenizer.json
+  # ===== Embedding / Rerank API =====
+  # api-key 为空或 enabled=false 时对应模型不构建/不启用，RAG 向量化/重排序降级不可用（应用可正常启动）
+  api:
+    # OpenAI 兼容 /v1/embeddings（langchain4j OpenAiEmbeddingModel）
+    embedding:
+      enabled: ${RAG_API_EMBEDDING_ENABLED:false}
+      base-url: ${RAG_API_EMBEDDING_BASE_URL}
+      api-key: ${RAG_API_EMBEDDING_API_KEY:}
+      model: ${RAG_API_EMBEDDING_MODEL}
+      timeout-seconds: ${RAG_API_EMBEDDING_TIMEOUT:120}
+      max-retries: ${RAG_API_EMBEDDING_MAX_RETRIES:2}
+    # /v1/rerank（Cohere/Jina 兼容，响应 results[].relevance_score 已归一化 [0,1]）
+    reranker:
+      enabled: ${RAG_API_RERANKER_ENABLED:false}
+      base-url: ${RAG_API_RERANKER_BASE_URL}
+      api-key: ${RAG_API_RERANKER_API_KEY:}
+      model: ${RAG_API_RERANKER_MODEL3}
+      batch-size: ${RAG_API_RERANKER_BATCH_SIZE:8}
+      timeout-seconds: ${RAG_API_RERANKER_TIMEOUT:120}
+      max-retries: ${RAG_API_RERANKER_MAX_RETRIES:2}
   cache:
     doc-preview-ttl: ${RAG_CACHE_DOC_PREVIEW_TTL:3600}
     # session-messages-ttl / agent-steps-ttl 保留仅供旧键自然过期观察
@@ -102,7 +118,7 @@ rag:
     #chat:response:{requestId} 幂等缓存 TTL（秒），默认 35 分钟，略大于 SSE 超时(30 分钟)以覆盖空闲 reset 窗口
     chat-response-ttl: ${RAG_CACHE_CHAT_RESPONSE_TTL:2100}
   python-service:
-    url: ${PYTHON_SERVICE_URL:http://localhost:8000}
+    url: ${PYTHON_SERVICE_URL:http://localhost:18000}
     timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:120}
     enabled: ${PYTHON_SERVICE_ENABLED:true}
     image-store-dir: ${RAG_STORE_PATH}/chunk_images

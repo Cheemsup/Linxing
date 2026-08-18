@@ -14,7 +14,7 @@ Linxing 平台的 Python 文档解析服务。基于 FastAPI 提供统一的 `/p
 Linxing_Agent (8080)
    │  POST /parse  (multipart: file + documentId + userId)
    ▼
-document_analysis_service (8000)
+document_analysis_service (18000)
    │  按扩展名 + 内容特征路由 → parser
    │  pdf/docx/markdown 图片落盘到 IMAGE_STORE_DIR/{userId}/{documentId}/
    ▼
@@ -148,7 +148,7 @@ pip install -r requirements.txt
 
 ```bash
 # 方式一：uvicorn
-uvicorn app:app --host 0.0.0.0 --port 8000
+uvicorn app:app --host 0.0.0.0 --port 18000
 
 # 方式二：直接运行 app.py（内部以 uvicorn 启动）
 python app.py
@@ -283,7 +283,7 @@ flowchart TD
 本服务当前无独立测试目录。开发调试可通过 `curl` 直接验证：
 
 ```bash
-curl -X POST http://localhost:8000/parse \
+curl -X POST http://localhost:18000/parse \
   -F "file=@test.pdf" \
   -F "documentId=1" \
   -F "userId=1"
@@ -292,7 +292,7 @@ curl -X POST http://localhost:8000/parse \
 ## 常见问题（FAQ）
 
 **Q：Java 侧报"Java 文档解析备用方案尚未实现"或连接超时？**
-A：本服务未启动或不可达。Java 侧 fallback 当前抛 `UnsupportedOperationException`，必须先启动本服务（默认 `localhost:8000`）。大文件解析调整 Java 侧 `rag.python-service.timeout-seconds`（默认 120s）。
+A：本服务未启动或不可达。Java 侧 fallback 当前抛 `UnsupportedOperationException`，必须先启动本服务（默认 `localhost:18000`）。大文件解析调整 Java 侧 `rag.python-service.timeout-seconds`（默认 120s）。
 
 **Q：前端显示不出图片？**
 A：检查 `IMAGE_STORE_DIR` 是否与 Java 侧 `rag.store-path/chunk_images` 指向同一物理目录，且 `IMAGE_URL_PREFIX`（默认 `/chunk_images`）与 Java 侧 `WebMvcConfig` 暴露的静态资源前缀一致。

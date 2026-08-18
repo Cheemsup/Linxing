@@ -15,13 +15,13 @@ import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.node.ImageNode;
 import org.linxing.linxing_agent.rag.node.NodeType;
 import org.linxing.linxing_agent.rag.node.TableNode;
+import org.linxing.linxing_agent.rag.utils.ChainOfThoughtStripper;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Node语义增强服务实现。
@@ -39,7 +39,6 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class SemanticEnhancementServiceImpl implements SemanticEnhancementService {
 
-    private static final Pattern THINK_TAG = Pattern.compile("-thinking[\\s\\S]*?-thinking", Pattern.CASE_INSENSITIVE);
     private static final int MAX_RETRY_ATTEMPTS = 3;
     private static final long INITIAL_BACKOFF_MS = 1000;
 
@@ -349,14 +348,18 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
     }
 
     /**
-     * 清理 LLM 响应（移除 thinking 标签、多余空格）。
+     * 清理 LLM 响应：剥除泄漏的思维链标记块（{@code <think>…</think>} / {@code [THINK]…[/THINK]} / {@code -thinking-} 等），
+     * 折叠多余空白。全部内容都是思维链（剥后为空）时返回 null，由调用方回退到原文。
      */
     private String cleanResponse(String response) {
         if (response == null) {
             return null;
         }
-        String cleaned = THINK_TAG.matcher(response).replaceAll("").trim();
-        return cleaned.replaceAll("\\s+", " ");
+        String cleaned = ChainOfThoughtStripper.strip(response);
+        if (cleaned == null || cleaned.isBlank()) {
+            return null;
+        }
+        return cleaned.replaceAll("\\s+", " ").trim();
     }
 
     /**

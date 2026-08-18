@@ -46,7 +46,10 @@ public class EmbeddingHelper {
                 ragProperties.getEmbedding().getChunkOverlap()
         );
 
-        List<TextSegment> segments = splitter.split(document);
+        List<TextSegment> segments = splitter.split(document).stream()
+                // 向量化前剥除文本中可能泄漏的思维链标记（<think> 等），保留 metadata（index 等）
+                .map(s -> TextSegment.from(ChainOfThoughtStripper.strip(s.text()), s.metadata()))
+                .toList();
         log.info("文档分块完成，共 {} 个片段", segments.size());
 
         if (segments.isEmpty()) {
@@ -86,7 +89,7 @@ public class EmbeddingHelper {
         }
 
         if (!embedRecords.isEmpty()) {
-            embeddingMapper.batchInsertEmbeddings(embedRecords);
+            embeddingMapper.batchInsertEmbeddings(embedRecords, ragProperties.getVectorStore().getDimension());
         }
 
         documentMapper.updateStatus(documentId, DocumentStatus.COMPLETED);

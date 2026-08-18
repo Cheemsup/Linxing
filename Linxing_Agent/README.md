@@ -16,7 +16,7 @@ webconsole (Vue) ──/api 代理剥离──▶ Linxing_Agent (8080)
                    ┌────────────────────┼────────────────────┐
                    ▼                    ▼                    ▼
         document_analysis_service   PostgreSQL/pgvector        Redis
-              (8000, /parse)        chunks/embeddings       会话/预览/步骤缓存
+              (18000, /parse)        chunks/embeddings       会话/预览/步骤缓存
 ```
 
 **为什么存在**：把"检索个人笔记"封装成 Agent 可调用的工具，让对话、出题、学习计划生成等学习场景都建立在用户自己的笔记之上。Python 服务只负责文档结构化解析，向量存储、检索、Agent 编排、业务持久化均由本服务承担。
@@ -232,7 +232,7 @@ PostgreSQL（默认库名 `vectordb`）需安装 pgvector 扩展。schema 见 [s
 - Maven 3.6+（仓库内置 `mvnw` / `mvnw.cmd`）
 - PostgreSQL 14+ 且已安装 pgvector 扩展
 - Redis 6+
-- `document_analysis_service` 已启动（默认 `http://localhost:8000`）
+- `document_analysis_service` 已启动（默认 `http://localhost:18000`）
 
 ### 1. 准备数据库
 
@@ -247,7 +247,7 @@ PostgreSQL（默认库名 `vectordb`）需安装 pgvector 扩展。schema 见 [s
 ```bash
 cd ../document_analysis_service
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000 / npm run serve
+uvicorn app:app --host 0.0.0.0 --port 18000 / npm run serve
 ```
 
 ### 4. 启动后端

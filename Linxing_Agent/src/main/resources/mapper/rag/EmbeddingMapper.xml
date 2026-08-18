@@ -4,12 +4,13 @@
 <mapper namespace="org.linxing.linxing_agent.rag.mapper.EmbeddingMapper">
 
     <insert id="batchInsertEmbeddings">
+        <!-- ${dimension} 为 rag.vector-store.dimension（embedding 输出维度，int 安全），与 schema 列维度一致 -->
         <foreach collection="list" item="item" separator=";">
             INSERT INTO embeddings (user_id, document_id, chunk_id, embedding, "text", metadata)
             VALUES (#{item.userId},
                     #{item.documentId},
                     #{item.chunkId},
-                    #{item.embeddingVector}::vector(512),
+                    #{item.embeddingVector}::vector(${dimension}),
                     #{item.text},
                     #{item.metadata}::jsonb)
         </foreach>

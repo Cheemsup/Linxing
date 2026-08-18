@@ -2,36 +2,34 @@ package org.linxing.linxing_agent.rag.utils;
 
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.output.Response;
-import dev.langchain4j.model.scoring.onnx.OnnxScoringModel;
+import dev.langchain4j.model.scoring.ScoringModel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.linxing.linxing_agent.rag.config.RagProperties;
 import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
-import org.springframework.core.io.DefaultResourceLoader;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * 重排序组件：对检索候选做 Cross-Encoder 风格重排。
+ * <p>旧本地 ONNX 方案（ms-marco-MiniLM-L-6-v2，纯英文模型无法处理中文）已停用并删除模型文件，
+ * 改为调用硅基流动 Rerank API（{@link SiliconFlowScoringModel}）。分数语义为 API 返回的
+ * {@code relevance_score}（已归一化 [0,1]，上层无需再做 sigmoid）。
+ * <p>模型不可用 / 调用失败时降级为按候选已有（向量相似度）分数稳定排序，保证搜索仍可用。
+ */
 @Slf4j
 @Component
 public class Reranker {
 
     private final RagProperties ragProperties;
 
-    private volatile OnnxScoringModel scoringModel;
+    private volatile ScoringModel scoringModel;
     private volatile boolean initialized = false;
-    private final Object initLock = new Object();
 
     public Reranker(RagProperties ragProperties) {
         this.ragProperties = ragProperties;
@@ -39,85 +37,27 @@ public class Reranker {
 
     @PostConstruct
     public void init() {
-        if (!ragProperties.getReranker().isEnabled()) {
-            log.info("Cross-Encoder重排序已禁用");
+        RagProperties.Api.Reranker cfg = ragProperties.getApi().getReranker();
+        if (!cfg.isEnabled()) {
+            log.info("Rerank API 重排序未启用（rag.api.reranker.enabled=false），检索将按其已有分数排序");
             return;
         }
-
-        try {
-            String modelPath = ragProperties.getReranker().getModelPath();
-            String tokenizerPath = ragProperties.getReranker().getTokenizerPath();
-
-            if (modelPath == null || modelPath.isBlank()) {
-                log.warn("未配置reranker.model-path，Cross-Encoder重排序不可用");
-                return;
-            }
-            if (tokenizerPath == null || tokenizerPath.isBlank()) {
-                log.warn("未配置reranker.tokenizer-path，Cross-Encoder重排序不可用");
-                return;
-            }
-
-            Path modelFile = resolvePath(modelPath, "model.onnx");
-            Path tokenizerFile = resolvePath(tokenizerPath, "tokenizer.json");
-
-            if (modelFile == null || !Files.exists(modelFile)) {
-                log.error("ONNX模型文件不存在: {}，请先下载模型文件", modelPath);
-                return;
-            }
-            if (tokenizerFile == null || !Files.exists(tokenizerFile)) {
-                log.error("Tokenizer文件不存在: {}，请先下载tokenizer文件", tokenizerPath);
-                return;
-            }
-
-            synchronized (initLock) {
-                if (!initialized) {
-                    log.info("正在加载Cross-Encoder ONNX模型: {}", modelFile);
-                    long startTime = System.currentTimeMillis();
-
-                    scoringModel = new OnnxScoringModel(modelFile.toString(), tokenizerFile.toString());
-
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    initialized = true;
-                    log.info("Cross-Encoder ONNX模型加载完成，耗时: {}ms", elapsed);
-                }
-            }
-        } catch (Exception e) {
-            log.error("Cross-Encoder ONNX模型加载失败，重排序功能将不可用: {}", e.getMessage(), e);
+        if (isBlank(cfg.getBaseUrl()) || isBlank(cfg.getApiKey()) || isBlank(cfg.getModel())) {
+            log.warn("Rerank API 配置不完整（base-url/api-key/model 缺一不可），重排序不可用，检索将按其已有分数排序");
+            return;
         }
-    }
-
-    private Path resolvePath(String path, String defaultFileName) throws IOException {
-        if (path == null || path.isBlank()) {
-            return null;
-        }
-
-        if (path.startsWith("classpath:")) {
-            DefaultResourceLoader resourceLoader = new DefaultResourceLoader();
-            Resource resource = resourceLoader.getResource(path);
-            if (!resource.exists()) {
-                log.error("classpath资源不存在: {}", path);
-                return null;
-            }
-            Path tempFile = Files.createTempFile("reranker_", "_" + defaultFileName);
-            try (InputStream is = resource.getInputStream()) {
-                Files.copy(is, tempFile, StandardCopyOption.REPLACE_EXISTING);
-            }
-            tempFile.toFile().deleteOnExit();
-            log.debug("classpath资源已复制到临时文件: {} → {}", path, tempFile);
-            return tempFile;
-        }
-
-        return Paths.get(path);
+        scoringModel = new SiliconFlowScoringModel(cfg);
+        initialized = true;
+        log.info("已启用 Rerank API 重排序: model={}, batch-size={}, base-url={}",
+                cfg.getModel(), cfg.getBatchSize(), cfg.getBaseUrl());
     }
 
     @PreDestroy
     public void destroy() {
         if (scoringModel != null) {
-            synchronized (initLock) {
-                scoringModel = null;
-                initialized = false;
-                log.info("Cross-Encoder ONNX模型资源已释放");
-            }
+            scoringModel = null;
+            initialized = false;
+            log.info("Rerank API 重排序资源已释放");
         }
     }
 
@@ -129,7 +69,7 @@ public class Reranker {
         //稳定兜底：模型不可用 / 出现异常时，统一按候选已有分数稳定降序后截断
         //——保证不同 topK 下前几名一致（不依赖 topK 走不同排序路径）
         if (!isAvailable()) {
-            log.warn("Cross-Encoder模型不可用，返回稳定排序后的前{}条结果", topK);
+            log.warn("Rerank 模型不可用，返回稳定排序后的前{}条结果", topK);
             return stableLimit(candidates, topK);
         }
 
@@ -138,9 +78,9 @@ public class Reranker {
     }
 
     /**
-     * 对全部候选统一 Cross-Encoder 打分，返回带分结果（不排序、不截断）。
+     * 对全部候选统一重排序打分，返回带分结果（不排序、不截断）。
      * 供调用方在父块去重后再做 limit(topK)，避免 topK 截断发生在父块去重之前
-     * 破坏不同 topK 下的前缀子集关系。
+     * 破坏不同 topK 下的前缀子集关系。分数为 API relevance_score（[0,1]）。
      */
     public List<ScoredResult> scoreAll(String query, List<VectorSearchResult> candidates) {
         if (candidates == null || candidates.isEmpty()) {
@@ -153,9 +93,9 @@ public class Reranker {
                     .collect(Collectors.toList());
         }
         try {
-            log.debug("开始ONNX Cross-Encoder打分，查询: {}, 候选数: {}", truncateText(query, 60), candidates.size());
+            log.debug("开始 Rerank API 打分，查询: {}, 候选数: {}", truncateText(query, 60), candidates.size());
 
-            int batchSize = ragProperties.getReranker().getBatchSize();
+            int batchSize = ragProperties.getApi().getReranker().getBatchSize();
             List<ScoredResult> scoredResults = new ArrayList<>(candidates.size());
 
             for (int i = 0; i < candidates.size(); i += batchSize) {
@@ -176,7 +116,7 @@ public class Reranker {
             }
             return scoredResults;
         } catch (Exception e) {
-            log.error("ONNX Cross-Encoder打分失败，退化为候选已有分数: {}", e.getMessage(), e);
+            log.error("Rerank API 打分失败，退化为候选已有分数: {}", e.getMessage(), e);
             return candidates.stream()
                     .map(c -> new ScoredResult(c, c.score() != null ? c.score() : 0.0))
                     .collect(Collectors.toList());
@@ -184,7 +124,7 @@ public class Reranker {
     }
 
     /**
-     * 对已打分结果按 Cross-Encoder 分数降序、同分按 chunkId 升序稳定排序后截断 topK。
+     * 对已打分结果按重排分数降序、同分按 chunkId 升序稳定排序后截断 topK。
      */
     public List<VectorSearchResult> pickTopK(List<ScoredResult> scored, int topK) {
         if (scored == null || scored.isEmpty()) {
@@ -199,11 +139,12 @@ public class Reranker {
     }
 
     /**
-     * 与 {@link #pickTopK} 相同的稳定排序+截断逻辑，但保留 Cross-Encoder 分数（返回 {@link ScoredResult}）。
-     * <p>供需要对分数做 sigmoid 归一化 / 阈值过滤的调用方使用——
-     * {@link #pickTopK} 在 {@code .map(ScoredResult::result)} 时丢弃了 Cross-Encoder 分，
-     * 而 {@link VectorSearchResult#score()} 对未做父块展开的结果是原始向量相似度，并非 Cross-Encoder 分，
-     * 二者语义不一致，故归一化/阈值过滤必须基于此处保留的 {@link ScoredResult#score()}。
+     * 与 {@link #pickTopK} 相同的稳定排序+截断逻辑，但保留重排分数（返回 {@link ScoredResult}）。
+     * <p>供需要对分数做阈值过滤的调用方使用——
+     * {@link #pickTopK} 在 {@code .map(ScoredResult::result)} 时丢弃了重排分，
+     * 而 {@link VectorSearchResult#score()} 对未做父块展开的结果是原始向量相似度，并非重排分，
+     * 二者语义不一致，故阈值过滤必须基于此处保留的 {@link ScoredResult#score()}。
+     * 分数为 API relevance_score（[0,1]），上层直接与 threshold 比较，无需 sigmoid。
      */
     public List<ScoredResult> pickTopKScored(List<ScoredResult> scored, int topK) {
         if (scored == null || scored.isEmpty()) {
@@ -237,6 +178,10 @@ public class Reranker {
             return "";
         }
         return text.length() <= maxChars ? text : text.substring(0, maxChars) + "...";
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     public record ScoredResult(VectorSearchResult result, double score) {

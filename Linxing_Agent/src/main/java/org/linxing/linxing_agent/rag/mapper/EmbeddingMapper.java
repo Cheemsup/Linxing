@@ -9,7 +9,11 @@ import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
 @Mapper
 public interface EmbeddingMapper {
 
-    int batchInsertEmbeddings(@Param("list") List<FullEmbeddingRecord> list);
+    /**
+     * 批量写入向量记录。
+     * @param dimension embedding 输出维度（rag.vector-store.dimension），用于 INSERT cast ::vector(${dimension})
+     */
+    int batchInsertEmbeddings(@Param("list") List<FullEmbeddingRecord> list, @Param("dimension") int dimension);
 
     List<VectorSearchResult> vectorSearch(
             @Param("userId") Integer userId,

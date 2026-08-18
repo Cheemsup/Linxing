@@ -31,9 +31,9 @@ Agent 驱动的个人学习平台。基于自研 ReAct Agent 主循环与多 Age
 | Spring Boot 4.0.5 / JDK 17 | 后端框架 |
 | langchain4j 1.13.0 | RAG 框架 |
 | langchain4j-agentic | 多 Agent 工作流编排 |
-| langchain4j-embeddings-bge-small-zh-v15 | 本地嵌入模型（512 维） |
+| langchain4j-embeddings-bge-small-zh-v15 | 本地嵌入模型（已停用，改调硅基流动 API bge-m3，1024 维） |
 | langchain4j-pgvector 0.1.6 | 向量存储 |
-| langchain4j-onnx-scoring + onnxruntime 1.20.0 | Cross-encoder 重排序（ms-marco-MiniLM-L-6-v2） |
+| langchain4j-onnx-scoring + onnxruntime 1.20.0 | 已停用的本地 Cross-encoder 重排序（改调硅基流动 API rerank） |
 | langchain4j-web-search-engine-tavily | 联网搜索 |
 | MyBatis 4.0.0 + Druid 1.2.28 | ORM 与连接池（专用 Spring Boot 4 starter） |
 | PostgreSQL + pgvector | 主库与向量库 |
@@ -153,7 +153,7 @@ Python 服务需**先于后端启动**（后端文档入库依赖它）。
 ```bash
 cd document_analysis_service
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000   # 或 python app.py
+uvicorn app:app --host 0.0.0.0 --port 18000   # 或 python app.py
 ```
 
 ### 4. 启动后端
@@ -177,8 +177,8 @@ yarn serve     # 或 npm run serve
 |---|---|
 | 前端 | http://localhost:3000 |
 | 后端 API | http://localhost:8080 |
-| Python 解析服务 | http://localhost:8000 |
-| Python 健康检查 | http://localhost:8000/health |
+| Python 解析服务 | http://localhost:18000 |
+| Python 健康检查 | http://localhost:18000/health |
 
 ## 配置说明
 
@@ -215,9 +215,10 @@ yarn serve     # 或 npm run serve
 
 | 配置 | 默认值 | 说明 |
 |---|---|---|
-| `rag.search.score-threshold` | 0.35 | Cross-Encoder sigmoid 归一化后相关性阈值，0 关闭 |
-| `rag.reranker.enabled` | true | 是否启用 ONNX 重排序 |
-| `rag.reranker.batch-size` | 8 | 重排序批大小 |
+| `rag.search.score-threshold` | 0.35 | Rerank API relevance_score（[0,1]）相关性阈值，0 关闭 |
+| `rag.api.embedding.*` | 关闭 | 硅基流动向量化 API（enabled/base-url/api-key/model/timeout-seconds/max-retries，默认 bge-m3） |
+| `rag.api.reranker.*` | 关闭 | 硅基流动 Rerank API（enabled/base-url/api-key/model/batch-size/timeout-seconds/max-retries，默认 bge-reranker-v2-m3） |
+| `rag.vector-store.dimension` | 1024 | embedding 输出维度（必须与模型一致；旧库 512 维需执行 `migrations/20260817_embedding_dim_1024.sql` 迁移） |
 | `rag.cache.mirror-ttl` | 43200 | Runtime Mirror TTL（秒，12h） |
 | `rag.cache.chat-response-ttl` | 2100 | 幂等缓存 TTL（秒，35min，略大于 SSE 超时） |
 | `rag.cache.doc-preview-ttl` | 3600 | 文档预览缓存 TTL（秒） |
@@ -230,7 +231,7 @@ yarn serve     # 或 npm run serve
 
 | 配置 | 默认值 | 说明 |
 |---|---|---|
-| `rag.python-service.url` | http://localhost:8000 | Python 解析服务地址 |
+| `rag.python-service.url` | http://localhost:18000 | Python 解析服务地址 |
 | `rag.python-service.timeout-seconds` | 120 | 调用超时 |
 | `rag.python-service.image-store-dir` | ${RAG_STORE_PATH}/chunk_images | 图片落盘目录 |
 

@@ -142,7 +142,7 @@ public class RagSearchTool implements Tool {
 
     /**
      * 核心搜索逻辑，两个入口共用。
-     * <p>检索结果经 Cross-Encoder sigmoid 归一化 + 阈值过滤后，若为空（无高相关命中），
+     * <p>检索结果经 Rerank API relevance_score（[0,1]）阈值过滤后，若为空（无高相关命中），
      * 返回降级提示文本而非空 JSON 数组，避免 LLM 误判为工具故障而反复重试。
      */
     private String doSearch(Integer userId, String query, int topK) throws Exception {

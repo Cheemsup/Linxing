@@ -10,6 +10,8 @@ import org.linxing.linxing_agent.user.exception.AccountDisabledException;
 import org.linxing.linxing_agent.user.exception.AccountNotFoundException;
 import org.linxing.linxing_agent.user.exception.PasswordIncorrectException;
 import org.linxing.linxing_agent.user.exception.UsernameDuplicateException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -96,10 +98,31 @@ public class GlobalExceptionHandler {
         return Result.error(ex.getMessage());
     }
 
+    /**
+     * 数据库访问异常（含 PostgreSQL 25P02 事务中止、约束冲突、连接中断等）。
+     * 原始 SQL 报错文本不应直接暴露给前端（泄露 SQL 细节/内部结构），统一降级为安全消息；
+     * 完整异常堆栈保留在服务端日志用于排查。
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public Result<Void> handleDataAccess(DataAccessException ex) {
+        log.error("数据库访问异常: {}", ex.getMessage(), ex);
+        return Result.error("数据处理失败，请稍后重试");
+    }
+
+    /**
+     * 事务边界异常：@Transactional 方法在提交/回滚阶段失败（如被中止事务上继续执行 SQL 触发的 25P02）。
+     * 与 DataAccessException 分开处理，便于按异常类型区分日志；同样不向前端泄露原始消息。
+     */
+    @ExceptionHandler(TransactionSystemException.class)
+    public Result<Void> handleTransactionSystem(TransactionSystemException ex) {
+        log.error("事务处理异常: {}", ex.getMessage(), ex);
+        return Result.error("事务处理失败，请稍后重试");
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public Result<Void> handleRuntimeException(RuntimeException ex) {
         log.error("运行时异常: {}", ex.getMessage(), ex);
-        return Result.error("系统处理请求时出现错误: " + ex.getMessage());
+        return Result.error("系统处理请求时出现错误，请稍后重试");
     }
 
     @ExceptionHandler(Exception.class)

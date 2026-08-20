@@ -36,6 +36,7 @@ from parsers._common import (
     IMAGE_ESTIMATED_CHARS,
     cap_text_nodes,
     compute_hash,
+    make_image_seq,
     should_flush_under_elastic,
 )
 
@@ -92,16 +93,13 @@ class MarkdownParser:
     def __init__(
         self,
         image_store_dir: str,
-        image_url_prefix: str = "/chunk_images",
         chunk_threshold: int = CHUNK_THRESHOLD,
     ):
         """
-        :param image_store_dir: 图片存储根目录（与 docx/pdf 一致，落盘到 {dir}/{userId}/{docId}/）
-        :param image_url_prefix: 图片 URL 前缀（与 docx/pdf 一致）
+        :param image_store_dir: 图片存储根目录（与 docx/pdf 一致，落盘到 {dir}/{userId}/documents/{docId}/images/）
         :param chunk_threshold: 拆分阈值（默认 1000）
         """
         self.image_store_dir = Path(image_store_dir)
-        self.image_url_prefix = image_url_prefix.rstrip("/")
         self.threshold = chunk_threshold
         if mistune is None:
             logger.warning(
@@ -144,7 +142,7 @@ class MarkdownParser:
             return []
 
         # 图片输出目录（与 docx/pdf 一致，按 userId/documentId 隔离）
-        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir = self.image_store_dir / str(user_id) / "documents" / str(document_id) / "images"
         image_output_dir.mkdir(parents=True, exist_ok=True)
 
         # 核心解析流程
@@ -183,6 +181,7 @@ class MarkdownParser:
             "image_output_dir": image_output_dir,
             "user_id": user_id,
             "document_id": document_id,
+            "img_seq": make_image_seq(),
         }
 
         # 1. 检查是否有标题
@@ -820,6 +819,7 @@ class MarkdownParser:
         image_output_dir: Path = img_ctx["image_output_dir"]
         user_id = img_ctx["user_id"]
         document_id = img_ctx["document_id"]
+        img_seq = img_ctx["img_seq"]
 
         # 解析本地路径（支持相对/绝对，去除 URL query/fragment）
         clean_url = url.split("?")[0].split("#")[0]
@@ -844,7 +844,7 @@ class MarkdownParser:
             ext = "png"
 
         node_id = next(node_seq)
-        img_filename = f"img_{node_id[1:]}.{ext}"
+        img_filename = f"p001_{next(img_seq):03d}.{ext}"
         img_path = image_output_dir / img_filename
         try:
             with open(img_path, "wb") as f:
@@ -854,7 +854,7 @@ class MarkdownParser:
             return
 
         relative_url = (
-            f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+            f"{user_id}/documents/{document_id}/images/{img_filename}"
         )
         img_hash = compute_hash(image_bytes)
 

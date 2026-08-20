@@ -22,6 +22,7 @@ import org.linxing.linxing_agent.rag.dto.SearchResult;
 import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
 import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
+import org.linxing.linxing_agent.rag.storage.ImagePathSigner;
 import org.linxing.linxing_agent.rag.utils.Reranker;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -76,8 +77,10 @@ class SearchServiceImplTest {
         // 未 init（@PostConstruct 仅 Spring 触发）：scoringModel=null → scoreAll 退化按候选已有分数包装
         Reranker reranker = new Reranker(ragProperties);
 
+        ImagePathSigner signer = new ImagePathSigner(ragProperties);
+
         searchService = new SearchServiceImpl(
-                embeddingModel, embeddingMapper, chunkMapper, ragProperties, reranker, agentObservability);
+                embeddingModel, embeddingMapper, chunkMapper, ragProperties, reranker, agentObservability, signer);
     }
 
     @Test

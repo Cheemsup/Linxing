@@ -32,7 +32,7 @@ class SemanticContextTest {
                 textNode("n0", "开头文本"),
                 textNode("n1", "前前文本"),
                 textNode("n2", "前一个文本"),
-                imageNode("n3", "/chunk_images/1/1/img_001.png"),
+                imageNode("n3", "1/documents/1/images/p001_01.png"),
                 textNode("n4", "后一个文本"),
                 textNode("n5", "后后文本"),
                 textNode("n6", "结尾文本")
@@ -59,7 +59,7 @@ class SemanticContextTest {
         SemanticContextBuilder builder = new SemanticContextBuilder(properties);
 
         List<DocumentNode> nodes = List.of(
-                imageNode("n0", "/chunk_images/1/1/img_000.png"),
+                imageNode("n0", "1/documents/1/images/p001_01.png"),
                 textNode("n1", "第二段")
         );
 
@@ -82,7 +82,7 @@ class SemanticContextTest {
                 headingNode("h1", "TCP 协议概述", 1),
                 textNode("t1", "TCP 是面向连接的可靠传输协议。")
         );
-        ImageNode target = imageNode("img1", "/chunk_images/1/1/tcp_handshake.png");
+        ImageNode target = imageNode("img1", "1/documents/1/images/p001_03.png");
         List<DocumentNode> next = List.of(
                 textNode("t2", "三次握手建立了全双工通信信道。")
         );
@@ -118,7 +118,7 @@ class SemanticContextTest {
         NeighborNodeRenderer renderer = new NeighborNodeRenderer(ctxConfig);
 
         List<DocumentNode> neighbors = List.of(
-                imageNode("img1", "/chunk_images/1/1/x.png"),
+                imageNode("img1", "1/documents/1/images/p001_02.png"),
                 codeNode("code1", "public static void main(String[] args) { ... }", "java"),
                 tableNode("tbl1", "<table><tr><td>...</td></tr></table>")
         );

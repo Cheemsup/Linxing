@@ -14,6 +14,7 @@ import org.linxing.linxing_agent.rag.entity.DocRecord;
 import org.linxing.linxing_agent.rag.mapper.DocumentMapper;
 import org.linxing.linxing_agent.rag.pipeline.ChunkIngestCoordinator;
 import org.linxing.linxing_agent.rag.service.IDocumentService;
+import org.linxing.linxing_agent.rag.storage.FileStoreLayout;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,8 +25,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -77,13 +80,8 @@ public class DocumentServiceImpl implements IDocumentService {
 
         evictPreviewCache(id);
 
-        try {
-            Path filePath = Paths.get(record.getFilePath());
-            Files.deleteIfExists(filePath);
-            log.info("已删除文件: {}", record.getFilePath());
-        } catch (IOException e) {
-            log.warn("删除物理文件失败: {}, 原因: {}", record.getFilePath(), e.getMessage());
-        }
+        // 删除整个文档物理目录（source + images），避免孤儿文件残留
+        deleteDocDir(userId, id);
 
         return true;
     }
@@ -103,7 +101,18 @@ public class DocumentServiceImpl implements IDocumentService {
         }
 
         String fileType = record.getFileType();
-        Path filePath = Paths.get(record.getFilePath());
+        // file_path 可空：INSERT 时先空插再回填；万一回填前请求预览（如处理失败后），给出明确提示而非 NPE
+        String rawPath = record.getFilePath();
+        if (rawPath == null || rawPath.isBlank()) {
+            return DocumentPreviewVO.builder()
+                    .id(record.getId())
+                    .fileName(record.getFileName())
+                    .fileType(fileType)
+                    .previewType("unsupported")
+                    .textContent("文件尚未就绪或处理失败，暂无法预览")
+                    .build();
+        }
+        Path filePath = Paths.get(rawPath);
 
         DocumentPreviewVO result;
 
@@ -245,6 +254,28 @@ public class DocumentServiceImpl implements IDocumentService {
             stringRedisTemplate.delete(key);
         } catch (Exception e) {
             log.warn("清除文档预览缓存失败, docId={}: {}", docId, e.getMessage());
+        }
+    }
+
+    /** 递归删除 tenants 布局下整份文档目录（含 source 与 images）。失败仅记录日志不阻断删除主流程。 */
+    private void deleteDocDir(Integer userId, Integer docId) {
+        Path dir = FileStoreLayout.docDir(ragProperties.getStorePath(), userId, docId);
+        try {
+            if (Files.exists(dir)) {
+                try (Stream<Path> walk = Files.walk(dir)) {
+                    walk.sorted(Comparator.reverseOrder())
+                            .forEach(p -> {
+                                try {
+                                    Files.deleteIfExists(p);
+                                } catch (IOException e) {
+                                    log.warn("删除物理文件/目录失败: {}, 原因: {}", p, e.getMessage());
+                                }
+                            });
+                }
+                log.info("已清理文档目录: {}", dir);
+            }
+        } catch (IOException e) {
+            log.warn("清理文档目录 {} 失败: {}", dir, e.getMessage());
         }
     }
 }

@@ -8,8 +8,8 @@
 返回 {"documentType": str, "nodes": List[dict]}。
 
 说明：
-- pdf / docx 解析器需要图片存储目录，由本模块从 config 读取 IMAGE_STORE_DIR /
-  IMAGE_URL_PREFIX 后懒加载注入；import config 只读环境变量，不会强制加载
+- pdf / docx 解析器需要图片存储目录，由本模块从 config 读取 IMAGE_STORE_DIR
+  后懒加载注入；import config 只读环境变量，不会强制加载
   fitz/pdfplumber/python-docx，重型依赖仍是首次解析 pdf/docx 时才加载。
 - md / html / code / linebased 解析器无图片需求，全局单例直接派发。
 - xlsx 暂未实现独立 parser，保留占位（warning + 空列表）。
@@ -21,7 +21,6 @@ from typing import Any, Dict
 
 from config import (
     IMAGE_STORE_DIR,
-    IMAGE_URL_PREFIX,
     MINERU_API_KEY,
     MINERU_BASE_URL,
     MINERU_MODEL_VERSION,
@@ -48,15 +47,14 @@ _docx_parser = None
 def _get_markdown_parser():
     """懒加载 Markdown 解析器单例，注入图片存储目录配置。
 
-    markdown 文档自带本地图片资源需落盘（与 docx/pdf 一致），故注入 IMAGE_STORE_DIR /
-    IMAGE_URL_PREFIX；远程 http(s) 图片不下载，仅本地图片处理。
+    markdown 文档自带本地图片资源需落盘（与 docx/pdf 一致），故注入 IMAGE_STORE_DIR；
+    远程 http(s) 图片不下载，仅本地图片处理。
     """
     global _markdown_parser
     if _markdown_parser is None:
         from .markdown_parser import MarkdownParser
         _markdown_parser = MarkdownParser(
             image_store_dir=IMAGE_STORE_DIR,
-            image_url_prefix=IMAGE_URL_PREFIX,
         )
     return _markdown_parser
 
@@ -110,7 +108,6 @@ def _get_pdf_parser():
 
         _pdf_parser = PdfParser(
             image_store_dir=IMAGE_STORE_DIR,
-            image_url_prefix=IMAGE_URL_PREFIX,
             mineru_client=mineru_client,
             mineru_max_size_mb=MINERU_MAX_FILE_MB,
         )
@@ -127,7 +124,6 @@ def _get_docx_parser():
         from .docx_parser import DocxParser
         _docx_parser = DocxParser(
             image_store_dir=IMAGE_STORE_DIR,
-            image_url_prefix=IMAGE_URL_PREFIX,
         )
     return _docx_parser
 

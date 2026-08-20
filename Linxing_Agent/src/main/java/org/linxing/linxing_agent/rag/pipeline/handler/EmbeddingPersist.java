@@ -55,6 +55,14 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
             return true;
         }
 
+        // embedding 模型未配置（rag.api.embedding.enabled=false 或配置不全时 bean 为 null）→ 跳过嵌入生成，
+        // 但依旧返回 true 放行后续流水线，避免把"未配置向量化"误判为处理失败
+        if (embeddingModel == null) {
+            log.warn("EmbeddingModel 未配置，跳过 Chunk {} 嵌入生成", chunk.getId());
+            return true;
+        }
+
+        FullEmbeddingRecord record;
         try {
             String embeddingText = buildEmbeddingText(chunk);
             // 调用嵌入模型将文本转为向量（bge-m3 输出 1024 维）
@@ -64,7 +72,7 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
             //构造向量记录的元数据 JSON
             String metadataJson = buildMetadataJson(chunk, context.getDocument());
 
-            FullEmbeddingRecord record = new FullEmbeddingRecord(
+            record = new FullEmbeddingRecord(
                     null,
                     chunk.getUserId(),
                     chunk.getDocumentId(),
@@ -73,32 +81,51 @@ public class EmbeddingPersist implements ChunkProcessingHandler {
                     embeddingText,
                     metadataJson
             );
-
-            buffer.add(record);
-
-            // 达到批处理阈值时自动刷新，减少数据库 IO 次数
-            if (buffer.size() >= BATCH_SIZE) {
-                flush();
-            }
-
-            log.debug("Chunk {} 嵌入生成完成，向量维度: {}", chunk.getId(), embedding.vector().length);
         } catch (Exception e) {
+            // 仅模型调用（嵌入生成）失败时容忍并放行该 chunk——向量缺失由检索侧兜底，
+            // 不应因单条嵌入失败中止整份文档入库。注意：数据库写入失败不在此吞掉，
+            // 由下方 flush() 抛出并向上传播，否则会重现"吞掉 DB 失败 → PG 事务中止 → 25P02"的问题
             log.error("Chunk {} 嵌入生成失败: {}", chunk.getId(), e.getMessage());
+            return true;
         }
 
+        buffer.add(record);
+
+        // 达到批处理阈值时自动刷新，减少数据库 IO 次数。
+        // flush() 必须放在 try 之外：其 DB 写入失败会抛出 IllegalStateException 并向上传播，
+        // 由流水线/协调器中止本次入库并回滚，绝不能被本 handler 吞掉。
+        if (buffer.size() >= BATCH_SIZE) {
+            flush();
+        }
+
+        log.debug("Chunk {} 嵌入生成完成，向量维度: {}", chunk.getId(), record.embeddingVector().length());
         return true;
     }
 
     // 批量刷新缓冲区中的向量记录到数据库
+    // 必须将数据库写入失败向上传播（不吞掉）：否则失败后 PG 事务已中止，后续 SQL 全部落到 25P02，
+    // 且 buffer 未清空会持有已回滚 chunk 引用，污染下一次 ingest。失败时清空 buffer 以防残留。
     public void flush() {
+        if (buffer.isEmpty()) {
+            return;
+        }
+        try {
+            embeddingMapper.batchInsertEmbeddings(
+                    new ArrayList<>(buffer), ragProperties.getVectorStore().getDimension());
+            log.debug("批量持久化 {} 条向量记录", buffer.size());
+        } catch (Exception e) {
+            log.error("批量持久化向量失败: {}", e.getMessage());
+            throw new IllegalStateException("批量持久化向量失败", e);
+        } finally {
+            // 无论成功与否都清空缓冲区，避免回滚后残留已提交/未提交 chunk 引用
+            buffer.clear();
+        }
+    }
+
+    /** 清空未写入的向量缓冲区。事务失败/回滚后由调用方调用，防止把已回滚 chunk 的向量带入下次 ingest。 */
+    public void clearBuffer() {
         if (!buffer.isEmpty()) {
-            try {
-                embeddingMapper.batchInsertEmbeddings(
-                        new ArrayList<>(buffer), ragProperties.getVectorStore().getDimension());
-                log.debug("批量持久化 {} 条向量记录", buffer.size());
-            } catch (Exception e) {
-                log.error("批量持久化向量失败: {}", e.getMessage());
-            }
+            log.warn("清空未刷新的向量缓冲区（{} 条）", buffer.size());
             buffer.clear();
         }
     }

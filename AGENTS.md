@@ -155,7 +155,7 @@ Trace（一次 chat 请求）
 ## Critical gotchas
 
 ### 前端代理剥离 `/api` 前缀
-`vue.config.js` 重写 `^/api` → `''`。前端调用 `/api/agent/chat`，后端收到 `/agent/chat`。另有 `/chunk_images` 直连代理（不带 `/api` 前缀，对应后端 `WebMvcConfig` 暴露的静态图片资源）。新增接口时匹配后端路径（无 `/api` 前缀）。
+`vue.config.js` 重写 `^/api` → `''`。前端调用 `/api/agent/chat`，后端收到 `/agent/chat`。图片走 `/api/assets/images/**`（前端代理剥离 `/api` 后落到后端 `ImageAccessController`，短时签名鉴权，免 JWT）。新增接口时匹配后端路径（无 `/api` 前缀）。
 
 ### Node 体系是唯一入库路径
 所有文件类型统一走 `IngestServiceImpl` → `DocumentAnalysisFacade.analyze` → `ChunkIngestCoordinator.processDocumentFromNodes`。旧 `ChunkIngestCoordinator.processDocument`（基于 `ChunkStrategyFactory` 按文件类型分派）已 `@Deprecated`，调用直接抛 `UnsupportedOperationException`。`rag/strategy/`（8 个旧策略）与 `rag/render/`（3 个 Renderer）包整体 `@Deprecated` 但未删除，结构识别逻辑已迁移至 Python 侧 parsers。
@@ -179,7 +179,7 @@ JWT 拦截器 `addPathPatterns("/**")`，仅排除 `/user/login` 与 `/user/regi
 `document_analysis_service` 是 Node-Based RAG 的唯一解析入口，通过 `rag.python-service.url` 调用。需先于后端启动：
 - **PDF 主路径走 MinerU 云托管解析**（`parsers/mineru_client.py`，官方 v4 Bearer token，配置 `MINERU_API_KEY` 后启用）：上传→轮询→下载结果 zip，读 `content_list.json` 映射 Node（含 page/bbox/formula/表格 HTML/代码，支持扫描件 OCR）；未配置 key、超 MinerU 上限（200MB/200页）、或云端失败时自动回退本地 PyMuPDF + pdfplumber 兜底（`_parse_legacy`）
 - pdf/docx 单例懒加载并注入图片目录（`IMAGE_STORE_DIR`），避免未用时强制加载 fitz/pdfplumber/python-docx
-- 图片直接保存到 Java 的 `storePath/chunk_images/{userId}/{docId}/`，Java 无需搬运
+- 图片直接保存到 Java 的 `storePath/tenants/{userId}/documents/{docId}/images/`（图片名 `p{page:03d}_{seq:03d}.{ext}`，`imagePath` 即资源键；Java 据同名根目录读取做 VLM 增强/签名访问，无需搬运）
 - 图片预估字数 120 参与含图段落累加 flush 判断（避免一遇图就截断文本聚类）
 - MinerU 云端异步轮询耗时大头在等待，Java 侧 `rag.python-service.timeout-seconds` 默认 600s，Python 侧 `MINERU_TIMEOUT_SECONDS`（默认 480s）须小于该值（云端超时后回退本地留余量）
 - 详见 [document_analysis_service/README.md](document_analysis_service/README.md)

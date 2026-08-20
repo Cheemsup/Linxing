@@ -13,8 +13,7 @@ Linxing 平台的 Vue 前端服务。基于 Vue 3 + Element Plus，为用户提�
 ```
 浏览器 ──▶ webconsole (Vue, 3000/dev)
               │
-              │  /api/**         ──proxy(rewrite ^/api→'')──▶  Linxing_Agent (8080)
-              │  /chunk_images/** ──proxy(无重写)────────────▶  Linxing_Agent (8080)
+              │  /api/**         ──proxy(rewrite ^/api→'')──▶  Linxing_Agent (8080)  含 /api/assets/images/**（签名图片）
               │  /agent/chat     ──fetch SSE 直连─────────────▶  Linxing_Agent (8080)
               ▼
            用户界面
@@ -80,7 +79,7 @@ webconsole/
 │   │   └── agent/              # chat / workflow / ingest / search / document / chunk / exam / studyPlan / memory
 │   └── composables/
 │       └── useMarkdownRenderer.js  # markdown-it 封装（html:false 防 XSS、linkify、breaks、外链 _blank）
-├── vue.config.js               # devServer 代理（/api、/chunk_images）
+├── vue.config.js               # devServer 代理（/api，剥离前缀）
 ├── babel.config.js
 ├── jsconfig.json
 ├── .env.development            # VUE_APP_SSE_BASE_URL=http://localhost:8080
@@ -125,8 +124,7 @@ webconsole/
 
 | 前端发出的路径 | 代理行为 | 后端收到 |
 |---|---|---|
-| `/api/**` | `pathRewrite: {'^/api': ''}` | `/**`（裸路径） |
-| `/chunk_images/**` | 不重写，直接转发 | `/chunk_images/**` |
+| `/api/**` | `pathRewrite: {'^/api': ''}` | `/**`（裸路径，含 `/api/assets/images/**` 签名图片） |
 | `/agent/chat`（SSE） | **不走路由代理**，fetch 直连 `VUE_APP_SSE_BASE_URL` | `/agent/chat` |
 
 > SSE 直连后端是为了绕过 webpack devServer 对代理响应的缓冲。生产环境 `VUE_APP_SSE_BASE_URL` 留空，走 Nginx 反代（需配置 `X-Accel-Buffering: no`）。
@@ -145,7 +143,7 @@ webconsole/
        chatTreeStore 构建消息树（parentId）
           │
           ▼
-       RichChunkText 回填 chunkText 占位符 → 图片走 /chunk_images/**
+       RichChunkText 回填 chunkText 占位符 → 图片走 /api/assets/images/**（签名 URL）
 
 入库:  IngestPanel ──ingestApi.ingestFile──▶ /api/rag/ingest/file (multipart, 300s 超时)
 
@@ -173,8 +171,7 @@ webconsole/
 | 配置 | 值 |
 |---|---|
 | `devServer.port` | 3000 |
-| `/api` 代理目标 | `http://localhost:8080`，`changeOrigin: true`，`pathRewrite: {'^/api': ''}` |
-| `/chunk_images` 代理目标 | `http://localhost:8080`，`changeOrigin: true`（无重写） |
+| `/api` 代理目标 | `http://localhost:8080`，`changeOrigin: true`，`pathRewrite: {'^/api': ''}`（含 `/api/assets/images/**`） |
 
 ### 浏览器持久化键（[src/stores/authStore.js](src/stores/authStore.js) 等）
 
@@ -309,7 +306,7 @@ yarn build           # 输出到 dist/
 
 后端 `chunkText` 用占位符 `[[LINXING:IMAGE:nodeId]]` / `[[LINXING:CODE:...]]` / `[[LINXING:TABLE:...]]` / `[[LINXING:FORMULA:...]]` 表示非文本节点。组件按正则切分 `chunkText`，用 `nodeMetadata`（按 `id` 建 Map）回填：
 
-- `image`：`src = meta.imagePath`，图片实际从后端 `/chunk_images/**` 取（devServer 代理转发）
+- `image`：`src = meta.imagePath`，即后端动态签发的 `/api/assets/images/**?expires&sig` 签名 URL（经 `/api` 代理剥离前缀后落到 `ImageAccessController`）
 - `code` / `table` / `formula`：取 `meta.code` / `meta.html` / `meta.formula`
 - 元信息缺失时保留原占位符作为 fallback
 
@@ -331,7 +328,7 @@ yarn lint           # ESLint（vue3-essential + eslint:recommended）
 
 - SSE 对话不流式：检查 `VUE_APP_SSE_BASE_URL`（开发应指向 `http://localhost:8080`）；生产需确认 Nginx 配置 `X-Accel-Buffering: no`。
 - 请求 401：响应拦截器会自动清 token 跳 `/login`；检查 token 是否过期或后端 `JwtTokenUserInterceptor` 是否放行该路径。
-- 图片 404：`RichChunkText` 取 `meta.imagePath`，经 `/chunk_images/**` 代理到后端；确认后端 `WebMvcConfig` 暴露的物理目录与 Python 解析时落盘路径一致。
+- 图片 404/401：`RichChunkText` 取 `meta.imagePath`（签名 URL），经 `/api` 代理到 `ImageAccessController`；确认后端 `rag.store-path` 的 `tenants/` 根与 Python 侧 `IMAGE_STORE_DIR` 指向同一物理目录、且 `RAG_IMAGE_SIGNING_SECRET` 与签发时一致。
 - 对话树分支异常：`chatTreeStore.getMessageMap` 依赖 `parentId`，确认后端 `/agent/sessions/{id}/messages` 返回的 `parentId` 字段名一致。
 
 ## 常见问题（FAQ）
@@ -343,7 +340,7 @@ A：axios 与 webpack devServer 代理会缓冲响应，无法逐 token 推送�
 A：后端路径无 `/api` 前缀。REST 请求经 `baseURL='/api'` + devServer `pathRewrite` 自动剥离；但 SSE 是 fetch 直连，[chat.js](src/api/agent/chat.js) 里写的是 `/agent/chat`（不带 `/api`），不要在这里加 `/api`。
 
 **Q：图片显示不出来？**
-A：`RichChunkText` 用 `meta.imagePath` 作为 `src`，路径需以 `/chunk_images/` 开头才能命中 devServer 代理。确认后端 `nodeMetadata` 里 `imagePath` 字段格式。
+A：`RichChunkText` 用 `meta.imagePath` 作为 `src`，其应为后端签发的 `/api/assets/images/...?expires&sig` 签名 URL。若为空或非 imageKey，检查节点是否含图、后端 `nodeMetadata.imagePath` 是否落库、以及签名密钥 `RAG_IMAGE_SIGNING_SECRET` 前后端是否一致。
 
 ## 进一步阅读
 

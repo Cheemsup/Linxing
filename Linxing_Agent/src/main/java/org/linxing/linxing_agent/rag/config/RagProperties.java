@@ -23,6 +23,7 @@ public class RagProperties {
     private Cache cache = new Cache();
     private PythonService pythonService = new PythonService();
     private SemanticEnhancement semanticEnhancement = new SemanticEnhancement();
+    private Security security = new Security();
 
     @Data
     public static class Embedding {
@@ -129,10 +130,19 @@ public class RagProperties {
         private int timeoutSeconds = 600;
         /** 是否启用 Python 服务 */
         private boolean enabled = true;
-        /** 图片存储根目录（应与 Python 侧 IMAGE_STORE_DIR 一致，默认使用 storePath 下的 chunk_images） */
-        private String imageStoreDir;
         /** Python 解释器路径（可选，用于指定python运行环境） */
         private String pythonPath;
+    }
+
+    /**
+     * 文件访问安全配置（签名 URL 隔离）。
+     */
+    @Data
+    public static class Security {
+        /** 图片签名 HMAC 密钥（用于签发/校验 /assets/images/** 的短时访问签名）。 */
+        private String imageSignSecret;
+        /** 图片签名有效期（秒），默认 3600；给前端 loading="lazy" 一个足够长的窗口。 */
+        private int imageSignTtl = 3600;
     }
 
     /**

@@ -31,6 +31,10 @@ public class ChunkProcessingPipeline {
                 }
             } catch (Exception e) {
                 log.error("处理器 {} 执行异常: {}", handler.getClass().getSimpleName(), e.getMessage());
+                // 处理器异常（尤其 EmbeddingPersist 的 DB 写入失败）必须向上抛出，中止本次文档入库。
+                // 若在此吞掉，会带着已中止的 PG 事务继续执行后续 SQL → 触发 25P02"当前事务被终止"。
+                throw new RuntimeException(
+                        "处理器 " + handler.getClass().getSimpleName() + " 执行异常", e);
             }
         }
     }

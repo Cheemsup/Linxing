@@ -75,6 +75,10 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateFilePath">
+        UPDATE documents SET file_path = #{filePath} WHERE id = #{id}
+    </update>
+
     <delete id="deleteById">
         DELETE FROM documents WHERE id = #{id}
     </delete>

@@ -12,6 +12,7 @@ import org.linxing.linxing_agent.rag.entity.VectorSearchResult;
 import org.linxing.linxing_agent.rag.mapper.ChunkMapper;
 import org.linxing.linxing_agent.rag.mapper.EmbeddingMapper;
 import org.linxing.linxing_agent.rag.service.ISearchService;
+import org.linxing.linxing_agent.rag.storage.ImagePathSigner;
 import org.linxing.linxing_agent.rag.utils.KeywordExtractor;
 import org.linxing.linxing_agent.rag.utils.ReciprocalRankFusion;
 import org.linxing.linxing_agent.rag.utils.Reranker;
@@ -51,6 +52,7 @@ public class SearchServiceImpl implements ISearchService {
     private final RagProperties ragProperties;
     private final Reranker reranker;
     private final AgentObservability agentObservability;
+    private final ImagePathSigner imagePathSigner;
 
     @Override
     public List<SearchResult> search(Integer userId, String query, int topK, boolean hybrid) {
@@ -165,7 +167,7 @@ public class SearchServiceImpl implements ISearchService {
                                 .titlePath(r.titlePath())
                                 .chunkType(r.chunkType())
                                 .chunkText(r.chunkText())
-                                .nodeMetadata(parseNodeMetadata(r.nodeMetadata()))
+                                .nodeMetadata(signNodeMetadata(parseNodeMetadata(r.nodeMetadata())))
                                 //对外暴露 relevance_score（Rerank API 已归一化到 [0,1]）
                                 .score(sr.score())
                                 .build();
@@ -249,9 +251,21 @@ public class SearchServiceImpl implements ISearchService {
                 .titlePath(r.getTitlePath())
                 .chunkType(r.getChunkType())
                 .chunkText(r.getChunkText())
-                .nodeMetadata(r.getNodeMetadata())
+                .nodeMetadata(signNodeMetadata(r.getNodeMetadata()))
                 .score(Math.round(r.getScore() * 10000.0) / 10000.0)
                 .build();
+    }
+
+    /**
+     * 对外暴露 nodeMetadata 前，把其中的 imagePath（imageKey）替换为短时签名 URL。
+     * 入参 List 为按需解析的新对象，直接就地修改不影响 DB 与复用缓存。
+     */
+    private List<Map<String, Object>> signNodeMetadata(List<Map<String, Object>> nodeMetadata) {
+        if (nodeMetadata == null || nodeMetadata.isEmpty()) {
+            return nodeMetadata;
+        }
+        imagePathSigner.signMetadataImages(nodeMetadata, System.currentTimeMillis());
+        return nodeMetadata;
     }
 
     /**

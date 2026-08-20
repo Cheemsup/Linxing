@@ -35,7 +35,7 @@ document_analysis_service (18000)
 - **titlePath 标题路径**：跨块维护标题栈，每个 Node 都带 `titlePath`（如 "第一章 > 第一节"），保留文档层级
 - **超长块内部拆分 + groupId**：超长文本/段落按句子拆为多个小 Node，共享同一 `groupId` 标识同源整块，由 Java 侧据 `groupId` 合成父子 Chunk
 - **图片预估字数参与 flush**：图片本身无文本，但以 `IMAGE_ESTIMATED_CHARS=120`（VLM 增强后产出描述的中位数预估）计入前后文本累加的 flush 判断，避免"一遇到图片就无条件截断文本聚类"导致长文本+图被跨 chunk 切开
-- **图片落盘**：PDF/DOCX/Markdown 中的图片提取并保存到 `IMAGE_STORE_DIR/{userId}/{documentId}/`，返回相对 URL（`/chunk_images/{userId}/{documentId}/img_n1.png`）
+- **图片落盘**：PDF/DOCX/Markdown 中的图片提取并保存到 `IMAGE_STORE_DIR/{userId}/documents/{documentId}/images/`，图片文件名 `p{page:03d}_{seq:03d}.{ext}`（页码+页内顺序补零，直观可辨、稳定不漂移）；`imagePath` 即资源键（imageKey）`{userId}/documents/{documentId}/images/p001_01.png`，Java 侧据此拼物理路径与生成前端签名访问 URL
 - **健康检查**：`GET /health`
 
 ## 技术栈（Tech Stack）
@@ -58,7 +58,7 @@ document_analysis_service (18000)
 ```
 document_analysis_service/
 ├── app.py                 # FastAPI 入口：/parse、/health、临时文件管理
-├── config.py              # 环境变量配置（HOST/PORT/IMAGE_STORE_DIR/IMAGE_URL_PREFIX/LOG_LEVEL/MINERU_*）
+├── config.py              # 环境变量配置（HOST/PORT/IMAGE_STORE_DIR/LOG_LEVEL/MINERU_*）
 ├── requirements.txt       # 依赖清单
 ├── __init__.py            # 包说明
 └── parsers/
@@ -113,10 +113,11 @@ document_analysis_service/
 
 ### 图片落盘契约
 
-- 本服务把图片直接保存到 Java 配置的存储目录：`{IMAGE_STORE_DIR}/{userId}/{documentId}/img_{nodeId}.{ext}`
-- 返回的 `imagePath` 是相对 URL：`/chunk_images/{userId}/{documentId}/img_{nodeId}.{ext}`
-- Java 侧 `WebMvcConfig` 把 `/chunk_images/**` 暴露为静态资源（物理目录优先 `rag.python-service.image-store-dir`，回退 `rag.store-path/chunk_images`），并在 JWT 拦截器中放行该前缀
-- 因此本服务的 `IMAGE_STORE_DIR` 必须与 Java 侧 `rag.store-path` 下的 `chunk_images` 指向同一物理目录，否则前端无法访问图片
+- 本服务把图片直接保存到 Java 配置的存储目录：`{IMAGE_STORE_DIR}/{userId}/documents/{documentId}/images/p{page:03d}_{seq:03d}.{ext}`
+- 返回的 `imagePath` 即资源键（imageKey）：`{userId}/documents/{documentId}/images/p001_01.png`
+- Java 侧把 imageKey 落库（DB `nodeMetadata.imagePath` 存键，不过期）；对外响应时经 `ImagePathSigner` 动态签发短时签名 URL（`/api/assets/images/{imageKey}?expires=..&sig=..`）供前端 `<img>` 加载
+- Java 侧 `ImageAccessController`（`/assets/images/**`）校验签名后从 `{store-path}/tenants/` + imageKey 读取并返回，JWT 拦截器放行该前缀。语义增强由 Java 直读物理路径，不经此通道
+- 因此本服务的 `IMAGE_STORE_DIR` 必须与 Java 侧 `rag.store-path`（多租户 `tenants/` 根）指向同一物理目录，否则图片无法读取
 
 ### 数据流转
 
@@ -151,7 +152,7 @@ sequenceDiagram
 ### 环境要求
 
 - Python 3.10+
-- `IMAGE_STORE_DIR` 指向的目录可写（与 Java 侧 `rag.store-path/chunk_images` 同物理目录）
+- `IMAGE_STORE_DIR` 指向的目录可写（与 Java 侧 `rag.store-path` 下多租户 `tenants/` 根同物理目录）
 - （可选，启用 MinerU 云解析）MinerU API key，见下
 
 ### 安装依赖
@@ -208,7 +209,7 @@ python app.py
   "documentType": "pdf",
   "nodes": [
     {"id": "n1", "type": "heading", "text": "...", "level": 1, "titlePath": "...", "page": 1, "bbox": [...]},
-    {"id": "n2", "type": "image", "imagePath": "/chunk_images/.../img_n2.png", "hash": "...", "page": 1, "bbox": [...]},
+    {"id": "n2", "type": "image", "imagePath": "1/documents/12/images/p001_01.png", "hash": "...", "page": 1, "bbox": [...]},
     {"id": "n3", "type": "text", "text": "...", "groupId": null, "titlePath": "...", "page": 1, "bbox": null},
     {"id": "n4", "type": "table", "html": "<table>...</table>", "rowCount": 3, "colCount": 2, "titlePath": "...", "page": 1},
     {"id": "n5", "type": "code", "text": "...", "language": "java", "titlePath": "..."}

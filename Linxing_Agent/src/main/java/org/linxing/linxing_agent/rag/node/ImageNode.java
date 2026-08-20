@@ -20,7 +20,7 @@ import java.util.Map;
 @Builder
 public class ImageNode implements DocumentNode {
 
-    /** 图片存储路径（相对路径，如 /chunk_images/1/101/img_001.png） */
+    /** 图片资源键（imageKey）：{userId}/documents/{documentId}/images/p001_01.png，用于拼物理路径与生成签名 URL */
     private String imagePath;
 
     /** 图片标题（可选） */

@@ -38,6 +38,9 @@ public interface DocumentMapper {
 
     int update(DocRecord docRecord);
 
+    /** 更新文档物理路径（入库插入后再落盘 source 文件，回填 filePath）。 */
+    int updateFilePath(@Param("id") Integer id, @Param("filePath") String filePath);
+
     int deleteById(@Param("id") Integer id);
 
     int deleteByUserId(@Param("userId") Integer userId);

@@ -14,14 +14,14 @@ HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
 PORT = int(os.getenv("SERVICE_PORT", "18000"))
 
 # 图片存储配置
-# 对应 Java 侧 rag.store-path 下的 chunk_images 目录
-# 默认值仅用于本地测试，生产环境应通过环境变量配置
-# 默认与 Java 侧 rag.store-path保持一致
+# 对应 Java 侧 rag.store-path 下的 tenants 目录（多租户命名空间根，按 {userId}/documents/{docId}/images 隔离）。
+# 默认值仅用于本地测试，生产环境应通过环境变量配置。
+# imagePath 契约（与 Java 侧一致）：{userId}/documents/{documentId}/images/p{page:03d}_{seq:03d}.{ext}
+# 该字符串既是资源键（imageKey），Java 侧据此拼物理路径，也用于生成前端签名访问 URL。
 IMAGE_STORE_DIR = os.getenv(
     "IMAGE_STORE_DIR",
-    "D:/JavaProjects/Linxing/files_store/chunk_images",
+    "D:/JavaProjects/Linxing/files_store/tenants",
 )
-IMAGE_URL_PREFIX = os.getenv("IMAGE_URL_PREFIX", "/chunk_images")
 
 # 日志级别
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -32,8 +32,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 #   PUT  <file_urls[0]>                    上传裸字节（自动提交解析）
 #   GET  /api/v4/extract-results/batch/{id} 轮询结果（done 后得 full_zip_url）
 # 结果 zip 内含 full.md / images/ / *_content_list.json / *_middle.json。
-# 未配置 API key 时 PDF 走本地 PyMuPDF 兜底（见 parsers/pdf_parser.py）。
-MINERU_API_KEY = os.getenv("MINERU_API_KEY", "")
+# 未配置 API key 时 PDF 走本地 PyMuPDF 兜底
+MINERU_API_KEY = os.getenv("MINERU_API_KEY", "sk-7L1d30VQhlZ8lnukSRLQ0lQtrzBPQtAR08JZvNQAipk7ZXMH")
 # 正确 host 是 mineru.net（api.mineru.net 解析不可达，已实测）
 MINERU_BASE_URL = os.getenv("MINERU_BASE_URL", "https://mineru.net")
 # 模型版本：文档用 vlm；HTML 用 MinerU-HTML

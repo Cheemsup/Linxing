@@ -23,6 +23,18 @@ def make_node_seq():
         yield f"n{i}"
 
 
+def make_image_seq():
+    """
+    自管递增图片序号生成器：1, 2, 3, ...
+    供各解析器生成稳定的图片文件名（p{page:03d}_{seq:03d}.{ext}），
+    替代旧实现按 node id 取名（顺序漂移、难以辨识）。
+    """
+    i = 0
+    while True:
+        i += 1
+        yield i
+
+
 def build_title_path(title_stack: Iterable[Tuple[int, str]]) -> Optional[str]:
     """
     根据标题栈构建 titlePath（"一级 > 二级"），栈空返回 None。

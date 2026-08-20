@@ -121,8 +121,12 @@ rag:
     url: ${PYTHON_SERVICE_URL:http://localhost:18000}
     timeout-seconds: ${PYTHON_SERVICE_TIMEOUT:600}
     enabled: ${PYTHON_SERVICE_ENABLED:true}
-    image-store-dir: ${RAG_STORE_PATH}/chunk_images
     python-path: ${PYTHON_PATH:}
+  security:
+    # 图片签名 URL（/assets/images/**）的 HMAC 密钥；生产必须改为环境变量注入
+    image-sign-secret: ${RAG_IMAGE_SIGNING_SECRET:local-placeholder-change-me}
+    # 图片签名有效期（秒），默认 3600；给前端 loading="lazy" 足够窗口
+    image-sign-ttl: ${RAG_IMAGE_SIGNING_TTL:3600}
   semantic-enhancement:
     context:
       previous-nodes: ${RAG_SEMANTIC_PREV_NODES:2}

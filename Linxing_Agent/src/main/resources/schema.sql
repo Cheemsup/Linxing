@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS documents (
     id              SERIAL PRIMARY KEY,
     user_id         INT NOT NULL,
     file_name       VARCHAR(255) NOT NULL,
-    file_path       VARCHAR(500) NOT NULL,
+    file_path       VARCHAR(500),
     file_size       BIGINT DEFAULT 0,
     file_type       VARCHAR(50) DEFAULT '',
     status          VARCHAR(20) DEFAULT 'processing' CHECK (status IN ('processing', 'completed', 'failed')),

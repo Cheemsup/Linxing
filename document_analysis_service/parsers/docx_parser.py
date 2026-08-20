@@ -37,6 +37,7 @@ from ._common import (
     compute_hash,
     detect_code_language,
     guess_image_ext,
+    make_image_seq,
     make_node_seq,
     should_flush_under_elastic,
     table_to_html,
@@ -84,11 +85,9 @@ class DocxParser:
     def __init__(
         self,
         image_store_dir: str,
-        image_url_prefix: str = "/chunk_images",
         chunk_threshold: int = CHUNK_THRESHOLD,
     ):
         self.image_store_dir = Path(image_store_dir)
-        self.image_url_prefix = image_url_prefix.rstrip("/")
         self.threshold = chunk_threshold
         logger.info("DocxParser 初始化完成，图片存储目录: %s, 阈值: %d", self.image_store_dir, self.threshold)
 
@@ -111,12 +110,13 @@ class DocxParser:
         file_path = Path(file_path)
         logger.info("DocxParser 开始解析: %s", file_path)
 
-        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir = self.image_store_dir / str(user_id) / "documents" / str(document_id) / "images"
         image_output_dir.mkdir(parents=True, exist_ok=True)
 
         doc = Document(str(file_path))
         nodes: List[dict] = []
         node_seq = make_node_seq()
+        img_seq = make_image_seq()
 
         # 标题栈：[(level, title)]，跨段维护层级
         title_stack: List[Tuple[int, str]] = []
@@ -183,7 +183,7 @@ class DocxParser:
                     continue
                 self._handle_paragraph(
                     paragraph, element, doc, image_output_dir,
-                    user_id, document_id, node_seq, title_stack, nodes,
+                    user_id, document_id, node_seq, img_seq, title_stack, nodes,
                     cluster, flush_cluster, consecutive_blank,
                 )
             elif tag == qn("w:tbl"):
@@ -217,6 +217,7 @@ class DocxParser:
         user_id: int,
         document_id: int,
         node_seq,
+        img_seq,
         title_stack: List[Tuple[int, str]],
         nodes: List[dict],
         cluster: dict,
@@ -239,7 +240,7 @@ class DocxParser:
             flush_cluster()
         self._extract_inline_images(
             element, doc, image_output_dir,
-            user_id, document_id, node_seq, title_stack, nodes,
+            user_id, document_id, node_seq, img_seq, title_stack, nodes,
         )
 
         if not text:
@@ -331,6 +332,7 @@ class DocxParser:
         user_id: int,
         document_id: int,
         node_seq,
+        img_seq,
         title_stack: List[Tuple[int, str]],
         nodes: List[dict],
     ) -> None:
@@ -350,13 +352,13 @@ class DocxParser:
                 ext = guess_image_ext(image_part.content_type)
 
                 node_id = next(node_seq)
-                img_filename = f"img_{node_id[1:]}.{ext}"
+                img_filename = f"p001_{next(img_seq):03d}.{ext}"
                 img_path = image_output_dir / img_filename
                 with open(img_path, "wb") as f:
                     f.write(image_bytes)
 
                 relative_url = (
-                    f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+                    f"{user_id}/documents/{document_id}/images/{img_filename}"
                 )
                 img_hash = compute_hash(image_bytes)
 

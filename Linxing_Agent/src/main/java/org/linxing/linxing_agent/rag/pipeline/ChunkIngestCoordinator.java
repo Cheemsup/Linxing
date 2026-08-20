@@ -17,7 +17,6 @@ import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.chunk.NodeBasedChunkBuilder;
 import org.linxing.linxing_agent.rag.node.NodeType;
 import org.linxing.linxing_agent.rag.pipeline.handler.EmbeddingPersist;
-import org.linxing.linxing_agent.rag.enhancement.SemanticEnhancementService;
 import org.linxing.linxing_agent.rag.entity.ChunkResult;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +45,6 @@ public class ChunkIngestCoordinator {
     private final ActivityLogMapper activityLogMapper;
     private final RagProperties ragProperties;
     private final NodeBasedChunkBuilder nodeBasedChunkBuilder;
-    private final SemanticEnhancementService semanticEnhancementService;
 
     public ChunkIngestCoordinator(
             ChunkProcessingPipeline pipeline,
@@ -56,8 +54,7 @@ public class ChunkIngestCoordinator {
             DocumentMapper documentMapper,
             ActivityLogMapper activityLogMapper,
             RagProperties ragProperties,
-            NodeBasedChunkBuilder nodeBasedChunkBuilder,
-            SemanticEnhancementService semanticEnhancementService) {
+            NodeBasedChunkBuilder nodeBasedChunkBuilder) {
         this.pipeline = pipeline;
         this.embeddingPersist = embeddingPersist;
         this.chunkMapper = chunkMapper;
@@ -66,7 +63,6 @@ public class ChunkIngestCoordinator {
         this.activityLogMapper = activityLogMapper;
         this.ragProperties = ragProperties;
         this.nodeBasedChunkBuilder = nodeBasedChunkBuilder;
-        this.semanticEnhancementService = semanticEnhancementService;
     }
 
     /**
@@ -74,11 +70,14 @@ public class ChunkIngestCoordinator {
      * 用于调用 Python 文档解析服务后，将生成的 Node 序列转换为 Chunk。
      *
      * 流程：
-     * 1. 语义增强（VLM/LLM）填充 Node.semanticText
-     * 2. 使用 NodeBasedChunkBuilder 将 Node 序列切分为 ChunkResult（含父子装配）
-     * 3. 按 parentChunkId 构建层级关系：先插入所有 Level1 父块，再插入 Level2 子块并解析 parentChunkId→DB id
-     * 4. 执行责任链后处理（标题提取、tsContent、向量化等）
-     * 5. 持久化到数据库
+     * 1. 使用 NodeBasedChunkBuilder 将已作语义增强的 Node 序列切分为 ChunkResult（含父子装配）
+     *    （语义增强 VLM/LLM 调用已移入 ingestFile，本方法仅做数据库操作，事务足够短）
+     * 2. 按 parentChunkId 构建层级关系：先插入所有 Level1 父块，再插入 Level2 子块并解析 parentChunkId→DB id
+     * 3. 执行责任链后处理（标题提取、tsContent、向量化等）
+     * 4. 持久化到数据库
+     *
+     * 整体处于 DB 事务中：任一 SQL / 分块后处理失败（尤其向量批量写入）都会抛出并回滚整个事务，
+     * 同时在 catch 中清空 EmbeddingPersist 缓冲区，避免把已回滚 chunk 的向量带入下次 ingest（FK 冲突）。
      *
      * @param doc  文档记录
      * @param nodes Node 序列（按阅读顺序）
@@ -92,11 +91,16 @@ public class ChunkIngestCoordinator {
             return 0;
         }
 
-        // 语义增强：对 IMAGE/CODE/TABLE 等需要的节点调用 VLM/LLM 生成 semanticText（增强失败会fallback到默认semanticText）
-        // 透传 fileType 用于按文件类型选择上下文构建路径（code/html 走全文注入，其余走邻居注入）
-        log.info("文档 {} 开始语义增强，共 {} 个 Node", doc.getId(), nodes.size());
-        semanticEnhancementService.enhance(nodes, doc.getFileType());
+        try {
+            return processDocumentFromNodesInternal(doc, nodes);
+        } catch (Exception e) {
+            // 事务将回滚：清空向量缓冲区，防止残留已回滚 chunk 的引用进入下一次 ingest
+            embeddingPersist.clearBuffer();
+            throw e;
+        }
+    }
 
+    private int processDocumentFromNodesInternal(DocRecord doc, List<DocumentNode> nodes) {
         int maxChunkTokens = RagParameters.MAX_EMBEDDING_TOKENS;
 
         // NodeBasedChunkBuilder 将各个 Node 按照文档顺序排好以及组合，最终得到经由了Node组合的chunk列表

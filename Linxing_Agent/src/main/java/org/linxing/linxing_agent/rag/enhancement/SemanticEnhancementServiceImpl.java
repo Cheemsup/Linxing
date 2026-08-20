@@ -15,12 +15,12 @@ import org.linxing.linxing_agent.rag.node.DocumentNode;
 import org.linxing.linxing_agent.rag.node.ImageNode;
 import org.linxing.linxing_agent.rag.node.NodeType;
 import org.linxing.linxing_agent.rag.node.TableNode;
+import org.linxing.linxing_agent.rag.storage.FileStoreLayout;
 import org.linxing.linxing_agent.rag.utils.ChainOfThoughtStripper;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 /**
@@ -122,9 +122,9 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
             return;
         }
 
-        // 解析图片完整路径
+        // 解析图片完整路径（非法 imageKey 返回 null，跳过增强）
         Path fullPath = resolveImagePath(imagePath);
-        if (!Files.exists(fullPath)) {
+        if (fullPath == null || !Files.exists(fullPath)) {
             log.warn("ImageNode {} 图片文件不存在: {}", node.getId(), fullPath);
             return;
         }
@@ -284,12 +284,11 @@ public class SemanticEnhancementServiceImpl implements SemanticEnhancementServic
 
     /**
      * 解析图片完整路径。
-     * imagePath 格式：/chunk_images/{userId}/{documentId}/img_xxx.png 或相对路径
+     * imagePath 即资源键（imageKey）：{userId}/documents/{documentId}/images/p001_01.png，
+     * 物理路径 = {storePath}/tenants/ + imageKey；非法键返回 null（调用方跳过增强）。
      */
     private Path resolveImagePath(String imagePath) {
-        String storePath = ragProperties.getStorePath();
-        String normalizedPath = imagePath.startsWith("/") ? imagePath.substring(1) : imagePath;
-        return Paths.get(storePath, normalizedPath);
+        return FileStoreLayout.resolveFromImageKey(ragProperties.getStorePath(), imagePath);
     }
 
     /**

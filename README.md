@@ -95,7 +95,7 @@ Linxing/
 │       └── router/             # 路由表与守卫
 ├── docs/                       # README 截图（images/）
 ├── langfuse_dataset/           # RAG 检索评测工具集：考题生成 + Hit@K/MRR 评测（gitignore）
-├── files_store/                # 文档与图片存储（gitignore，含 memory/{userId}/）
+├── files_store/                # 文档与图片存储（gitignore，含 memory/{userId}/、tenants/{userId}/）
 ├── reference/                  # 开发参考/计划（gitignore）
 └── AGENTS.md                   # 架构与开发约束详述
 ```
@@ -226,7 +226,9 @@ DeepSeek 支持 `return-thinking: true`（返回思维链）与 `send-thinking`�
 
 | 配置 | 默认值 | 说明 |
 |---|---|---|
-| `rag.store-path` | ./files_store | 文档与图片存储根目录 |
+| `rag.store-path` | ./files_store | 文档与图片存储根目录（多租户 `tenants/{userId}/documents/{docId}/{source,images}`） |
+| `rag.security.image-sign-secret` | （占位） | 图片签名 URL HMAC 密钥（生产必改环境变量） |
+| `rag.security.image-sign-ttl` | 3600 | 图片签名有效期（秒） |
 | `rag.search.score-threshold` | 0.35 | Rerank API relevance_score（[0,1]）相关性阈值，0 关闭 |
 | `rag.search.default-top-k` | 5 | 默认返回条数（代码默认，见 RagParameters） |
 | `rag.search.recall-size` | 20 | 向量召回量 |
@@ -255,10 +257,9 @@ DeepSeek 支持 `return-thinking: true`（返回思维链）与 `send-thinking`�
 | `rag.python-service.url` | http://localhost:18000 | Python 解析服务地址 |
 | `rag.python-service.timeout-seconds` | 600 | 调用超时（MinerU 云端异步轮询等待为大头） |
 | `rag.python-service.enabled` | true | 总开关 |
-| `rag.python-service.image-store-dir` | ${RAG_STORE_PATH}/chunk_images | 图片落盘目录 |
 | `rag.python-service.python-path` | （空） | Python 可执行路径覆盖 |
 
-Python 服务侧的环境变量见 [document_analysis_service/config.py](document_analysis_service/config.py)：`SERVICE_HOST` / `SERVICE_PORT` / `IMAGE_STORE_DIR` / `IMAGE_URL_PREFIX` / `LOG_LEVEL`，以及 MinerU 云端 PDF 解析 `MINERU_API_KEY` / `MINERU_BASE_URL` / `MINERU_MODEL_VERSION` / `MINERU_POLL_INTERVAL` / `MINERU_TIMEOUT_SECONDS` / `MINERU_MAX_FILE_MB`。
+Python 服务侧的环境变量见 [document_analysis_service/config.py](document_analysis_service/config.py)：`SERVICE_HOST` / `SERVICE_PORT` / `IMAGE_STORE_DIR`（默认 `files_store/tenants`）/ `LOG_LEVEL`，以及 MinerU 云端 PDF 解析 `MINERU_API_KEY` / `MINERU_BASE_URL` / `MINERU_MODEL_VERSION` / `MINERU_POLL_INTERVAL` / `MINERU_TIMEOUT_SECONDS` / `MINERU_MAX_FILE_MB`。
 
 ### Langfuse 观测
 
@@ -337,7 +338,7 @@ Python 服务侧的环境变量见 [document_analysis_service/config.py](documen
 | POST | `/rag/search` | 知识库检索（body 含 query / topK / hybrid） |
 | GET | `/rag/chunks/{id}/context` | 分块上下文 |
 
-> 后端路径无 `/api` 前缀；前端调用统一加 `/api`，由 `vue.config.js` 代理剥离。除 `/user/login`、`/user/register`、`/chunk_images/**` 外均需携带 Bearer Token。
+> 后端路径无 `/api` 前缀；前端调用统一加 `/api`，由 `vue.config.js` 代理剥离。除 `/user/login`、`/user/register`、`/assets/images/**`（签名鉴权，免 JWT）外均需携带 Bearer Token。
 
 ## 进一步阅读
 

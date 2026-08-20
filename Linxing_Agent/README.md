@@ -145,7 +145,7 @@ Linxing_Agent/
 
 - 触发点：文档上传 `/rag/ingest/file` → `IngestServiceImpl` → `DocumentAnalysisFacade.analyze`
 - `DocumentAnalysisFacade` 优先 `PythonDocumentAnalysisServiceImpl`（Spring `RestClient`，`multipart/form-data` POST `/parse`，连接超时 10s，读取超时 `rag.python-service.timeout-seconds` 默认 600s）
-- 请求体含 `file`、`documentId`、`userId`，Python 侧据此把图片落到 `{storePath}/chunk_images/{userId}/{documentId}/`
+- 请求体含 `file`、`documentId`、`userId`，Python 侧据此把图片落到 `{storePath}/tenants/{userId}/documents/{documentId}/images/`（图片名 `p{page}_{seq}.{ext}`，`imagePath` 即资源键 imageKey）
 - fallback 到 `JavaDocumentAnalysisServiceImpl`，但**该备用方案当前未实现，调用直接抛 `UnsupportedOperationException`** —— 开发时务必先启动 Python 服务
 
 ### 数据流转
@@ -205,9 +205,11 @@ PostgreSQL（默认库名 `vectordb`）需安装 pgvector 扩展。schema 见 [s
 | `SEMANTIC_CHUNK_MODEL` | deepseek | （旧路径，Node 体系下未使用） |
 | `CONTEXT_ENRICH_MODEL` / `QUERY_REWRITE` | deepseek / deepseek | （旧路径，已废弃） |
 
-### 静态资源与文件存储
+### 文件存储（多租户）与图片签名访问
 
-`WebMvcConfig.addResourceHandlers` 暴露 `/chunk_images/**`，物理目录优先 `rag.python-service.image-store-dir`，回退 `rag.store-path/chunk_images`。
+`rag.store-path`（默认 `./files_store`）下用 `tenants/{userId}/documents/{documentId}/{source,images}` 多租户命名空间隔离。原文件存 `source/`（sanitize 后的安全名），解析图片存 `images/`（`p{page:03d}_{seq:03d}.{ext}`），DB `nodeMetadata.imagePath` 存资源键（imageKey）。
+
+图片经 `ImageAccessController`（`/assets/images/**`）以**短时签名 URL** 访问：`ImagePathSigner` 用 `rag.security.image-sign-secret` 对资源路径签发 HMAC-SHA256 `expires+sig`，校验签名与 userId/docId 归属后返回；该前缀已在 JWT 拦截器放行（签名即鉴权）。生产须通过 `RAG_IMAGE_SIGNING_SECRET` 注入密钥。
 
 ### 上下文管理与长期记忆（关键新增配置）
 
@@ -273,7 +275,7 @@ uvicorn app:app --host 0.0.0.0 --port 18000 / npm run serve
 
 ## API
 
-所有 Controller 均为 `@RestController`，路径无 `/api` 前缀。除 `/user/login`、`/user/register`、`/chunk_images/**` 外均需携带 Bearer Token。
+所有 Controller 均为 `@RestController`，路径无 `/api` 前缀。除 `/user/login`、`/user/register`、`/assets/images/**`（签名鉴权，免 JWT）外均需携带 Bearer Token。
 
 ### user 域
 

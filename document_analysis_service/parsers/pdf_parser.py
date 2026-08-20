@@ -22,7 +22,7 @@ Node JSON 协议（与 Java 侧 NodeDTO 对应）：
 2. 标题识别：先做一遍全文档 span 字号扫描得到 body_median，标题阈值 = body_median * 1.3
    （粗体且字号不低于 body_median * 1.15 也算标题），level 按字号倍数分 1/2/3
 3. 表格：pdfplumber.extract_tables() → HTML（原子块，首行 th）
-4. 图片：按 xref 提取并保存到 storePath/chunk_images/{userId}/{docId}/，
+4. 图片：按 xref 提取并保存到 storePath/tenants/{userId}/documents/{docId}/images/，
    bbox 用 page.get_image_info(xref) 精确匹配（修复旧实现"全页图片共用首个 bbox"的 bug）
 5. 代码：等宽字体名优先，否则按"多行 4 空格缩进"启发式
 6. 页内按 bbox.y0 混合重排（2026-07-06 决策第五节）：每页收集图片/表格/文本块 Node，
@@ -51,6 +51,7 @@ from ._common import (
     compute_hash,
     detect_code_language,
     guess_image_ext,
+    make_image_seq,
     make_node_seq,
     should_flush_under_elastic,
     table_to_html,
@@ -95,12 +96,10 @@ class PdfParser:
     def __init__(
         self,
         image_store_dir: str,
-        image_url_prefix: str = "/chunk_images",
         mineru_client=None,
         mineru_max_size_mb: float = 200.0,
     ):
         self.image_store_dir = Path(image_store_dir)
-        self.image_url_prefix = image_url_prefix.rstrip("/")
         # MinerU 云解析客户端；None 表示未配置（走本地 PyMuPDF 兜底）
         self._mineru_client = mineru_client
         # MinerU 官方单文件大小上限（超限直接走本地兜底，不硬失败）
@@ -164,11 +163,12 @@ class PdfParser:
         file_path = Path(file_path)
         logger.info("PdfParser 开始解析: %s", file_path)
 
-        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir = self.image_store_dir / str(user_id) / "documents" / str(document_id) / "images"
         image_output_dir.mkdir(parents=True, exist_ok=True)
 
         nodes: List[dict] = []
         node_seq = make_node_seq()
+        img_seq = make_image_seq()
         title_stack: List[Tuple[int, str]] = []
 
         # 跨页段落缝合状态：上一页最后一个 text Node 的引用
@@ -197,7 +197,7 @@ class PdfParser:
                     page_nodes.extend(
                         self._extract_images_from_page(
                             page, page_num + 1, image_output_dir,
-                            user_id, document_id, node_seq, title_stack,
+                            user_id, document_id, node_seq, img_seq, title_stack,
                         )
                     )
                     if plumber_page is not None:
@@ -272,7 +272,7 @@ class PdfParser:
 
         content_list 缺失时兜底读 full.md 喂 MarkdownParser（保链路不断，表格 HTML 可能被降级）。
         """
-        image_output_dir = self.image_store_dir / str(user_id) / str(document_id)
+        image_output_dir = self.image_store_dir / str(user_id) / "documents" / str(document_id) / "images"
         image_output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("PdfParser(MinerU) 开始解析: %s", file_path)
@@ -284,6 +284,7 @@ class PdfParser:
         try:
             return self._consume_mineru_result(
                 result_dir, image_output_dir, document_id, user_id, file_path,
+                make_image_seq(),
             )
         finally:
             # 清理云端产物解压目录（图片已复制到 image_output_dir，md 兜底也已读完）
@@ -294,7 +295,7 @@ class PdfParser:
 
     def _consume_mineru_result(
         self, result_dir: Path, image_output_dir: Path,
-        document_id: int, user_id: int, file_path: Path,
+        document_id: int, user_id: int, file_path: Path, img_seq,
     ) -> List[dict]:
         """
         消费 MinerU 解压目录，产出 Node JSON。
@@ -308,7 +309,7 @@ class PdfParser:
             if isinstance(content_list, list) and content_list:
                 nodes = self._nodes_from_content_list(
                     content_list, result_dir, image_output_dir,
-                    user_id, document_id,
+                    user_id, document_id, img_seq,
                 )
                 # Node 字数兜底：超长 text Node 拆为多个小 Node（共享 groupId），不截断内容
                 nodes = cap_text_nodes(nodes)
@@ -328,7 +329,6 @@ class PdfParser:
             from .markdown_parser import MarkdownParser
             md_parser = MarkdownParser(
                 image_store_dir=str(self.image_store_dir),
-                image_url_prefix=self.image_url_prefix,
             )
             return md_parser.parse(str(md_path), document_id, user_id)
 
@@ -341,6 +341,7 @@ class PdfParser:
         image_output_dir: Path,
         user_id: int,
         document_id: int,
+        img_seq,
     ) -> List[dict]:
         """
         将 MinerU content_list（阅读顺序的扁平 block 列表）映射为 Node JSON。
@@ -393,7 +394,7 @@ class PdfParser:
             elif block_type == "image":
                 node = self._content_image_node(
                     block, result_dir, image_output_dir, user_id, document_id,
-                    node_seq, title_path, page, bbox,
+                    node_seq, img_seq, title_path, page, bbox,
                 )
                 if node is not None:
                     nodes.append(node)
@@ -481,7 +482,7 @@ class PdfParser:
 
     def _content_image_node(
         self, block, result_dir, image_output_dir, user_id, document_id,
-        node_seq, title_path, page, bbox,
+        node_seq, img_seq, title_path, page, bbox,
     ):
         """content_list 的 image 块：img_path 相对 result_dir 复制到图片目录，产出 image Node。
 
@@ -502,7 +503,7 @@ class PdfParser:
             ext = "png"
 
         node_id = next(node_seq)
-        img_filename = f"img_{node_id[1:]}.{ext}"
+        img_filename = f"p{page:03d}_{next(img_seq):03d}.{ext}"
         img_path = image_output_dir / img_filename
         # 自足创建目录（_parse_with_mineru 已建，此处防御性兜底）
         img_path.parent.mkdir(parents=True, exist_ok=True)
@@ -526,7 +527,7 @@ class PdfParser:
             caption = raw_caption
 
         relative_url = (
-            f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+            f"{user_id}/documents/{document_id}/images/{img_filename}"
         )
         return {
             "id": node_id,
@@ -654,6 +655,7 @@ class PdfParser:
         user_id: int,
         document_id: int,
         node_seq,
+        img_seq,
         title_stack: List[Tuple[int, str]],
     ) -> List[dict]:
         """从 PDF 页面提取图片，按 xref 精确匹配 bbox。"""
@@ -683,7 +685,7 @@ class PdfParser:
                 image_ext = base_image["ext"]
 
                 node_id = next(node_seq)
-                img_filename = f"img_{node_id[1:]}.{image_ext}"
+                img_filename = f"p{page_num:03d}_{next(img_seq):03d}.{image_ext}"
                 img_path = image_output_dir / img_filename
                 with open(img_path, "wb") as f:
                     f.write(image_bytes)
@@ -697,7 +699,7 @@ class PdfParser:
                     pass
 
                 relative_url = (
-                    f"{self.image_url_prefix}/{user_id}/{document_id}/{img_filename}"
+                    f"{user_id}/documents/{document_id}/images/{img_filename}"
                 )
                 bbox = xref_to_bbox.get(xref)
                 img_hash = compute_hash(image_bytes)

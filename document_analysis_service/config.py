@@ -6,6 +6,14 @@
 """
 
 import os
+from os.path import dirname, join
+
+# 尝试加载 .env 文件（仅开发环境，生产环境应通过系统环境变量注入）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(join(dirname(__file__), ".env"))
+except ImportError:
+    pass
 
 # 服务监听配置
 HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
@@ -32,8 +40,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 #   PUT  <file_urls[0]>                    上传裸字节（自动提交解析）
 #   GET  /api/v4/extract-results/batch/{id} 轮询结果（done 后得 full_zip_url）
 # 结果 zip 内含 full.md / images/ / *_content_list.json / *_middle.json。
-# 未配置 API key 时 PDF 走本地 PyMuPDF 兜底
-MINERU_API_KEY = os.getenv("MINERU_API_KEY", "sk-7L1d30VQhlZ8lnukSRLQ0lQtrzBPQtAR08JZvNQAipk7ZXMH")
+# 未配置 API key 时 PDF 走本地 PyMuPDF 兜底。
+MINERU_API_KEY = os.getenv("MINERU_API_KEY", "")
 # 正确 host 是 mineru.net（api.mineru.net 解析不可达，已实测）
 MINERU_BASE_URL = os.getenv("MINERU_BASE_URL", "https://mineru.net")
 # 模型版本：文档用 vlm；HTML 用 MinerU-HTML

@@ -33,7 +33,7 @@ import java.util.Map;
 public class DeepSeekReasoningTest {
 
     private static final String DEEPSEEK_BASE_URL = "https://api.deepseek.com";
-    private static final String DEEPSEEK_API_KEY = "sk-da641ead3da74a08b8f6ecdb4a5f84c9";
+    private static final String DEEPSEEK_API_KEY = System.getenv("DEEPSEEK_API_KEY");
     private static final String DEEPSEEK_MODEL = "deepseek-v4-flash";
 
     private final RestTemplate restTemplate = new RestTemplate();
